@@ -1,0 +1,18 @@
+# Translation Guide
+
+Authoritative English → Simplified Chinese glossary for AndroFuse documentation (`doc/en-us/` → `doc/zh-cn/`).
+
+| English | Simplified Chinese | Notes |
+|---|---|---|
+| Samsung DeX Desktop | Samsung DeX 桌面 | Genuine Samsung DeX workspace |
+| Android Phone Mirroring | Android 手机镜像 | Primary display (`display 0`) stream |
+| Independent App Windows | 独立 APP 窗口 | Per-app native Windows window on virtual display |
+| Virtual Display | 虚拟显示 | Android `DisplayManager` / `scrcpy --new-display` screen |
+| Simulated Display | 模拟显示 | Android `overlay_display_devices` fallback |
+| Native DeX Loopback | 原生 DeX 回环 | `SemWifiDisplayConfig` `127.0.0.1:7236` activation |
+| Miracast Sink | Miracast 接收端 | Wi-Fi Direct + RTSP + RTP/MPEG-TS + UIBC |
+| Android Companion APK | Android Companion 辅助端 APK | Optional same-repo Android app |
+| Lease Ledger | 租约账本 | Persisted virtual display / UHID cleanup tracker |
+| Self-Check Diagnostics | 主机自检诊断 | Passive architecture, Media Foundation, WFD, and ADB probes |
+| Negotiated Resolution | 实际协商分辨率 | Actual stream dimensions reported by encoder/decoder |
+| Measured FPS | 实测帧率 | Actual decoded/presented frame rate |

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 96 96" role="img" aria-labelledby="title desc">
-  <title id="title">DroidFuse app icon</title>
+  <title id="title">AndroFuse app icon</title>
   <desc id="desc">Mint-green rounded screen with a staggered pixel pattern on a midnight blue-gray tile.</desc>
   <rect width="96" height="96" rx="16" fill="#1D2C33"/>
   <g fill="none" stroke="#B8F1D2" stroke-width="3.5" stroke-linejoin="round">

@@ -1,0 +1,106 @@
+{
+  "@@locale": "en",
+  "AppName": "AndroFuse",
+  "AppTagline": "Samsung DeX, phone mirroring, and independent Android app windows for Windows",
+  "NavDevices": "Devices",
+  "NavModes": "Work Modes",
+  "NavDiagnostics": "Diagnostics",
+  "NavSettings": "Settings",
+  "NavAbout": "About",
+  "DevicesTitle": "Connected Devices",
+  "DevicesSubtitle": "USB ADB, encrypted TLS wireless ADB, and Miracast Wi-Fi Direct",
+  "DevicesEmptyTitle": "No active device sessions yet",
+  "DevicesEmptyBody": "Device discovery and streaming backends are scheduled for M1 (ADB mirror & independent app windows) and M2 (Samsung DeX dual-channel). Use Diagnostics now to verify host drivers and hardware decoding.",
+  "DevicesBadgePlanned": "M1–M2 Transport",
+  "ModesTitle": "Three Coexisting Work Modes",
+  "ModesSubtitle": "Designed without artificial mutual exclusion; real capabilities are probed per device and One UI version.",
+  "ModeDexTitle": "Samsung DeX Desktop",
+  "ModeDexBadge": "Planned M2",
+  "ModeDexDesc": "Runs genuine Samsung DeX via wireless Miracast (without forcing USB debugging) or USB/Wi-Fi ADB loopback activation, with verified multi-window, taskbar, Recents, and desktop mouse behavior.",
+  "ModeMirrorTitle": "Android Phone Mirroring",
+  "ModeMirrorBadge": "Planned M1",
+  "ModeMirrorDesc": "Low-latency screen mirroring with keyboard/mouse, audio, clipboard, portrait/landscape rotation, borderless fullscreen, screenshots, recording, and screen-on or screen-off display modes.",
+  "ModeAppsTitle": "Independent App Windows",
+  "ModeAppsBadge": "Planned M1",
+  "ModeAppsDesc": "Runs each Android app in its own native Windows window (taskbar, Alt+Tab, resize, Snap Layouts) on an isolated virtual display while your physical phone screen remains free.",
+  "ModeCoexistenceNote": "Coexistence & Fallback Rule",
+  "ModeCoexistenceDesc": "When hardware encoders or device policies restrict simultaneous modes, AndroFuse detects the limit, informs the user clearly, and falls back safely instead of failing silently.",
+  "DiagTitle": "Host Self-Check & Environment Diagnostics",
+  "DiagSubtitle": "Live checks run on this machine without requiring Root or modifying system configuration.",
+  "DiagRefresh": "Re-run Self-Check",
+  "DiagRefreshing": "Probing host...",
+  "DiagArchLabel": "Architecture & Native Execution",
+  "DiagArchNative": "Native {arch} ({os} build {build})",
+  "@DiagArchNative": {
+    "placeholders": {
+      "arch": { "type": "String" },
+      "os": { "type": "String" },
+      "build": { "type": "int" }
+    }
+  },
+  "DiagArchEmulated": "Emulated {proc} on {native} — install native build",
+  "@DiagArchEmulated": {
+    "placeholders": {
+      "proc": { "type": "String" },
+      "native": { "type": "String" }
+    }
+  },
+  "DiagCoreLabel": "Rust Core Library (androfuse_core)",
+  "DiagCoreLoaded": "Loaded (ABI v{abi})",
+  "@DiagCoreLoaded": {
+    "placeholders": {
+      "abi": { "type": "int" }
+    }
+  },
+  "DiagCoreMissing": "Core DLL not found next to binary (build core/androfuse-core to enable native probes)",
+  "DiagVideoLabel": "Media Foundation Video Decoders",
+  "DiagVideoSummary": "H.264 HW: {h264hw} · HEVC HW: {hevchw}",
+  "@DiagVideoSummary": {
+    "placeholders": {
+      "h264hw": { "type": "String" },
+      "hevchw": { "type": "String" }
+    }
+  },
+  "DiagWfdLabel": "Wi-Fi Direct / Miracast Stack",
+  "DiagWfdSummary": "Wi-Fi Direct API: {wfd} · Miracast Sink IE: {ie}",
+  "@DiagWfdSummary": {
+    "placeholders": {
+      "wfd": { "type": "String" },
+      "ie": { "type": "String" }
+    }
+  },
+  "DiagAdbLabel": "Android Debug Bridge (ADB)",
+  "DiagAdbFound": "Detected ({version})",
+  "@DiagAdbFound": {
+    "placeholders": {
+      "version": { "type": "String" }
+    }
+  },
+  "DiagAdbMissing": "Not found in PATH or standard Android SDK platform-tools (Miracast DeX does not require ADB)",
+  "DiagStatusYes": "Available",
+  "DiagStatusNo": "Unavailable",
+  "DiagNotesTitle": "Diagnostic Notes",
+  "SettingsTitle": "Settings",
+  "SettingsSubtitle": "Appearance, language, and baseline security defaults",
+  "SettingsAppearance": "Appearance",
+  "ThemeSystem": "Follow System",
+  "ThemeLight": "Light",
+  "ThemeDark": "Dark",
+  "SettingsLanguage": "Language",
+  "LangSystem": "Follow System",
+  "LangEnglish": "English",
+  "LangZhHans": "简体中文",
+  "SettingsSecurityTitle": "Security & Privacy Posture",
+  "SettingsSecurityBody": "Encrypted TLS wireless ADB pairing is preferred over plaintext tcpip. Remote access and MCP control remain disabled by default. Diagnostic logs scrub device serials and local paths.",
+  "AboutTitle": "About AndroFuse",
+  "AboutVersion": "Version {version} (M0 Architecture Baseline)",
+  "@AboutVersion": {
+    "placeholders": {
+      "version": { "type": "String" }
+    }
+  },
+  "AboutLicense": "Licensed under GPL-3.0-only. Open-source alternative and enhancement for Samsung DeX for PC and general Android devices.",
+  "AboutTrademarks": "Samsung, Samsung DeX, Galaxy, and One UI are trademarks of Samsung Electronics Co., Ltd. Android is a trademark of Google LLC.",
+  "TrayShow": "Show AndroFuse",
+  "TrayQuit": "Quit AndroFuse"
+}
