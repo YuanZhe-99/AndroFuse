@@ -24,3 +24,20 @@ windows-sys = { version = "0.59", features = [
   "Win32_System_SystemInformation",
   "Win32_System_Threading",
 ] }
+windows = { version = "0.58", features = [
+  "Devices_Enumeration",
+  "Devices_WiFiDirect",
+  "Foundation",
+  "Foundation_Collections",
+  "Networking",
+  "Win32_Foundation",
+  "Win32_Graphics_Direct3D",
+  "Win32_Graphics_Direct3D11",
+  "Win32_Graphics_Dxgi",
+  "Win32_Graphics_Dxgi_Common",
+  "Win32_Media_MediaFoundation",
+  "Win32_Networking_WinSock",
+  "Win32_System_Com",
+  "Win32_System_LibraryLoader",
+  "Win32_System_WinRT",
+] }

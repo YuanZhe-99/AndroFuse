@@ -9,12 +9,12 @@ AndroFuse 基于 **GNU General Public License v3.0 only**（`GPL-3.0-only`，见
 | `github.com/egoist/mygo`（`v0.10.0`） | MIT | 已启用（M0） | 与 `GPL-3.0-only` 兼容 |
 | `github.com/ebitengine/purego` | Apache-2.0 | 已启用（M0） | 与 `GPL-3.0-only` 兼容 |
 | `golang.org/x/sys` | BSD-3-Clause | 已启用（M0） | 与 `GPL-3.0-only` 兼容 |
-| Rust `serde`、`serde_json`、`windows-sys` | MIT OR Apache-2.0 | 已启用（M0） | 通过 `cargo deny check licenses bans sources` 校验 |
-| `Genymobile/scrcpy`（`scrcpy-server` v5.0.1） | Apache-2.0 | 规划中（M1） | 随包附带上游 `LICENSE` 文本 |
-| Android Platform Tools（`adb`） | Apache-2.0 | 规划中（M1） | 随包附带上游许可声明 |
-| `adirh3/DeXDesk`（Miracast 协议与实现参考） | MIT | 规划中（M2） | 若复用/改写代码则完整保留 MIT 版权与许可声明 |
-| `Aureliano021/ScrcpyDex`（回环 DeX 激活） | Apache-2.0 | 规划中（M2） | 若复用/改写代码则完整保留 Apache-2.0 声明与 `NOTICE` |
-| `maze-mei/DX-Manager` | MIT | 参考 / 规划 | 若复用/改写代码则完整保留 MIT 声明 |
+| Rust `serde`、`serde_json`、`windows-sys`、`windows` | MIT OR Apache-2.0 | 已启用（M1a） | 通过 `cargo deny check licenses bans sources` 校验 |
+| `Genymobile/scrcpy`（`scrcpy-server` v5.0.1） | Apache-2.0 | 已启用（M1a） | 由 `tools/fetchdeps` 校验 SHA-256 下载；已集成其线协议 |
+| Android Platform Tools（`adb`） | Apache-2.0 | 已启用（M1a） | 由 `internal/adb` 调用；打包分发时附带上游许可声明 |
+| `adirh3/DeXDesk`（Miracast 协议与实现参考） | MIT | 已启用（M1a） | 参考 WFD Sink / RTSP / RTP-TS / UIBC 与 MF DXVA 解码 |
+| `Aureliano021/ScrcpyDex`（回环 DeX 激活） | Apache-2.0 | 已启用（M1a） | 参考并采用洁净室重写的 `SemWifiDisplayConfig` 回环辅助器 |
+| `maze-mei/DX-Manager` | MIT | 参考 / 已启用 | 参考多会话管理与初始 DPI ≥ 160 引导规则 |
 | `AndroMeld`（`catchingnow`） | 专有商业软件 | 仅作交互参考 | 严禁复制、反编译或重新分发其源码、APK 或任何资源 |
 
 ## 商标声明

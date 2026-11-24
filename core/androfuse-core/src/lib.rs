@@ -2,15 +2,43 @@
 //! and the Android controller/companion runtime.
 
 pub mod diag;
+#[cfg(windows)]
+pub mod mf_video;
+pub mod miracast;
+pub mod scrcpy;
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 /// C ABI version spoken between Go (`internal/core`) and `androfuse-core`.
-pub const ABI_VERSION: u32 = 1;
+pub const ABI_VERSION: u32 = 3;
 
 static STATE: OnceLock<Mutex<Option<CoreState>>> = OnceLock::new();
+static NEXT_DECODER_ID: AtomicU64 = AtomicU64::new(1);
+
+#[cfg(windows)]
+static DECODERS: OnceLock<Mutex<HashMap<u64, Mutex<mf_video::MfVideoDecoder>>>> = OnceLock::new();
+#[cfg(not(windows))]
+static DECODERS: OnceLock<Mutex<HashMap<u64, ()>>> = OnceLock::new();
+
+#[cfg(windows)]
+static MIRACAST_SESSIONS: OnceLock<Mutex<HashMap<u64, Mutex<miracast::MiracastReceiver>>>> =
+    OnceLock::new();
+#[cfg(not(windows))]
+static MIRACAST_SESSIONS: OnceLock<Mutex<HashMap<u64, ()>>> = OnceLock::new();
+
+#[cfg(windows)]
+fn miracast_map() -> &'static Mutex<HashMap<u64, Mutex<miracast::MiracastReceiver>>> {
+    MIRACAST_SESSIONS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+#[cfg(not(windows))]
+fn miracast_map() -> &'static Mutex<HashMap<u64, ()>> {
+    MIRACAST_SESSIONS.get_or_init(|| Mutex::new(HashMap::new()))
+}
 
 #[derive(Debug, Clone)]
 struct CoreState {
@@ -45,8 +73,35 @@ struct StatusResult {
     arch: &'static str,
 }
 
+/// Cross-platform C-ABI NV12 frame metadata populated by `androfuse_decoder_pull_nv12`.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct FrameMeta {
+    pub width: u32,
+    pub height: u32,
+    pub y_stride: u32,
+    pub uv_stride: u32,
+    pub uv_offset: u32,
+    pub total_len: u32,
+    pub pts_us: u64,
+    pub decode_us: u32,
+    pub hardware: u8,
+    pub surface_changed: u8,
+    pub _reserved: [u8; 2],
+}
+
 fn state_lock() -> &'static Mutex<Option<CoreState>> {
     STATE.get_or_init(|| Mutex::new(None))
+}
+
+#[cfg(windows)]
+fn decoders_map() -> &'static Mutex<HashMap<u64, Mutex<mf_video::MfVideoDecoder>>> {
+    DECODERS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+#[cfg(not(windows))]
+fn decoders_map() -> &'static Mutex<HashMap<u64, ()>> {
+    DECODERS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 fn canonical_arch() -> &'static str {
@@ -190,6 +245,10 @@ pub unsafe extern "C" fn androfuse_call(
         };
         match req.method.as_str() {
             "diagnostics.self_check" => ok_json(diag::run_self_check()),
+            "miracast.test_sink" => match miracast::test_sink_advertisement() {
+                Ok(res) => ok_json(res),
+                Err(e) => err_json(&e),
+            },
             "status" => {
                 let guard = match state_lock().lock() {
                     Ok(g) => g,
@@ -234,14 +293,342 @@ pub unsafe extern "C" fn androfuse_free(ptr: *mut u8, len: usize) {
     }
 }
 
-/// Stops the core and clears in-memory state.
+/// Stops the core, destroys active decoders, and clears in-memory state.
 #[unsafe(no_mangle)]
 pub extern "C" fn androfuse_stop() {
+    if let Ok(mut d) = decoders_map().lock() {
+        d.clear();
+    }
+    if let Ok(mut m) = miracast_map().lock() {
+        m.clear();
+    }
     let mut guard = match state_lock().lock() {
         Ok(g) => g,
         Err(p) => p.into_inner(),
     };
     *guard = None;
+}
+
+/// Opens a native video decoder instance (Windows Media Foundation H.264/HEVC → NV12).
+///
+/// Ownership: Caller owns the returned opaque numeric handle in `*out_handle` and must release it
+/// with `androfuse_decoder_close`.
+///
+/// # Safety
+/// `out_handle` must be a valid writable non-null pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn androfuse_decoder_open(
+    codec_id: u32,
+    width: u32,
+    height: u32,
+    out_handle: *mut u64,
+) -> i32 {
+    if out_handle.is_null() {
+        return -1;
+    }
+    catch_unwind(AssertUnwindSafe(|| {
+        #[cfg(windows)]
+        {
+            match mf_video::MfVideoDecoder::open(codec_id, width, height) {
+                Ok(dec) => {
+                    let id = NEXT_DECODER_ID.fetch_add(1, Ordering::Relaxed);
+                    let mut map = match decoders_map().lock() {
+                        Ok(g) => g,
+                        Err(p) => p.into_inner(),
+                    };
+                    map.insert(id, Mutex::new(dec));
+                    // SAFETY: Caller guarantees `out_handle` is non-null writable storage.
+                    unsafe { *out_handle = id };
+                    0
+                }
+                Err(_) => -2,
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = (codec_id, width, height, &NEXT_DECODER_ID);
+            let _ = decoders_map();
+            -2
+        }
+    }))
+    .unwrap_or(-99)
+}
+
+/// Feeds an encoded H.264/HEVC access unit into a decoder opened via `androfuse_decoder_open`.
+///
+/// Ownership: Caller retains ownership of `data`.
+///
+/// # Safety
+/// If `len > 0`, `data` must point to `len` readable bytes for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn androfuse_decoder_push(
+    handle: u64,
+    data: *const u8,
+    len: usize,
+    pts_us: u64,
+    flags: u32,
+) -> i32 {
+    catch_unwind(AssertUnwindSafe(|| {
+        // SAFETY: Caller guarantees `data` is valid for `len` bytes.
+        let bytes = match unsafe { read_slice(data, len) } {
+            Ok(b) => b,
+            Err(_) => return -1,
+        };
+        #[cfg(windows)]
+        {
+            let map = match decoders_map().lock() {
+                Ok(g) => g,
+                Err(p) => p.into_inner(),
+            };
+            let Some(dec_lock) = map.get(&handle) else {
+                return -2;
+            };
+            let mut dec = match dec_lock.lock() {
+                Ok(g) => g,
+                Err(p) => p.into_inner(),
+            };
+            match dec.push(bytes, pts_us, flags) {
+                Ok(()) => 0,
+                Err(_) => -3,
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = (handle, bytes, pts_us, flags);
+            -2
+        }
+    }))
+    .unwrap_or(-99)
+}
+
+/// Copies the latest decoded NV12 frame into caller-provided `dst` and writes `out_meta`.
+///
+/// Return values: `0` = frame written; `1` = `dst_cap` too small (`out_meta.total_len` has required
+/// size); `2` = need more input; `< 0` = error.
+///
+/// Ownership: Caller retains ownership of `dst` and `out_meta`.
+///
+/// # Safety
+/// `out_meta` must be valid writable storage; if `dst_cap > 0`, `dst` must point to `dst_cap`
+/// writable bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn androfuse_decoder_pull_nv12(
+    handle: u64,
+    dst: *mut u8,
+    dst_cap: usize,
+    out_meta: *mut FrameMeta,
+) -> i32 {
+    if out_meta.is_null() {
+        return -1;
+    }
+    catch_unwind(AssertUnwindSafe(|| {
+        #[cfg(windows)]
+        {
+            let dst_slice = if dst_cap == 0 {
+                &mut []
+            } else if dst.is_null() {
+                return -1;
+            } else {
+                // SAFETY: Caller guarantees `dst` is valid for `dst_cap` writable bytes.
+                unsafe { std::slice::from_raw_parts_mut(dst, dst_cap) }
+            };
+            let map = match decoders_map().lock() {
+                Ok(g) => g,
+                Err(p) => p.into_inner(),
+            };
+            let Some(dec_lock) = map.get(&handle) else {
+                return -2;
+            };
+            let mut dec = match dec_lock.lock() {
+                Ok(g) => g,
+                Err(p) => p.into_inner(),
+            };
+            let mut mf_meta = mf_video::FrameMeta::default();
+            match dec.pull_nv12(dst_slice, &mut mf_meta) {
+                Ok(rc) => {
+                    // SAFETY: Caller guarantees `out_meta` is valid writable storage.
+                    unsafe {
+                        *out_meta = FrameMeta {
+                            width: mf_meta.width,
+                            height: mf_meta.height,
+                            y_stride: mf_meta.y_stride,
+                            uv_stride: mf_meta.uv_stride,
+                            uv_offset: mf_meta.uv_offset,
+                            total_len: mf_meta.total_len,
+                            pts_us: mf_meta.pts_us,
+                            decode_us: mf_meta.decode_us,
+                            hardware: mf_meta.hardware,
+                            surface_changed: mf_meta.surface_changed,
+                            _reserved: mf_meta._reserved,
+                        };
+                    }
+                    rc
+                }
+                Err(_) => -3,
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = (handle, dst, dst_cap);
+            -2
+        }
+    }))
+    .unwrap_or(-99)
+}
+
+/// Destroys a decoder opened via `androfuse_decoder_open` and releases its Media Foundation/D3D11 state.
+#[unsafe(no_mangle)]
+pub extern "C" fn androfuse_decoder_close(handle: u64) {
+    if let Ok(mut map) = decoders_map().lock() {
+        map.remove(&handle);
+    }
+}
+
+/// Starts a Windows Wi-Fi Direct / Miracast DeX receiver session on `rtsp_port` (0 = 7236).
+///
+/// Ownership: Caller owns `*out_handle` and must release it with `androfuse_miracast_stop`.
+///
+/// # Safety
+/// `out_handle` must be writable non-null storage.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn androfuse_miracast_start(rtsp_port: u16, out_handle: *mut u64) -> i32 {
+    if out_handle.is_null() {
+        return -1;
+    }
+    catch_unwind(AssertUnwindSafe(|| {
+        #[cfg(windows)]
+        {
+            match miracast::MiracastReceiver::start(rtsp_port) {
+                Ok(rx) => {
+                    let id = NEXT_DECODER_ID.fetch_add(1, Ordering::Relaxed);
+                    let mut map = match miracast_map().lock() {
+                        Ok(g) => g,
+                        Err(p) => p.into_inner(),
+                    };
+                    map.insert(id, Mutex::new(rx));
+                    // SAFETY: Caller guarantees `out_handle` is valid writable storage.
+                    unsafe { *out_handle = id };
+                    0
+                }
+                Err(_) => -2,
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = rtsp_port;
+            let _ = miracast_map();
+            -2
+        }
+    }))
+    .unwrap_or(-99)
+}
+
+/// Polls the newest NV12 frame and live receiver state (`0=Listening, 1=Negotiating, 2=Streaming, 3=Stopped`).
+///
+/// Ownership: Caller retains ownership of `dst`, `out_meta`, and `out_state`.
+///
+/// # Safety
+/// `out_meta` must be non-null writable storage; `out_state` may be null; if `dst_cap > 0`, `dst` must
+/// be writable for `dst_cap` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn androfuse_miracast_poll_nv12(
+    handle: u64,
+    dst: *mut u8,
+    dst_cap: usize,
+    out_meta: *mut FrameMeta,
+    out_state: *mut u32,
+) -> i32 {
+    if out_meta.is_null() {
+        return -1;
+    }
+    catch_unwind(AssertUnwindSafe(|| {
+        #[cfg(windows)]
+        {
+            let dst_slice = if dst_cap == 0 {
+                &mut []
+            } else if dst.is_null() {
+                return -1;
+            } else {
+                // SAFETY: Caller guarantees `dst` is writable for `dst_cap` bytes.
+                unsafe { std::slice::from_raw_parts_mut(dst, dst_cap) }
+            };
+            let map = match miracast_map().lock() {
+                Ok(g) => g,
+                Err(p) => p.into_inner(),
+            };
+            let Some(rx_lock) = map.get(&handle) else {
+                return -2;
+            };
+            let rx = match rx_lock.lock() {
+                Ok(g) => g,
+                Err(p) => p.into_inner(),
+            };
+            let mut meta = FrameMeta::default();
+            match rx.poll_nv12(dst_slice, &mut meta) {
+                Ok((rc, state)) => {
+                    // SAFETY: Caller guarantees `out_meta` (and non-null `out_state`) are writable.
+                    unsafe {
+                        *out_meta = meta;
+                        if !out_state.is_null() {
+                            *out_state = state;
+                        }
+                    }
+                    rc
+                }
+                Err(_) => -3,
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = (handle, dst, dst_cap, out_state);
+            -2
+        }
+    }))
+    .unwrap_or(-99)
+}
+
+/// Sends a Miracast UIBC GENERIC pointer packet (`action`: 0=down, 1=up, 2=move) to a running session.
+#[unsafe(no_mangle)]
+pub extern "C" fn androfuse_miracast_input(
+    handle: u64,
+    action: u8,
+    x_norm: u16,
+    y_norm: u16,
+) -> i32 {
+    catch_unwind(AssertUnwindSafe(|| {
+        #[cfg(windows)]
+        {
+            let map = match miracast_map().lock() {
+                Ok(g) => g,
+                Err(p) => p.into_inner(),
+            };
+            let Some(rx_lock) = map.get(&handle) else {
+                return -2;
+            };
+            let rx = match rx_lock.lock() {
+                Ok(g) => g,
+                Err(p) => p.into_inner(),
+            };
+            match rx.send_pointer(action, x_norm, y_norm) {
+                Ok(()) => 0,
+                Err(_) => -3,
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = (handle, action, x_norm, y_norm);
+            -2
+        }
+    }))
+    .unwrap_or(-99)
+}
+
+/// Stops a Miracast receiver session and tears down its Wi-Fi Direct / IE advertisement cleanly.
+#[unsafe(no_mangle)]
+pub extern "C" fn androfuse_miracast_stop(handle: u64) {
+    if let Ok(mut map) = miracast_map().lock() {
+        map.remove(&handle);
+    }
 }
 
 #[cfg(test)]
@@ -305,5 +692,87 @@ mod tests {
             v
         };
         assert_eq!(status_resp["ok"], false);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn mf_decoder_open_and_synthetic_h264_nv12_roundtrip() {
+        use crate::scrcpy::CODEC_H264;
+
+        fn decode_b64(s: &str) -> Vec<u8> {
+            let mut out = Vec::new();
+            let mut acc = 0u32;
+            let mut bits = 0u8;
+            for b in s.bytes() {
+                let val = match b {
+                    b'A'..=b'Z' => b - b'A',
+                    b'a'..=b'z' => b - b'a' + 26,
+                    b'0'..=b'9' => b - b'0' + 52,
+                    b'+' => 62,
+                    b'/' => 63,
+                    _ => continue,
+                };
+                acc = (acc << 6) | u32::from(val);
+                bits += 6;
+                if bits >= 8 {
+                    bits -= 8;
+                    out.push((acc >> bits) as u8);
+                }
+            }
+            out
+        }
+
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../internal/scrcpy/testdata/fold8_scrcpy_session.json"
+        ))
+        .unwrap();
+        let packets = fixture["packets"].as_array().unwrap();
+        let csd = decode_b64(packets[1]["payload_b64"].as_str().unwrap());
+
+        let mut handle = 0u64;
+        // SAFETY: Stack pointer `handle` is valid writable storage.
+        let rc = unsafe { androfuse_decoder_open(CODEC_H264, 64, 48, &mut handle) };
+        assert_eq!(rc, 0, "Media Foundation H.264 decoder failed to open");
+        assert!(handle != 0);
+
+        let mut decoded = 0u32;
+        let mut meta = FrameMeta::default();
+        let mut buf = vec![0u8; 64 * 1024];
+        for (idx, pkt) in packets[2..].iter().enumerate() {
+            let mut au = Vec::new();
+            if pkt["is_keyframe"].as_bool().unwrap_or(false) {
+                au.extend_from_slice(&csd);
+            }
+            au.extend_from_slice(&decode_b64(pkt["payload_b64"].as_str().unwrap()));
+            let pts = pkt["pts_us"].as_u64().unwrap_or(0);
+            let flags = u32::from(idx == 0);
+            // SAFETY: `au` is a valid Rust slice.
+            let push_rc =
+                unsafe { androfuse_decoder_push(handle, au.as_ptr(), au.len(), pts, flags) };
+            assert_eq!(push_rc, 0);
+            // SAFETY: `buf` and `meta` are valid writable buffers.
+            if unsafe {
+                androfuse_decoder_pull_nv12(handle, buf.as_mut_ptr(), buf.len(), &mut meta)
+            } == 0
+            {
+                assert_eq!((meta.width, meta.height), (64, 48));
+                decoded += 1;
+            }
+        }
+        let flush_rc = {
+            // SAFETY: Null data with zero length is valid for drain-only call (flags = 2).
+            unsafe { androfuse_decoder_push(handle, std::ptr::null(), 0, 0, 2) }
+        };
+        assert_eq!(flush_rc, 0);
+        // SAFETY: `buf` and `meta` are valid writable buffers.
+        let pull_flush =
+            unsafe { androfuse_decoder_pull_nv12(handle, buf.as_mut_ptr(), buf.len(), &mut meta) };
+        if pull_flush == 0 {
+            assert_eq!((meta.width, meta.height), (64, 48));
+            decoded += 1;
+        }
+        assert!(decoded >= 1, "expected >= 1 decoded 64x48 NV12 frame");
+
+        androfuse_decoder_close(handle);
     }
 }

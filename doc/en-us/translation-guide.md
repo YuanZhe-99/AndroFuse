@@ -16,3 +16,10 @@ Authoritative English → Simplified Chinese glossary for AndroFuse documentatio
 | Self-Check Diagnostics | 主机自检诊断 | Passive architecture, Media Foundation, WFD, and ADB probes |
 | Negotiated Resolution | 实际协商分辨率 | Actual stream dimensions reported by encoder/decoder |
 | Measured FPS | 实测帧率 | Actual decoded/presented frame rate |
+| Protocol Replay Fixture | 协议回放样本 | Sanitized synthetic/recorded stream for offline replay tests |
+| Zero-Allocation NV12 Ring | 零分配 NV12 环形缓冲 | Two-slot reusable buffer feeding `ui.Bitmap.UpdateYUV` |
+| DeX Truth Verification | DeX 真伪校验 | Validates genuine Samsung DeX vs virtual desktop fallback (`INV-06`) |
+| Overlay Mesh (EasyTier / VPN) | 异网组网（EasyTier / VPN） | Cross-Wi-Fi or 5G remote tunnel (`--no-tun` userspace mode avoids `VpnService` collision) |
+| Android Emulator (AVD) | Android 模拟器（AVD） | Local virtual Android target (`emulator-*`) for offline iteration |
+| Mouse Mode | 鼠标模式 | Per-display `PointerIDMouse` hover, click, right-click, and scroll forwarding |
+| Touch Mode | 触控模式 | `PointerIDGenericFinger` direct touchscreen/swipe emulation |

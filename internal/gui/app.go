@@ -7,14 +7,17 @@ package gui
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
+	"github.com/YuanZhe-99/AndroFuse/internal/adb"
 	"github.com/YuanZhe-99/AndroFuse/internal/version"
 	L "github.com/YuanZhe-99/AndroFuse/locales"
 )
@@ -51,6 +54,17 @@ type App struct {
 	themeIndex int
 	langIndex  int
 	quitting   bool
+
+	rt              guiRuntime
+	scanningDevices bool
+	devices         []DiscoveredDevice
+	mdnsServices    []adb.MDNSService
+	deviceNotice    string
+	manualAddr      string
+	pairAddr        string
+	pairCode        string
+	appFilter       string
+	sessions        map[string]*SessionWindow
 }
 
 // DefaultStateDir returns the per-user state directory for AndroFuse.
@@ -85,6 +99,7 @@ func New(profile, stateDir string) *App {
 		stateDir: stateDir,
 		prefs:    Prefs{Theme: "system"},
 		page:     string(pageDevices),
+		sessions: make(map[string]*SessionWindow),
 	}
 	a.loadPrefs()
 	a.syncControlIndices()
@@ -112,9 +127,10 @@ func (a *App) SetTray(t *Tray) {
 	a.mu.Unlock()
 }
 
-// Start kicks off the initial asynchronous host diagnostics check.
+// Start kicks off the initial asynchronous host diagnostics check and device scan.
 func (a *App) Start() {
 	a.RefreshDiagnostics()
+	a.RefreshDevices()
 }
 
 // Focus creates (when closed to tray) or raises the main application window.
@@ -142,11 +158,12 @@ func (a *App) RefreshChrome() {
 	}
 }
 
-// Quit exits the application cleanly.
+// Quit tears down active streaming sessions and exits cleanly (INV-03).
 func (a *App) Quit() {
 	a.mu.Lock()
 	a.quitting = true
 	a.mu.Unlock()
+	a.CloseAllSessions()
 	mygo.App.Quit()
 }
 
@@ -477,27 +494,224 @@ func (a *App) pageBody(c *ui.Context, k tokens) {
 }
 
 func (a *App) devicesPage(c *ui.Context, k tokens) {
-	ui.Column(c.Key("page-devices")).Gap(16).FillWidth().Children(func() {
-		ui.Text(c, L.DevicesSubtitle()).FontSize(sizeBody).TextColor(k.muted)
-		card(c.Key("devices-empty")).Children(func() {
-			ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
-				ui.Icon(c, iconDevices).Size(20, 20).TextColor(k.brand)
-				ui.Text(c, L.DevicesEmptyTitle()).Bold().FontSize(sizeHeading)
+	a.mu.Lock()
+	scanning := a.scanningDevices
+	devs := append([]DiscoveredDevice(nil), a.devices...)
+	mdns := append([]adb.MDNSService(nil), a.mdnsServices...)
+	notice := a.deviceNotice
+	sessList := make([]*SessionWindow, 0, len(a.sessions))
+	for _, s := range a.sessions {
+		sessList = append(sessList, s)
+	}
+	a.mu.Unlock()
+
+	ui.Column(c.Key("page-devices")).Gap(14).FillWidth().Children(func() {
+		ui.Row(c.Key("devices-topbar")).FillWidth().AlignItems(ui.Center).Gap(10).Children(func() {
+			ui.Text(c, L.DevicesSubtitle()).FontSize(sizeBody).TextColor(k.muted).Grow(1)
+			scanLbl := L.DevicesRefresh()
+			if scanning {
+				scanLbl = L.DevicesRefreshing()
+			}
+			rb := ui.Button(c.Key("btn-scan-devices"), scanLbl)
+			if scanning {
+				rb.Disabled(true)
+			}
+			if rb.Clicked() {
+				a.RefreshDevices()
+			}
+		})
+
+		if notice != "" {
+			card(c.Key("devices-notice")).Children(func() {
+				ui.Text(c, notice).FontSize(sizeSmall).TextColor(k.warn)
 			})
-			ui.Text(c, L.DevicesEmptyBody()).FontSize(sizeBody).TextColor(k.muted)
-			ui.Row(c).Gap(8).Children(func() {
-				if ui.Button(c.Key("go-diag"), L.NavDiagnostics()).Clicked() {
-					a.mu.Lock()
-					a.page = string(pageDiagnostics)
-					a.mu.Unlock()
+		}
+
+		if len(sessList) > 0 {
+			card(c.Key("active-sessions-card")).Children(func() {
+				ui.Text(c, L.ActiveSessionsTitle()).Bold().FontSize(sizeHeading)
+				for _, sw := range sessList {
+					sw.mu.Lock()
+					nw, nh, fps := sw.negotiatedW, sw.negotiatedH, sw.measuredFPS
+					sw.mu.Unlock()
+					res := "--"
+					if nw > 0 && nh > 0 {
+						res = fmt.Sprintf("%d×%d · %.1f fps", nw, nh, fps)
+					}
+					ui.Row(c.Key("sess-row-" + sw.spec.ID)).FillWidth().AlignItems(ui.Center).Gap(8).Children(func() {
+						ui.Row(c).Padding(badgePadV, badgePadH).Radius(pillRadius).Background(k.brandSoft).Children(func() {
+							ui.Text(c, sw.spec.Transport).FontSize(sizeSmall).TextColor(k.brand).Bold().SingleLine()
+						})
+						ui.Text(c, sw.spec.Title).FontSize(sizeBody).Bold().Grow(1).SingleLine()
+						ui.Text(c, res).FontSize(sizeSmall).TextColor(k.muted).SingleLine()
+						if ui.Button(c.Key("focus-"+sw.spec.ID), L.ActionFocusWindow()).Clicked() {
+							sw.FocusWindow()
+						}
+						if ui.Button(c.Key("close-"+sw.spec.ID), L.ActionDisconnect()).Clicked() {
+							sw.Close()
+						}
+					})
 				}
-				if ui.Button(c.Key("go-modes"), L.NavModes()).Clicked() {
-					a.mu.Lock()
-					a.page = string(pageModes)
-					a.mu.Unlock()
+			})
+		}
+
+		card(c.Key("wireless-card")).Children(func() {
+			ui.Row(c).AlignItems(ui.Center).Gap(8).Children(func() {
+				ui.Icon(c, iconWifi).Size(18, 18).TextColor(k.brand)
+				ui.Text(c, L.WirelessCardTitle()).Bold().FontSize(sizeHeading)
+			})
+			ui.Text(c, L.WirelessCardDesc()).FontSize(sizeSmall).TextColor(k.muted)
+
+			if len(mdns) > 0 {
+				ui.Row(c.Key("mdns-chips")).Gap(8).Wrap().Children(func() {
+					for i, s := range mdns {
+						if s.CanConnect {
+							if ui.Button(c.Key(fmt.Sprintf("mdns-conn-%d", i)), L.WirelessMdnsConnect(s.MaskedAddr)).Clicked() {
+								a.ConnectWirelessTLS(s.Addr)
+							}
+						} else if s.CanPair {
+							if ui.Button(c.Key(fmt.Sprintf("mdns-pair-%d", i)), L.WirelessMdnsPairFound(s.MaskedAddr)).Clicked() {
+								a.mu.Lock()
+								a.pairAddr = s.Addr
+								a.mu.Unlock()
+							}
+						}
+					}
+				})
+			}
+
+			ui.Row(c.Key("manual-tls-row")).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
+				ui.TextInput(c.Key("manual-addr"), &a.manualAddr).Placeholder(L.WirelessManualAddrHint()).Grow(1)
+				if ui.Button(c.Key("btn-manual-tls"), L.WirelessConnectBtn()).Clicked() {
+					a.ConnectWirelessTLS(a.manualAddr)
+				}
+			})
+			ui.Row(c.Key("pair-tls-row")).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
+				ui.TextInput(c.Key("pair-addr"), &a.pairAddr).Placeholder(L.WirelessPairAddrHint()).Grow(2)
+				ui.TextInput(c.Key("pair-code"), &a.pairCode).Placeholder(L.WirelessPairCodeHint()).Grow(1)
+				if ui.Button(c.Key("btn-pair-tls"), L.WirelessPairBtn()).Clicked() {
+					a.PairWirelessTLS(a.pairAddr, a.pairCode)
 				}
 			})
 		})
+
+		if len(devs) == 0 {
+			card(c.Key("devices-empty")).Children(func() {
+				ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
+					ui.Icon(c, iconDevices).Size(20, 20).TextColor(k.brand)
+					ui.Text(c, L.DevicesEmptyTitle()).Bold().FontSize(sizeHeading)
+				})
+				ui.Text(c, L.DevicesEmptyBody()).FontSize(sizeBody).TextColor(k.muted)
+			})
+			return
+		}
+
+		for _, dev := range devs {
+			d := dev
+			devKey := "dev-" + string(d.Target.Transport) + "-" + d.Target.DeviceHash
+			card(c.Key(devKey)).Children(func() {
+				title := d.Target.Model
+				if title == "" {
+					title = d.Profile.Model
+				}
+				if title == "" {
+					title = d.Target.MaskedID
+				}
+				tIcon := iconUsb
+				if d.Target.Transport == adb.TransportTLSWiFi || d.Target.Transport == adb.TransportTCP {
+					tIcon = iconWifi
+				}
+				ui.Row(c.Key(devKey + "-head")).FillWidth().AlignItems(ui.Center).Gap(8).Children(func() {
+					ui.Icon(c, tIcon).Size(18, 18).TextColor(k.brand)
+					ui.Text(c, title).Bold().FontSize(sizeHeading)
+					ui.Text(c, d.Target.MaskedID).FontSize(sizeSmall).TextColor(k.muted).Grow(1)
+					ui.Row(c).Padding(badgePadV, badgePadH).Radius(pillRadius).Background(k.brandSoft).Children(func() {
+						ui.Text(c, transportLabel(d.Target.Transport)).FontSize(sizeSmall).TextColor(k.brand).Bold().SingleLine()
+					})
+				})
+
+				if d.Target.State != "device" {
+					ui.Text(c, d.Target.State).FontSize(sizeSmall).TextColor(k.warn)
+					return
+				}
+				if d.Probed {
+					meta := fmt.Sprintf("%s · Android %s (SDK %d)", d.Profile.Manufacturer, d.Profile.AndroidRelease, d.Profile.SDKInt)
+					if d.Profile.OneUIVersion != "" {
+						meta += " · One UI " + d.Profile.OneUIVersion
+					}
+					meta += " · " + d.TruthDeX.Label
+					ui.Text(c, meta).FontSize(sizeSmall).TextColor(k.muted)
+				} else if d.ProbeErr != "" {
+					ui.Text(c, d.ProbeErr).FontSize(sizeSmall).TextColor(k.warn)
+				}
+
+				ui.Row(c.Key(devKey + "-modes")).Gap(8).Wrap().AlignItems(ui.Center).Children(func() {
+					if d.TruthDeX.IsGenuineDeX && d.Target.Transport != adb.TransportEmulator {
+						if ui.Button(c.Key(devKey+"-dex"), L.ActionLaunchDeX()).Children(func() {
+							ui.Icon(c, iconDex).Size(14, 14)
+						}).Clicked() {
+							a.LaunchDeX(d, false)
+						}
+					}
+					if ui.Button(c.Key(devKey+"-fallback"), L.ActionLaunchFallback()).Clicked() {
+						a.LaunchDeX(d, true)
+					}
+					if ui.Button(c.Key(devKey+"-mirror"), L.ActionLaunchMirror()).Clicked() {
+						a.LaunchMirror(d)
+					}
+					if d.Target.Transport == adb.TransportTLSWiFi || d.Target.Transport == adb.TransportTCP {
+						if ui.Button(c.Key(devKey+"-disc"), L.ActionDisconnect()).Clicked() {
+							a.DisconnectWireless(d.Target.Serial)
+						}
+					}
+				})
+
+				if len(d.Apps) > 0 {
+					ui.Row(c.Key(devKey + "-appbar")).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
+						ui.TextInput(c.Key(devKey+"-filter"), &a.appFilter).Placeholder(L.AppFilterHint()).Grow(1)
+						selLabel := d.SelectedApp
+						for _, ap := range d.Apps {
+							if ap.Package == d.SelectedApp {
+								selLabel = ap.Label
+								break
+							}
+						}
+						if ui.Button(c.Key(devKey+"-openapp"), L.ActionLaunchApp()+": "+selLabel).Children(func() {
+							ui.Icon(c, iconApps).Size(14, 14)
+						}).Clicked() {
+							a.LaunchAppWindow(d, d.SelectedApp, selLabel)
+						}
+					})
+					filter := strings.ToLower(strings.TrimSpace(a.appFilter))
+					ui.Row(c.Key(devKey + "-apps")).Gap(6).Wrap().Children(func() {
+						shown := 0
+						for _, ap := range d.Apps {
+							if filter != "" && !strings.Contains(strings.ToLower(ap.Label), filter) && !strings.Contains(strings.ToLower(ap.Package), filter) {
+								continue
+							}
+							if shown >= 8 {
+								break
+							}
+							shown++
+							chosen := ap.Package == d.SelectedApp
+							lbl := ap.Label
+							if chosen {
+								lbl = "✓ " + lbl
+							}
+							if ui.Button(c.Key(devKey+"-ap-"+ap.Package), lbl).Clicked() {
+								a.mu.Lock()
+								for i := range a.devices {
+									if a.devices[i].Target.Serial == d.Target.Serial {
+										a.devices[i].SelectedApp = ap.Package
+									}
+								}
+								a.mu.Unlock()
+							}
+						}
+					})
+				}
+			})
+		}
 	})
 }
 

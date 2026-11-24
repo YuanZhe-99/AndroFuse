@@ -72,6 +72,17 @@ mod windows_impl {
     use super::{SelfCheck, canonical_arch};
     use std::ffi::c_void;
     use std::mem::size_of;
+    use windows::Win32::Graphics::Direct3D::{
+        D3D_DRIVER_TYPE_HARDWARE, D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_11_1,
+    };
+    use windows::Win32::Graphics::Direct3D11::{
+        D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_CREATE_DEVICE_VIDEO_SUPPORT, D3D11_SDK_VERSION,
+        D3D11CreateDevice, ID3D11Device,
+    };
+    use windows::Win32::Media::MediaFoundation::{
+        IMFActivate, IMFTransform, MF_SA_D3D11_AWARE, MFVideoFormat_H264, MFVideoFormat_HEVC,
+    };
+    use windows::core::{GUID as WinGuid, Interface};
     use windows_sys::Win32::Foundation::{FreeLibrary, HMODULE};
     use windows_sys::Win32::System::Com::{
         COINIT_MULTITHREADED, CoInitializeEx, CoTaskMemFree, CoUninitialize,
@@ -140,18 +151,15 @@ mod windows_impl {
         data3: 0x0010,
         data4: [0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71],
     };
-    const MF_VIDEO_FORMAT_H264: GUID = GUID {
-        data1: 0x3436_3248,
-        data2: 0x0000,
-        data3: 0x0010,
-        data4: [0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71],
-    };
-    const MF_VIDEO_FORMAT_HEVC: GUID = GUID {
-        data1: 0x4356_4548,
-        data2: 0x0000,
-        data3: 0x0010,
-        data4: [0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71],
-    };
+
+    fn to_sys_guid(g: WinGuid) -> GUID {
+        GUID {
+            data1: g.data1,
+            data2: g.data2,
+            data3: g.data3,
+            data4: g.data4,
+        }
+    }
 
     pub(super) fn run() -> SelfCheck {
         let mut notes = Vec::new();
@@ -264,6 +272,27 @@ mod windows_impl {
         unsafe { LoadLibraryExW(wide.as_ptr(), 0 as _, LOAD_LIBRARY_SEARCH_SYSTEM32) }
     }
 
+    fn probe_d3d11_video_device() -> bool {
+        let mut device: Option<ID3D11Device> = None;
+        let levels = [D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0];
+        // SAFETY: Standard hardware D3D11 device creation with valid stack output pointer.
+        unsafe {
+            D3D11CreateDevice(
+                None,
+                D3D_DRIVER_TYPE_HARDWARE,
+                windows::Win32::Foundation::HMODULE::default(),
+                D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_VIDEO_SUPPORT,
+                Some(&levels),
+                D3D11_SDK_VERSION,
+                Some(&mut device),
+                None,
+                None,
+            )
+            .is_ok()
+                && device.is_some()
+        }
+    }
+
     fn probe_media_foundation(notes: &mut Vec<String>) -> (bool, bool, bool, bool, bool) {
         let mfplat = load_system_dll("mfplat.dll");
         if mfplat.is_null() {
@@ -321,16 +350,35 @@ mod windows_impl {
             return (false, false, false, false, false);
         }
 
+        let d3d11_video_ok = probe_d3d11_video_device();
         let hw_flags = MFT_ENUM_FLAG_HARDWARE | MFT_ENUM_FLAG_SORTANDFILTER;
         let any_flags = MFT_ENUM_FLAG_SYNCMFT
             | MFT_ENUM_FLAG_ASYNCMFT
             | MFT_ENUM_FLAG_HARDWARE
             | MFT_ENUM_FLAG_SORTANDFILTER;
 
-        let h264_hw = has_decoder(mft_enum_ex, MF_VIDEO_FORMAT_H264, hw_flags);
-        let h264_any = has_decoder(mft_enum_ex, MF_VIDEO_FORMAT_H264, any_flags);
-        let hevc_hw = has_decoder(mft_enum_ex, MF_VIDEO_FORMAT_HEVC, hw_flags);
-        let hevc_any = has_decoder(mft_enum_ex, MF_VIDEO_FORMAT_HEVC, any_flags);
+        let h264_guid = to_sys_guid(MFVideoFormat_H264);
+        let hevc_guid = to_sys_guid(MFVideoFormat_HEVC);
+
+        let (h264_dedicated_hw, h264_d3d11_aware) = (
+            enum_decoders(mft_enum_ex, h264_guid, hw_flags, false) > 0,
+            enum_decoders(mft_enum_ex, h264_guid, any_flags, true) > 0,
+        );
+        let h264_any = enum_decoders(mft_enum_ex, h264_guid, any_flags, false) > 0;
+        let h264_hw = h264_dedicated_hw || (d3d11_video_ok && h264_d3d11_aware);
+
+        let (hevc_dedicated_hw, hevc_d3d11_aware) = (
+            enum_decoders(mft_enum_ex, hevc_guid, hw_flags, false) > 0,
+            enum_decoders(mft_enum_ex, hevc_guid, any_flags, true) > 0,
+        );
+        let hevc_any = enum_decoders(mft_enum_ex, hevc_guid, any_flags, false) > 0;
+        let hevc_hw = hevc_dedicated_hw || (d3d11_video_ok && hevc_d3d11_aware);
+
+        if d3d11_video_ok && (h264_d3d11_aware || hevc_d3d11_aware) {
+            notes.push(format!(
+                "DXVA/D3D11-aware decoder MFTs available (h264={h264_d3d11_aware}, hevc={hevc_d3d11_aware})"
+            ));
+        }
 
         // SAFETY: Pairs with successful `MFStartup`.
         unsafe { mf_shutdown() };
@@ -343,7 +391,12 @@ mod windows_impl {
         (true, h264_hw, h264_any, hevc_hw, hevc_any)
     }
 
-    fn has_decoder(mft_enum_ex: MftEnumExFn, subtype: GUID, flags: u32) -> bool {
+    fn enum_decoders(
+        mft_enum_ex: MftEnumExFn,
+        subtype: GUID,
+        flags: u32,
+        require_d3d11_aware: bool,
+    ) -> u32 {
         let input_type = MftRegisterTypeInfo {
             guid_major_type: MF_MEDIA_TYPE_VIDEO,
             guid_subtype: subtype,
@@ -362,34 +415,34 @@ mod windows_impl {
             )
         };
         if hr < 0 || activates.is_null() {
-            return false;
+            return 0;
         }
+        let mut matched = 0u32;
         // SAFETY: `MFTEnumEx` returns `count` COM `IMFActivate*` pointers in a `CoTaskMemAlloc` array.
         unsafe {
             for i in 0..count as usize {
                 let obj = *activates.add(i);
-                if !obj.is_null() {
-                    release_com_unknown(obj);
+                if obj.is_null() {
+                    continue;
+                }
+                let act = IMFActivate::from_raw(obj);
+                if !require_d3d11_aware {
+                    matched += 1;
+                } else if let Ok(transform) = act.ActivateObject::<IMFTransform>() {
+                    let aware = transform
+                        .GetAttributes()
+                        .and_then(|a| a.GetUINT32(&MF_SA_D3D11_AWARE))
+                        .unwrap_or(0)
+                        != 0;
+                    if aware {
+                        matched += 1;
+                    }
+                    let _ = act.ShutdownObject();
                 }
             }
             CoTaskMemFree(activates.cast());
         }
-        count > 0
-    }
-
-    /// Releases a COM `IUnknown` pointer by invoking vtable slot 2 (`Release`).
-    ///
-    /// # Safety
-    /// `obj` must be a valid non-null COM interface pointer inheriting `IUnknown`.
-    unsafe fn release_com_unknown(obj: *mut c_void) {
-        // SAFETY: Caller guarantees `obj` is a valid COM object whose first field is the vtable pointer.
-        unsafe {
-            let vtbl = *(obj.cast::<*const *const c_void>());
-            let release_ptr = *vtbl.add(2);
-            let release: unsafe extern "system" fn(*mut c_void) -> u32 =
-                std::mem::transmute(release_ptr);
-            release(obj);
-        }
+        matched
     }
 
     fn probe_wlan(notes: &mut Vec<String>) -> (bool, bool) {
@@ -408,6 +461,11 @@ mod windows_impl {
         if !ie {
             notes.push(
                 "wlanapi.dll lacks WlanNotifyVsIeProviderInt; Miracast Sink IE advertisement unavailable"
+                    .to_string(),
+            );
+        } else {
+            notes.push(
+                "Miracast Sink hidden by default: WlanNotifyVsIeProviderInt is an undocumented private Windows API (triggered qcwlan8280.sys BugCheck 0x7E); use USB or TLS Wi-Fi ADB"
                     .to_string(),
             );
         }

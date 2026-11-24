@@ -6,7 +6,8 @@
 
 | 文档 | 内容 |
 |---|---|
-| [系统架构](architecture.md) | 进程模型、Go 包与 Rust 核心库（`androfuse-core`）、C ABI v1、状态目录 |
+| [系统架构](architecture.md) | 进程模型、Go 包与 Rust 核心库（`androfuse-core`）、C ABI v3、状态目录 |
+| [线协议与核心引擎](protocols.md) | `scrcpy v5.0.1`、三星 DeX 回环、已隐藏的 Miracast WFD 调研、NV12 ABI v3 与 `leases.json` |
 | [上游项目调研](upstream.md) | MyGo、Kyokai、scrcpy、DeXDesk、ScrcpyDeX、DX-Manager、MyDeX、DeXter 与 AndroMeld 的源码、许可证及行为审计 |
 | [第三方声明](third-party.md) | 开源许可证、署名义务与商标声明 |
 | [平台验证记录](platform-notes.md) | Windows 11 x64/ARM64、Windows 10 与 Android/One UI 的已验证及待验证项 |

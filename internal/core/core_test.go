@@ -1,6 +1,7 @@
 package core
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -37,22 +38,65 @@ func TestSelfCheckJSON(t *testing.T) {
 	}
 }
 
-func TestBuiltCoreFFI(t *testing.T) {
+func TestNV12RingZeroAllocSteadyState(t *testing.T) {
+	var ring NV12Ring
+	const w, h = 64, 64
+	const total = w*h + w*(h/2)
+
+	// Warm both slots once.
+	for range 2 {
+		buf := ring.NextBack(total)
+		buf[0] = 0x10
+		buf[w*h] = 0x80
+		ring.Commit(FrameMeta{
+			Width:    w,
+			Height:   h,
+			YStride:  w,
+			UVStride: w,
+			UVOffset: w * h,
+			TotalLen: total,
+		})
+	}
+
+	allocs := testing.AllocsPerRun(100, func() {
+		buf := ring.NextBack(total)
+		buf[0] = 0x20
+		frame := ring.Commit(FrameMeta{
+			Width:    w,
+			Height:   h,
+			YStride:  w,
+			UVStride: w,
+			UVOffset: w * h,
+			TotalLen: total,
+		})
+		if len(frame.Y) != w*h || len(frame.UV) != w*(h/2) {
+			t.Fatalf("unexpected NV12 plane lengths: y=%d uv=%d", len(frame.Y), len(frame.UV))
+		}
+	})
+	if allocs != 0 {
+		t.Fatalf("steady-state NV12Ring allocated %v times per frame, want 0", allocs)
+	}
+}
+
+func findBuiltLib() string {
 	candidates := []string{
 		filepath.Join("..", "..", "core", "target", "debug", LibraryName()),
 		filepath.Join("..", "..", "core", "target", "release", LibraryName()),
 	}
-	var libPath string
 	for _, c := range candidates {
 		abs, err := filepath.Abs(c)
 		if err != nil {
 			continue
 		}
 		if _, err := os.Stat(abs); err == nil {
-			libPath = abs
-			break
+			return abs
 		}
 	}
+	return ""
+}
+
+func TestBuiltCoreFFI(t *testing.T) {
+	libPath := findBuiltLib()
 	if libPath == "" {
 		t.Skipf("built %s not found; build core first", LibraryName())
 	}
@@ -81,6 +125,76 @@ func TestBuiltCoreFFI(t *testing.T) {
 	if runtime.GOOS == "windows" && runtime.GOARCH == "arm64" {
 		if sc.NativeArch != "arm64" || sc.IsEmulated {
 			t.Fatalf("expected native arm64 without emulation, got %+v", sc)
+		}
+	}
+
+	if runtime.GOOS == "windows" {
+		dec, err := lib.OpenDecoder(CodecH264, 64, 48)
+		if err != nil {
+			t.Fatalf("OpenDecoder(H264): %v", err)
+		}
+		defer dec.Close()
+
+		rawFix, err := os.ReadFile(filepath.Join("..", "scrcpy", "testdata", "fold8_scrcpy_session.json"))
+		if err != nil {
+			t.Fatalf("read fixture: %v", err)
+		}
+		var fix struct {
+			Packets []struct {
+				IsSession  bool   `json:"is_session"`
+				IsConfig   bool   `json:"is_config"`
+				IsKeyframe bool   `json:"is_keyframe"`
+				PtsUs      uint64 `json:"pts_us"`
+				PayloadB64 string `json:"payload_b64"`
+			} `json:"packets"`
+		}
+		if err := json.Unmarshal(rawFix, &fix); err != nil {
+			t.Fatalf("unmarshal fixture: %v", err)
+		}
+		var csd []byte
+		var ring NV12Ring
+		decoded := 0
+		for _, p := range fix.Packets {
+			if p.IsSession {
+				continue
+			}
+			b, err := base64.StdEncoding.DecodeString(p.PayloadB64)
+			if err != nil {
+				t.Fatalf("decode b64: %v", err)
+			}
+			if p.IsConfig {
+				csd = b
+				continue
+			}
+			au := b
+			if p.IsKeyframe {
+				au = append(append([]byte(nil), csd...), b...)
+			}
+			if err := dec.Push(au, p.PtsUs, decoded == 0 && p.IsKeyframe); err != nil {
+				t.Fatalf("Push: %v", err)
+			}
+			if frame, ok, err := dec.PullInto(&ring); err != nil {
+				t.Fatalf("PullInto: %v", err)
+			} else if ok {
+				if frame.Width != 64 || frame.Height != 48 {
+					t.Fatalf("unexpected decoded frame size: %dx%d", frame.Width, frame.Height)
+				}
+				decoded++
+			}
+		}
+		if err := dec.Flush(); err != nil {
+			t.Fatalf("Flush: %v", err)
+		}
+		if frame, ok, err := dec.PullInto(&ring); err != nil {
+			t.Fatalf("PullInto after Flush: %v", err)
+		} else if ok {
+			if frame.Width != 64 || frame.Height != 48 {
+				t.Fatalf("unexpected flushed frame size: %dx%d", frame.Width, frame.Height)
+			}
+			decoded++
+		}
+		if decoded == 0 {
+			t.Fatal("expected >= 1 decoded 64x48 NV12 frame")
 		}
 	}
 }

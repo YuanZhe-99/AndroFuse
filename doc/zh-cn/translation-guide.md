@@ -16,3 +16,10 @@ AndroFuse 文档（`doc/en-us/` → `doc/zh-cn/`）的权威英文→简体中�
 | Self-Check Diagnostics | 主机自检诊断 | 被动检测处理器架构、Media Foundation、Wi-Fi Direct 与 ADB |
 | Negotiated Resolution | 实际协商分辨率 | 编解码器实际协商输出的画面分辨率 |
 | Measured FPS | 实测帧率 | 实际解码并渲染呈现的帧率 |
+| Protocol Replay Fixture | 协议回放样本 | 不含真实画面与序列号的离线协议测试数据 |
+| Zero-Allocation NV12 Ring | 零分配 NV12 环形缓冲 | 直喂 `ui.Bitmap.UpdateYUV` 的双槽位可复用缓冲区 |
+| DeX Truth Verification | DeX 真伪校验 | 严格区分完整三星 DeX 与虚拟桌面兼容回退（`INV-06`） |
+| Overlay Mesh (EasyTier / VPN) | 异网组网（EasyTier / VPN） | 跨 Wi-Fi 或 5G 远程加密隧道（`--no-tun` 用户态模式避免与系统 `VpnService` 冲突） |
+| Android Emulator (AVD) | Android 模拟器（AVD） | 无真机期间用于线下迭代的本地 Android 虚拟设备（`emulator-*`） |
+| Mouse Mode | 鼠标模式 | 按 `display_id` 路由的 `PointerIDMouse` 悬停、左/右键点击与滚轮控制 |
+| Touch Mode | 触控模式 | `PointerIDGenericFinger` 触屏点击与滑动模拟 |

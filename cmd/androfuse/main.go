@@ -61,6 +61,9 @@ func main() {
 		if runtime.GOOS != "android" {
 			mygo.App.OnWindowAllClosed(func() {})
 		}
+		mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) {
+			app.CloseAllSessions()
+		})
 		mygo.App.OnLocaleChanged(func(string) {
 			app.RefreshChrome()
 			tray.Refresh()

@@ -6,11 +6,10 @@
 
 | 模块 | 状态 | 实测证据 |
 |---|---|---|
-| Rust 核心库（`core/androfuse-core`） | 已验证（M0） | 在 `aarch64-pc-windows-msvc`（`rustc 1.99.1`）原生编译，通过 `cargo clippy -- -D warnings`、`cargo test` 与 `cargo deny check licenses bans sources` |
-| Go ↔ Rust C-ABI（`internal/core`）与 `androfuse-svc check` | 已验证（M0） | 通过 `LoadLibraryEx` 加载真实 `androfuse_core.dll`，确认 `native_arch = "arm64"`、`is_emulated = false`、`os_build = 26300` 及真实 Media Foundation / `wlanapi.dll` 探测 |
-| MyGo 原生界面（`internal/gui`） | 已验证（M0） | 通过 `CGO_ENABLED=0 go test ./...`、`go tool mygo vet .` 与 `go tool mygo i18n check`；`ui.NewTester` 无头渲染全部 5 个页面（`en`/`zh-Hans`、深浅色、`1080x700`/`412x915`） |
-| ADB 手机镜像与独立 APP 窗口 | 尚未实现（M1） | 待 M1 与 Spike S1 实施 |
-| Miracast 与 ADB 原生 Samsung DeX | 尚未实现（M2） | 待 M2 与 Spike S2–S3 实施 |
+| Rust 核心库（`core/androfuse-core`）C ABI v3 | 已验证（M1b） | 在 `aarch64-pc-windows-msvc`（`rustc 1.99.1`）原生编译；`cargo test` 6/6 通过（含真实 64×48 Media Foundation H.264 NV12 解码、`MFT_MESSAGE_COMMAND_DRAIN` 与 `build_wfd_sink_replies` RTSP 应答器）、通过 `cargo clippy -- -D warnings` 与 `cargo deny check licenses bans sources` |
+| DXVA/D3D11 视频解码与零分配 NV12 → MyGo `UpdateYUV` | 已验证（M1a–M1b） | `androfuse-svc probe` 实测 `h264_hw_decoder = true`、`hevc_hw_decoder = true`；Fold 8 有线 USB 与无线 TLS Wi-Fi 流均通过 DXVA 硬解（`hw=true`），并通过 `TestNV12RingZeroAllocSteadyState`（每帧 0 分配）与 MyGo `Bitmap.UpdateYUV` 渲染 |
+| Miracast / Wi-Fi Direct 接收端（`Spike S3` 与实时接收器） | 已隐藏禁用（依赖未公开 Windows 接口） | 依赖未公开接口 `wlanapi.dll!WlanNotifyVsIeProviderInt`；在 Windows 11 ARM64（`build 26300`）真机关联复测中固定触发高通 **`qcwlan8280.sys`**（`1.0.4122.4000` WiFiCx，WER 事件 `1019`）内核态 `BugCheck 0x0000007E`（`0xC0000005`）蓝屏。已在全平台隐藏禁用，无线 DeX 统一采用加密 TLS Wi-Fi ADB Native DeX |
+| MyGo 原生界面（`internal/gui`） | 已在真机桌面实测通过（M1b） | 有线 USB 与 TLS 无线 ADB 手机镜像及交互式原生 Samsung DeX 已在 `androfuse.exe` 桌面窗口实测正常；`CGO_ENABLED=0 go test ./...`、`go tool mygo vet .` 与 `go tool mygo i18n check` 全部通过 |
 
 ## Windows 11 x64（`windows/amd64`）与 Windows 10
 
@@ -23,6 +22,6 @@
 
 | 目标 | 状态 | 说明 |
 |---|---|---|
-| 三星 Galaxy DeX（One UI 6/7/8/9） | 尚未真机验证 | 规划于 Spike S2–S4 与 M1–M2 |
-| 普通 Android 手机（Android 11–17） | 尚未真机验证 | 规划于 M1 |
+| 三星 Galaxy Z Fold 8（`SM-F971U1`，Android 17 / SDK 37，One UI 9.0 `90000`，`SM8850`） | 已在 `androfuse.exe` 通过 USB 与 TLS Wi-Fi ADB 实测 | **有线 USB 与无线 TLS Wi-Fi（`_adb-tls-connect._tcp`）**：手机主屏镜像与交互式原生 Samsung DeX（`SemWifiDisplayConfig` 回环、`1920x1080`、DXVA `hw=true`、鼠标悬停/左键/右键/滚轮/最近任务、动态缩放至 `1600x900`）均已在自动化套件与 `androfuse.exe` 桌面窗口实测正常（`leases.json` 零残留）。**Miracast**：因依赖未公开 `WlanNotifyVsIeProviderInt` 且触发 `qcwlan8280.sys` 内核 `BugCheck 0x7E` 已全平台隐藏禁用。**独立应用窗口体验**：下一阶段在模拟器按 AndroMeld 标准重构无边框窗口与图标网格 |
+| Android 模拟器（`Pixel_9a_API_36`）与普通 Android 设备 | 已备好 AVD 离线迭代基线 | 用于 Fold 8 离线期间继续开发与回归 ADB 镜像、`--flex-display` 独立窗口与虚拟桌面回退 UI（`INV-06`） |
 | Android Companion APK（`arm64-v8a`） | 尚未构建（M3） | M0 已预备自适应图标前景层与 `mygo.json` Android 配置 |

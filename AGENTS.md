@@ -32,6 +32,7 @@ about to change, verify against the code, then fix the docs in the same commit.
 |---|---|
 | Active plan, requirements fusion, compatibility matrix, milestones (`M0–M5`) | `PLAN.md` |
 | Processes, packages, crates, C ABI (`androfuse_abi_version`), state | `doc/en-us/architecture.md` |
+| Wire protocols (`scrcpy v5.0.1`, DeX loopback, Miracast, NV12 ABI v2, leases) | `doc/en-us/protocols.md` |
 | Verified upstream contracts (MyGo, scrcpy, DeXDesk, ScrcpyDeX, DX-Manager, MyDeX, DeXter, Kyokai) | `doc/en-us/upstream.md` |
 | Reused third-party code, licenses, and trademark notices | `doc/en-us/third-party.md` |
 | What is implemented and verified per Windows architecture and Android/One UI version | `doc/en-us/platform-notes.md` |

@@ -1,7 +1,7 @@
 // Package core loads the Rust core library (androfuse_core) with purego on
 // Unix/Android or LoadLibraryEx on Windows and calls its C ABI
-// (doc/en-us/architecture.md, "FFI"): JSON requests in, JSON responses out,
-// integers and pointers only.
+// (doc/en-us/architecture.md, "FFI"): JSON control requests in/out and zero-copy
+// planar NV12 frames into caller-owned ring buffers for ui.Bitmap.UpdateYUV.
 package core
 
 import (
@@ -16,7 +16,28 @@ import (
 
 // ABIVersion is the C ABI this package speaks; the library must report the
 // same one.
-const ABIVersion = 1
+const ABIVersion = 3
+
+// Codec identifiers matching scrcpy-server v5.0.1 and androfuse-core.
+const (
+	CodecH264 uint32 = 0x68323634
+	CodecH265 uint32 = 0x68323635
+)
+
+// Decoder PullNV12 status codes.
+const (
+	PullOK             = 0
+	PullBufferTooSmall = 1
+	PullNeedMoreInput  = 2
+)
+
+// Live Miracast receiver state values returned by MiracastHandle.PollInto.
+const (
+	MiracastListening   uint32 = 0
+	MiracastNegotiating uint32 = 1
+	MiracastStreaming   uint32 = 2
+	MiracastStopped     uint32 = 3
+)
 
 // LibraryName returns the dynamic library file name for the current platform.
 func LibraryName() string {
@@ -38,12 +59,20 @@ func LibraryPath(dir string) string {
 
 // Lib is a loaded instance of the Rust core library.
 type Lib struct {
-	abiVersion uintptr
-	start      uintptr
-	call       uintptr
-	free       uintptr
-	stop       uintptr
-	mu         sync.RWMutex
+	abiVersion    uintptr
+	start         uintptr
+	call          uintptr
+	free          uintptr
+	stop          uintptr
+	decoderOpen   uintptr
+	decoderPush   uintptr
+	decoderPull   uintptr
+	decoderClose  uintptr
+	miracastStart uintptr
+	miracastPoll  uintptr
+	miracastInput uintptr
+	miracastStop  uintptr
+	mu            sync.RWMutex
 }
 
 // outSlot receives one call's response buffer on the heap rather than a
@@ -90,6 +119,95 @@ type SelfCheck struct {
 	Notes                  []string `json:"notes"`
 }
 
+// MiracastSinkTestResult holds the result of a passive-safe Wi-Fi Direct /
+// Miracast IE Sink advertisement lifecycle test ("miracast.test_sink").
+type MiracastSinkTestResult struct {
+	Port7236Available bool     `json:"port_7236_available"`
+	PublisherStarted  bool     `json:"publisher_started"`
+	PublisherStatus   string   `json:"publisher_status"`
+	WFDHandleOpened   bool     `json:"wfd_handle_opened"`
+	IEEnableError     int32    `json:"ie_enable_error"`
+	IESinkError       int32    `json:"ie_sink_error"`
+	CleanedUp         bool     `json:"cleaned_up"`
+	Notes             []string `json:"notes"`
+}
+
+// FrameMeta mirrors C-ABI `FrameMeta` populated by `androfuse_decoder_pull_nv12`.
+type FrameMeta struct {
+	Width          uint32
+	Height         uint32
+	YStride        uint32
+	UVStride       uint32
+	UVOffset       uint32
+	TotalLen       uint32
+	PtsUs          uint64
+	DecodeUs       uint32
+	Hardware       uint8
+	SurfaceChanged uint8
+	Reserved       [2]uint8
+}
+
+// NV12Frame references the front NV12 slice pair inside an NV12Ring.
+//
+// Notes: Planes stay valid without copying for ui.Bitmap.UpdateYUV until the
+// next AcquireBack/Commit cycle.
+type NV12Frame struct {
+	Width    int
+	Height   int
+	Y        []byte
+	UV       []byte
+	YStride  int
+	UVStride int
+	PtsUs    uint64
+	DecodeUs uint32
+	Hardware bool
+}
+
+// NV12Ring maintains two reusable byte buffers so a background decode goroutine
+// writes into the back slot while the UI thread samples the front slot.
+//
+// Notes: Steady-state frames perform zero heap allocations once warmed to size.
+type NV12Ring struct {
+	slots [2][]byte
+	front int
+}
+
+// NextBack returns a writable capacity-reused back buffer of at least minCap bytes.
+func (r *NV12Ring) NextBack(minCap int) []byte {
+	back := 1 - r.front
+	if cap(r.slots[back]) < minCap {
+		r.slots[back] = make([]byte, minCap)
+	} else {
+		r.slots[back] = r.slots[back][:minCap]
+	}
+	return r.slots[back]
+}
+
+// Commit swaps front and back slots and returns an NV12Frame view over the new front slot.
+func (r *NV12Ring) Commit(meta FrameMeta) NV12Frame {
+	back := 1 - r.front
+	r.front = back
+	buf := r.slots[back][:meta.TotalLen]
+	return NV12Frame{
+		Width:    int(meta.Width),
+		Height:   int(meta.Height),
+		Y:        buf[:meta.UVOffset],
+		UV:       buf[meta.UVOffset:meta.TotalLen],
+		YStride:  int(meta.YStride),
+		UVStride: int(meta.UVStride),
+		PtsUs:    meta.PtsUs,
+		DecodeUs: meta.DecodeUs,
+		Hardware: meta.Hardware != 0,
+	}
+}
+
+// Decoder wraps an opaque native Media Foundation H.264/HEVC decoder handle.
+type Decoder struct {
+	lib    *Lib
+	handle uint64
+	mu     sync.Mutex
+}
+
 type callEnvelope struct {
 	Method string `json:"method"`
 	Params any    `json:"params,omitempty"`
@@ -133,6 +251,31 @@ func Open(path string) (*Lib, error) {
 	if l.stop, err = resolve("androfuse_stop"); err != nil {
 		return nil, err
 	}
+	if l.decoderOpen, err = resolve("androfuse_decoder_open"); err != nil {
+		return nil, err
+	}
+	if l.decoderPush, err = resolve("androfuse_decoder_push"); err != nil {
+		return nil, err
+	}
+	if l.decoderPull, err = resolve("androfuse_decoder_pull_nv12"); err != nil {
+		return nil, err
+	}
+	if l.decoderClose, err = resolve("androfuse_decoder_close"); err != nil {
+		return nil, err
+	}
+	if l.miracastStart, err = resolve("androfuse_miracast_start"); err != nil {
+		return nil, err
+	}
+	if l.miracastPoll, err = resolve("androfuse_miracast_poll_nv12"); err != nil {
+		return nil, err
+	}
+	if l.miracastInput, err = resolve("androfuse_miracast_input"); err != nil {
+		return nil, err
+	}
+	if l.miracastStop, err = resolve("androfuse_miracast_stop"); err != nil {
+		return nil, err
+	}
+
 	abi := uint32(syscallN(l.abiVersion))
 	if abi != ABIVersion {
 		return nil, fmt.Errorf("core ABI %d != expected %d", abi, ABIVersion)
@@ -162,6 +305,16 @@ func (l *Lib) SelfCheck() (SelfCheck, error) {
 	return out, nil
 }
 
+// MiracastTestSink starts and immediately tears down Windows Wi-Fi Direct
+// Sink + IE provider advertisement to verify wireless DeX driver readiness.
+func (l *Lib) MiracastTestSink() (MiracastSinkTestResult, error) {
+	var out MiracastSinkTestResult
+	if err := l.Call("miracast.test_sink", nil, &out); err != nil {
+		return MiracastSinkTestResult{}, err
+	}
+	return out, nil
+}
+
 // Status returns the initialized core status.
 func (l *Lib) Status() (Status, error) {
 	var out Status
@@ -178,6 +331,221 @@ func (l *Lib) Call(method string, params any, out any) error {
 		return err
 	}
 	return l.invoke(l.call, req, out)
+}
+
+// OpenDecoder creates a native H.264 or HEVC decoder initialized to width x height.
+func (l *Lib) OpenDecoder(codecID, width, height uint32) (*Decoder, error) {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+
+	var handle uint64
+	rc := int32(syscallN(
+		l.decoderOpen,
+		uintptr(codecID),
+		uintptr(width),
+		uintptr(height),
+		uintptr(unsafe.Pointer(&handle)),
+	))
+	if rc != 0 || handle == 0 {
+		return nil, fmt.Errorf("androfuse_decoder_open(0x%08x, %dx%d) failed: rc=%d", codecID, width, height, rc)
+	}
+	return &Decoder{lib: l, handle: handle}, nil
+}
+
+// Push submits one encoded video access unit to the decoder.
+func (d *Decoder) Push(data []byte, ptsUs uint64, discontinuity bool) error {
+	var flags uint32
+	if discontinuity {
+		flags = 1
+	}
+	return d.PushFlags(data, ptsUs, flags)
+}
+
+// Flush drains queued frames from the decoder without closing it.
+func (d *Decoder) Flush() error {
+	return d.PushFlags(nil, 0, 2)
+}
+
+// PushFlags submits an encoded access unit with raw C-ABI flags (bit 0: discontinuity, bit 1: drain).
+func (d *Decoder) PushFlags(data []byte, ptsUs uint64, flags uint32) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.handle == 0 {
+		return errors.New("decoder closed")
+	}
+	var ptr uintptr
+	if len(data) > 0 {
+		ptr = uintptr(unsafe.Pointer(unsafe.SliceData(data)))
+	}
+	rc := int32(syscallN(
+		d.lib.decoderPush,
+		uintptr(d.handle),
+		ptr,
+		uintptr(len(data)),
+		uintptr(ptsUs),
+		uintptr(flags),
+	))
+	runtime.KeepAlive(data)
+	if rc != 0 {
+		return fmt.Errorf("androfuse_decoder_push failed: rc=%d", rc)
+	}
+	return nil
+}
+
+// PullInto pulls the latest decoded NV12 frame into ring without allocating in steady state.
+//
+// Returns: (frame, true, nil) when a frame was produced; (_, false, nil) when more input is needed.
+func (d *Decoder) PullInto(ring *NV12Ring) (NV12Frame, bool, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.handle == 0 {
+		return NV12Frame{}, false, errors.New("decoder closed")
+	}
+
+	var meta FrameMeta
+	buf := ring.NextBack(0)
+	if cap(buf) > 0 {
+		buf = buf[:cap(buf)]
+	}
+	var dstPtr uintptr
+	if len(buf) > 0 {
+		dstPtr = uintptr(unsafe.Pointer(unsafe.SliceData(buf)))
+	}
+	rc := int32(syscallN(
+		d.lib.decoderPull,
+		uintptr(d.handle),
+		dstPtr,
+		uintptr(len(buf)),
+		uintptr(unsafe.Pointer(&meta)),
+	))
+	runtime.KeepAlive(buf)
+
+	if rc == PullBufferTooSmall && meta.TotalLen > 0 {
+		buf = ring.NextBack(int(meta.TotalLen))
+		dstPtr = uintptr(unsafe.Pointer(unsafe.SliceData(buf)))
+		rc = int32(syscallN(
+			d.lib.decoderPull,
+			uintptr(d.handle),
+			dstPtr,
+			uintptr(len(buf)),
+			uintptr(unsafe.Pointer(&meta)),
+		))
+		runtime.KeepAlive(buf)
+	}
+
+	switch rc {
+	case PullOK:
+		return ring.Commit(meta), true, nil
+	case PullNeedMoreInput:
+		return NV12Frame{}, false, nil
+	default:
+		return NV12Frame{}, false, fmt.Errorf("androfuse_decoder_pull_nv12 failed: rc=%d", rc)
+	}
+}
+
+// Close releases the native decoder handle.
+func (d *Decoder) Close() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.handle == 0 {
+		return
+	}
+	syscallN(d.lib.decoderClose, uintptr(d.handle))
+	d.handle = 0
+}
+
+// MiracastHandle wraps an active Windows Wi-Fi Direct / Miracast DeX receiver in androfuse_core.
+type MiracastHandle struct {
+	lib    *Lib
+	handle uint64
+	mu     sync.Mutex
+}
+
+// StartMiracast starts a Miracast sink listener on rtspPort (0 uses 7236).
+func (l *Lib) StartMiracast(rtspPort uint16) (*MiracastHandle, error) {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+
+	var handle uint64
+	rc := int32(syscallN(l.miracastStart, uintptr(rtspPort), uintptr(unsafe.Pointer(&handle))))
+	if rc != 0 || handle == 0 {
+		return nil, fmt.Errorf("androfuse_miracast_start(%d) failed: rc=%d", rtspPort, rc)
+	}
+	return &MiracastHandle{lib: l, handle: handle}, nil
+}
+
+// PollInto polls the latest decoded Miracast NV12 frame into ring and reports receiver state.
+func (m *MiracastHandle) PollInto(ring *NV12Ring) (NV12Frame, uint32, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.handle == 0 {
+		return NV12Frame{}, MiracastStopped, false, errors.New("miracast handle closed")
+	}
+	var meta FrameMeta
+	var state uint32
+	buf := ring.NextBack(0)
+	if cap(buf) > 0 {
+		buf = buf[:cap(buf)]
+	}
+	var dstPtr uintptr
+	if len(buf) > 0 {
+		dstPtr = uintptr(unsafe.Pointer(unsafe.SliceData(buf)))
+	}
+	rc := int32(syscallN(
+		m.lib.miracastPoll,
+		uintptr(m.handle),
+		dstPtr,
+		uintptr(len(buf)),
+		uintptr(unsafe.Pointer(&meta)),
+		uintptr(unsafe.Pointer(&state)),
+	))
+	runtime.KeepAlive(buf)
+	if rc == PullBufferTooSmall && meta.TotalLen > 0 {
+		buf = ring.NextBack(int(meta.TotalLen))
+		dstPtr = uintptr(unsafe.Pointer(unsafe.SliceData(buf)))
+		rc = int32(syscallN(
+			m.lib.miracastPoll,
+			uintptr(m.handle),
+			dstPtr,
+			uintptr(len(buf)),
+			uintptr(unsafe.Pointer(&meta)),
+			uintptr(unsafe.Pointer(&state)),
+		))
+		runtime.KeepAlive(buf)
+	}
+	switch rc {
+	case PullOK:
+		return ring.Commit(meta), state, true, nil
+	case PullNeedMoreInput:
+		return NV12Frame{}, state, false, nil
+	default:
+		return NV12Frame{}, state, false, fmt.Errorf("androfuse_miracast_poll_nv12 failed: rc=%d", rc)
+	}
+}
+
+// SendPointer forwards a UIBC GENERIC pointer action (`0=down, 1=up, 2=move`) in normalized [0..65535] coordinates.
+func (m *MiracastHandle) SendPointer(action uint8, xNorm, yNorm uint16) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.handle == 0 {
+		return errors.New("miracast handle closed")
+	}
+	rc := int32(syscallN(m.lib.miracastInput, uintptr(m.handle), uintptr(action), uintptr(xNorm), uintptr(yNorm)))
+	if rc != 0 {
+		return fmt.Errorf("androfuse_miracast_input failed: rc=%d", rc)
+	}
+	return nil
+}
+
+// Close tears down the Miracast sink advertisement, RTSP/RTP sockets, and IE state cleanly.
+func (m *MiracastHandle) Close() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.handle == 0 {
+		return
+	}
+	syscallN(m.lib.miracastStop, uintptr(m.handle))
+	m.handle = 0
 }
 
 // Stop stops the core and waits for in-flight calls to finish.

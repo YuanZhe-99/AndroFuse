@@ -114,41 +114,41 @@ func (msgs Messages) DevicesTitle() string {
 	return Catalog.Format(msgs.locale, "DevicesTitle", nil)
 }
 
-// DevicesSubtitle says "USB ADB, encrypted TLS wireless ADB, and Miracast Wi-Fi Direct"
+// DevicesSubtitle says "Wired USB ADB and encrypted TLS Wireless ADB"
 // in the language the app shows.
 func DevicesSubtitle() string { return In(i18n.Locale()).DevicesSubtitle() }
 
-// DevicesSubtitle says "USB ADB, encrypted TLS wireless ADB, and Miracast Wi-Fi Direct"
+// DevicesSubtitle says "Wired USB ADB and encrypted TLS Wireless ADB"
 // in the language of msgs.
 func (msgs Messages) DevicesSubtitle() string {
 	return Catalog.Format(msgs.locale, "DevicesSubtitle", nil)
 }
 
-// DevicesEmptyTitle says "No active device sessions yet"
+// DevicesEmptyTitle says "No active ADB or emulator devices detected"
 // in the language the app shows.
 func DevicesEmptyTitle() string { return In(i18n.Locale()).DevicesEmptyTitle() }
 
-// DevicesEmptyTitle says "No active device sessions yet"
+// DevicesEmptyTitle says "No active ADB or emulator devices detected"
 // in the language of msgs.
 func (msgs Messages) DevicesEmptyTitle() string {
 	return Catalog.Format(msgs.locale, "DevicesEmptyTitle", nil)
 }
 
-// DevicesEmptyBody says "Device discovery and streaming backends are scheduled for M1 (ADB mirror & independent app windows) and M2 (Samsung D…"
+// DevicesEmptyBody says "Plug in a phone over USB debugging, start an Android Emulator, or connect via encrypted TLS Wireless ADB above."
 // in the language the app shows.
 func DevicesEmptyBody() string { return In(i18n.Locale()).DevicesEmptyBody() }
 
-// DevicesEmptyBody says "Device discovery and streaming backends are scheduled for M1 (ADB mirror & independent app windows) and M2 (Samsung D…"
+// DevicesEmptyBody says "Plug in a phone over USB debugging, start an Android Emulator, or connect via encrypted TLS Wireless ADB above."
 // in the language of msgs.
 func (msgs Messages) DevicesEmptyBody() string {
 	return Catalog.Format(msgs.locale, "DevicesEmptyBody", nil)
 }
 
-// DevicesBadgePlanned says "M1–M2 Transport"
+// DevicesBadgePlanned says "DeX · Scrcpy"
 // in the language the app shows.
 func DevicesBadgePlanned() string { return In(i18n.Locale()).DevicesBadgePlanned() }
 
-// DevicesBadgePlanned says "M1–M2 Transport"
+// DevicesBadgePlanned says "DeX · Scrcpy"
 // in the language of msgs.
 func (msgs Messages) DevicesBadgePlanned() string {
 	return Catalog.Format(msgs.locale, "DevicesBadgePlanned", nil)
@@ -184,21 +184,21 @@ func (msgs Messages) ModeDexTitle() string {
 	return Catalog.Format(msgs.locale, "ModeDexTitle", nil)
 }
 
-// ModeDexBadge says "Planned M2"
+// ModeDexBadge says "Wired & TLS Wi-Fi"
 // in the language the app shows.
 func ModeDexBadge() string { return In(i18n.Locale()).ModeDexBadge() }
 
-// ModeDexBadge says "Planned M2"
+// ModeDexBadge says "Wired & TLS Wi-Fi"
 // in the language of msgs.
 func (msgs Messages) ModeDexBadge() string {
 	return Catalog.Format(msgs.locale, "ModeDexBadge", nil)
 }
 
-// ModeDexDesc says "Runs genuine Samsung DeX via wireless Miracast (without forcing USB debugging) or USB/Wi-Fi ADB loopback activation, …"
+// ModeDexDesc says "Runs genuine Samsung DeX over wired USB ADB or encrypted TLS Wireless ADB (`SemWifiDisplayConfig` loopback), with ver…"
 // in the language the app shows.
 func ModeDexDesc() string { return In(i18n.Locale()).ModeDexDesc() }
 
-// ModeDexDesc says "Runs genuine Samsung DeX via wireless Miracast (without forcing USB debugging) or USB/Wi-Fi ADB loopback activation, …"
+// ModeDexDesc says "Runs genuine Samsung DeX over wired USB ADB or encrypted TLS Wireless ADB (`SemWifiDisplayConfig` loopback), with ver…"
 // in the language of msgs.
 func (msgs Messages) ModeDexDesc() string {
 	return Catalog.Format(msgs.locale, "ModeDexDesc", nil)
@@ -214,11 +214,11 @@ func (msgs Messages) ModeMirrorTitle() string {
 	return Catalog.Format(msgs.locale, "ModeMirrorTitle", nil)
 }
 
-// ModeMirrorBadge says "Planned M1"
+// ModeMirrorBadge says "Active M1"
 // in the language the app shows.
 func ModeMirrorBadge() string { return In(i18n.Locale()).ModeMirrorBadge() }
 
-// ModeMirrorBadge says "Planned M1"
+// ModeMirrorBadge says "Active M1"
 // in the language of msgs.
 func (msgs Messages) ModeMirrorBadge() string {
 	return Catalog.Format(msgs.locale, "ModeMirrorBadge", nil)
@@ -244,14 +244,386 @@ func (msgs Messages) ModeAppsTitle() string {
 	return Catalog.Format(msgs.locale, "ModeAppsTitle", nil)
 }
 
-// ModeAppsBadge says "Planned M1"
+// ModeAppsBadge says "Active M1"
 // in the language the app shows.
 func ModeAppsBadge() string { return In(i18n.Locale()).ModeAppsBadge() }
 
-// ModeAppsBadge says "Planned M1"
+// ModeAppsBadge says "Active M1"
 // in the language of msgs.
 func (msgs Messages) ModeAppsBadge() string {
 	return Catalog.Format(msgs.locale, "ModeAppsBadge", nil)
+}
+
+// DevicesRefresh says "Refresh Devices"
+// in the language the app shows.
+func DevicesRefresh() string { return In(i18n.Locale()).DevicesRefresh() }
+
+// DevicesRefresh says "Refresh Devices"
+// in the language of msgs.
+func (msgs Messages) DevicesRefresh() string {
+	return Catalog.Format(msgs.locale, "DevicesRefresh", nil)
+}
+
+// DevicesRefreshing says "Scanning..."
+// in the language the app shows.
+func DevicesRefreshing() string { return In(i18n.Locale()).DevicesRefreshing() }
+
+// DevicesRefreshing says "Scanning..."
+// in the language of msgs.
+func (msgs Messages) DevicesRefreshing() string {
+	return Catalog.Format(msgs.locale, "DevicesRefreshing", nil)
+}
+
+// MiracastStart says "Start Miracast DeX Receiver"
+// in the language the app shows.
+func MiracastStart() string { return In(i18n.Locale()).MiracastStart() }
+
+// MiracastStart says "Start Miracast DeX Receiver"
+// in the language of msgs.
+func (msgs Messages) MiracastStart() string {
+	return Catalog.Format(msgs.locale, "MiracastStart", nil)
+}
+
+// MiracastWindowTitle says "Samsung Wireless DeX (Miracast Receiver)"
+// in the language the app shows.
+func MiracastWindowTitle() string { return In(i18n.Locale()).MiracastWindowTitle() }
+
+// MiracastWindowTitle says "Samsung Wireless DeX (Miracast Receiver)"
+// in the language of msgs.
+func (msgs Messages) MiracastWindowTitle() string {
+	return Catalog.Format(msgs.locale, "MiracastWindowTitle", nil)
+}
+
+// MiracastWaitingNote says "Open Smart View / Wireless DeX on your Galaxy phone and select this PC."
+// in the language the app shows.
+func MiracastWaitingNote() string { return In(i18n.Locale()).MiracastWaitingNote() }
+
+// MiracastWaitingNote says "Open Smart View / Wireless DeX on your Galaxy phone and select this PC."
+// in the language of msgs.
+func (msgs Messages) MiracastWaitingNote() string {
+	return Catalog.Format(msgs.locale, "MiracastWaitingNote", nil)
+}
+
+// MiracastNegotiatingNote says "Negotiating Wi-Fi Direct / RTSP stream..."
+// in the language the app shows.
+func MiracastNegotiatingNote() string { return In(i18n.Locale()).MiracastNegotiatingNote() }
+
+// MiracastNegotiatingNote says "Negotiating Wi-Fi Direct / RTSP stream..."
+// in the language of msgs.
+func (msgs Messages) MiracastNegotiatingNote() string {
+	return Catalog.Format(msgs.locale, "MiracastNegotiatingNote", nil)
+}
+
+// ActiveSessionsTitle says "Active Session Windows"
+// in the language the app shows.
+func ActiveSessionsTitle() string { return In(i18n.Locale()).ActiveSessionsTitle() }
+
+// ActiveSessionsTitle says "Active Session Windows"
+// in the language of msgs.
+func (msgs Messages) ActiveSessionsTitle() string {
+	return Catalog.Format(msgs.locale, "ActiveSessionsTitle", nil)
+}
+
+// ActionFocusWindow says "Focus"
+// in the language the app shows.
+func ActionFocusWindow() string { return In(i18n.Locale()).ActionFocusWindow() }
+
+// ActionFocusWindow says "Focus"
+// in the language of msgs.
+func (msgs Messages) ActionFocusWindow() string {
+	return Catalog.Format(msgs.locale, "ActionFocusWindow", nil)
+}
+
+// ActionDisconnect says "Disconnect"
+// in the language the app shows.
+func ActionDisconnect() string { return In(i18n.Locale()).ActionDisconnect() }
+
+// ActionDisconnect says "Disconnect"
+// in the language of msgs.
+func (msgs Messages) ActionDisconnect() string {
+	return Catalog.Format(msgs.locale, "ActionDisconnect", nil)
+}
+
+// WirelessCardTitle says "TLS Wireless ADB & Cross-Network Connect"
+// in the language the app shows.
+func WirelessCardTitle() string { return In(i18n.Locale()).WirelessCardTitle() }
+
+// WirelessCardTitle says "TLS Wireless ADB & Cross-Network Connect"
+// in the language of msgs.
+func (msgs Messages) WirelessCardTitle() string {
+	return Catalog.Format(msgs.locale, "WirelessCardTitle", nil)
+}
+
+// WirelessCardDesc says "Encrypted TLS Wireless Debugging (`_adb-tls-connect._tcp`) is preferred over plaintext tcpip. Direct host:port works …"
+// in the language the app shows.
+func WirelessCardDesc() string { return In(i18n.Locale()).WirelessCardDesc() }
+
+// WirelessCardDesc says "Encrypted TLS Wireless Debugging (`_adb-tls-connect._tcp`) is preferred over plaintext tcpip. Direct host:port works …"
+// in the language of msgs.
+func (msgs Messages) WirelessCardDesc() string {
+	return Catalog.Format(msgs.locale, "WirelessCardDesc", nil)
+}
+
+// WirelessMdnsConnect says "Connect {addr}"
+// in the language the app shows.
+func WirelessMdnsConnect(addr string) string { return In(i18n.Locale()).WirelessMdnsConnect(addr) }
+
+// WirelessMdnsConnect says "Connect {addr}"
+// in the language of msgs.
+func (msgs Messages) WirelessMdnsConnect(addr string) string {
+	return Catalog.Format(msgs.locale, "WirelessMdnsConnect", map[string]any{"addr": addr})
+}
+
+// WirelessMdnsPairFound says "Pairing service: {addr}"
+// in the language the app shows.
+func WirelessMdnsPairFound(addr string) string { return In(i18n.Locale()).WirelessMdnsPairFound(addr) }
+
+// WirelessMdnsPairFound says "Pairing service: {addr}"
+// in the language of msgs.
+func (msgs Messages) WirelessMdnsPairFound(addr string) string {
+	return Catalog.Format(msgs.locale, "WirelessMdnsPairFound", map[string]any{"addr": addr})
+}
+
+// WirelessManualAddrHint says "TLS or VPN host:port"
+// in the language the app shows.
+func WirelessManualAddrHint() string { return In(i18n.Locale()).WirelessManualAddrHint() }
+
+// WirelessManualAddrHint says "TLS or VPN host:port"
+// in the language of msgs.
+func (msgs Messages) WirelessManualAddrHint() string {
+	return Catalog.Format(msgs.locale, "WirelessManualAddrHint", nil)
+}
+
+// WirelessConnectBtn says "Connect TLS"
+// in the language the app shows.
+func WirelessConnectBtn() string { return In(i18n.Locale()).WirelessConnectBtn() }
+
+// WirelessConnectBtn says "Connect TLS"
+// in the language of msgs.
+func (msgs Messages) WirelessConnectBtn() string {
+	return Catalog.Format(msgs.locale, "WirelessConnectBtn", nil)
+}
+
+// WirelessPairAddrHint says "Pairing host:port"
+// in the language the app shows.
+func WirelessPairAddrHint() string { return In(i18n.Locale()).WirelessPairAddrHint() }
+
+// WirelessPairAddrHint says "Pairing host:port"
+// in the language of msgs.
+func (msgs Messages) WirelessPairAddrHint() string {
+	return Catalog.Format(msgs.locale, "WirelessPairAddrHint", nil)
+}
+
+// WirelessPairCodeHint says "6-digit code"
+// in the language the app shows.
+func WirelessPairCodeHint() string { return In(i18n.Locale()).WirelessPairCodeHint() }
+
+// WirelessPairCodeHint says "6-digit code"
+// in the language of msgs.
+func (msgs Messages) WirelessPairCodeHint() string {
+	return Catalog.Format(msgs.locale, "WirelessPairCodeHint", nil)
+}
+
+// WirelessPairBtn says "Pair TLS"
+// in the language the app shows.
+func WirelessPairBtn() string { return In(i18n.Locale()).WirelessPairBtn() }
+
+// WirelessPairBtn says "Pair TLS"
+// in the language of msgs.
+func (msgs Messages) WirelessPairBtn() string {
+	return Catalog.Format(msgs.locale, "WirelessPairBtn", nil)
+}
+
+// PairSuccessHint says "TLS Wireless ADB paired; refreshing targets..."
+// in the language the app shows.
+func PairSuccessHint() string { return In(i18n.Locale()).PairSuccessHint() }
+
+// PairSuccessHint says "TLS Wireless ADB paired; refreshing targets..."
+// in the language of msgs.
+func (msgs Messages) PairSuccessHint() string {
+	return Catalog.Format(msgs.locale, "PairSuccessHint", nil)
+}
+
+// ActionLaunchDeX says "Launch Samsung DeX"
+// in the language the app shows.
+func ActionLaunchDeX() string { return In(i18n.Locale()).ActionLaunchDeX() }
+
+// ActionLaunchDeX says "Launch Samsung DeX"
+// in the language of msgs.
+func (msgs Messages) ActionLaunchDeX() string {
+	return Catalog.Format(msgs.locale, "ActionLaunchDeX", nil)
+}
+
+// ActionLaunchFallback says "Virtual Desktop Fallback"
+// in the language the app shows.
+func ActionLaunchFallback() string { return In(i18n.Locale()).ActionLaunchFallback() }
+
+// ActionLaunchFallback says "Virtual Desktop Fallback"
+// in the language of msgs.
+func (msgs Messages) ActionLaunchFallback() string {
+	return Catalog.Format(msgs.locale, "ActionLaunchFallback", nil)
+}
+
+// ActionLaunchMirror says "Phone Mirror"
+// in the language the app shows.
+func ActionLaunchMirror() string { return In(i18n.Locale()).ActionLaunchMirror() }
+
+// ActionLaunchMirror says "Phone Mirror"
+// in the language of msgs.
+func (msgs Messages) ActionLaunchMirror() string {
+	return Catalog.Format(msgs.locale, "ActionLaunchMirror", nil)
+}
+
+// ActionLaunchApp says "Open App Window"
+// in the language the app shows.
+func ActionLaunchApp() string { return In(i18n.Locale()).ActionLaunchApp() }
+
+// ActionLaunchApp says "Open App Window"
+// in the language of msgs.
+func (msgs Messages) ActionLaunchApp() string {
+	return Catalog.Format(msgs.locale, "ActionLaunchApp", nil)
+}
+
+// AppFilterHint says "Filter installed apps..."
+// in the language the app shows.
+func AppFilterHint() string { return In(i18n.Locale()).AppFilterHint() }
+
+// AppFilterHint says "Filter installed apps..."
+// in the language of msgs.
+func (msgs Messages) AppFilterHint() string {
+	return Catalog.Format(msgs.locale, "AppFilterHint", nil)
+}
+
+// InputModeMouse says "Mouse"
+// in the language the app shows.
+func InputModeMouse() string { return In(i18n.Locale()).InputModeMouse() }
+
+// InputModeMouse says "Mouse"
+// in the language of msgs.
+func (msgs Messages) InputModeMouse() string {
+	return Catalog.Format(msgs.locale, "InputModeMouse", nil)
+}
+
+// InputModeTouch says "Touch"
+// in the language the app shows.
+func InputModeTouch() string { return In(i18n.Locale()).InputModeTouch() }
+
+// InputModeTouch says "Touch"
+// in the language of msgs.
+func (msgs Messages) InputModeTouch() string {
+	return Catalog.Format(msgs.locale, "InputModeTouch", nil)
+}
+
+// ActionBack says "Back"
+// in the language the app shows.
+func ActionBack() string { return In(i18n.Locale()).ActionBack() }
+
+// ActionBack says "Back"
+// in the language of msgs.
+func (msgs Messages) ActionBack() string {
+	return Catalog.Format(msgs.locale, "ActionBack", nil)
+}
+
+// ActionHome says "Home"
+// in the language the app shows.
+func ActionHome() string { return In(i18n.Locale()).ActionHome() }
+
+// ActionHome says "Home"
+// in the language of msgs.
+func (msgs Messages) ActionHome() string {
+	return Catalog.Format(msgs.locale, "ActionHome", nil)
+}
+
+// ActionRecents says "Recents"
+// in the language the app shows.
+func ActionRecents() string { return In(i18n.Locale()).ActionRecents() }
+
+// ActionRecents says "Recents"
+// in the language of msgs.
+func (msgs Messages) ActionRecents() string {
+	return Catalog.Format(msgs.locale, "ActionRecents", nil)
+}
+
+// ActionRotate says "Rotate"
+// in the language the app shows.
+func ActionRotate() string { return In(i18n.Locale()).ActionRotate() }
+
+// ActionRotate says "Rotate"
+// in the language of msgs.
+func (msgs Messages) ActionRotate() string {
+	return Catalog.Format(msgs.locale, "ActionRotate", nil)
+}
+
+// ActionScreenOff says "Screen Off / On"
+// in the language the app shows.
+func ActionScreenOff() string { return In(i18n.Locale()).ActionScreenOff() }
+
+// ActionScreenOff says "Screen Off / On"
+// in the language of msgs.
+func (msgs Messages) ActionScreenOff() string {
+	return Catalog.Format(msgs.locale, "ActionScreenOff", nil)
+}
+
+// ActionFullscreen says "Fullscreen (F11)"
+// in the language the app shows.
+func ActionFullscreen() string { return In(i18n.Locale()).ActionFullscreen() }
+
+// ActionFullscreen says "Fullscreen (F11)"
+// in the language of msgs.
+func (msgs Messages) ActionFullscreen() string {
+	return Catalog.Format(msgs.locale, "ActionFullscreen", nil)
+}
+
+// HudHide says "Hide HUD"
+// in the language the app shows.
+func HudHide() string { return In(i18n.Locale()).HudHide() }
+
+// HudHide says "Hide HUD"
+// in the language of msgs.
+func (msgs Messages) HudHide() string {
+	return Catalog.Format(msgs.locale, "HudHide", nil)
+}
+
+// HudShow says "HUD"
+// in the language the app shows.
+func HudShow() string { return In(i18n.Locale()).HudShow() }
+
+// HudShow says "HUD"
+// in the language of msgs.
+func (msgs Messages) HudShow() string {
+	return Catalog.Format(msgs.locale, "HudShow", nil)
+}
+
+// SessionEnded says "Stream ended"
+// in the language the app shows.
+func SessionEnded() string { return In(i18n.Locale()).SessionEnded() }
+
+// SessionEnded says "Stream ended"
+// in the language of msgs.
+func (msgs Messages) SessionEnded() string {
+	return Catalog.Format(msgs.locale, "SessionEnded", nil)
+}
+
+// FocusReleasedHint says "Focus released (Ctrl+Alt+Esc)"
+// in the language the app shows.
+func FocusReleasedHint() string { return In(i18n.Locale()).FocusReleasedHint() }
+
+// FocusReleasedHint says "Focus released (Ctrl+Alt+Esc)"
+// in the language of msgs.
+func (msgs Messages) FocusReleasedHint() string {
+	return Catalog.Format(msgs.locale, "FocusReleasedHint", nil)
+}
+
+// TelemetryTargetPrefix says "Configured target: {target}"
+// in the language the app shows.
+func TelemetryTargetPrefix(target string) string {
+	return In(i18n.Locale()).TelemetryTargetPrefix(target)
+}
+
+// TelemetryTargetPrefix says "Configured target: {target}"
+// in the language of msgs.
+func (msgs Messages) TelemetryTargetPrefix(target string) string {
+	return Catalog.Format(msgs.locale, "TelemetryTargetPrefix", map[string]any{"target": target})
 }
 
 // ModeAppsDesc says "Runs each Android app in its own native Windows window (taskbar, Alt+Tab, resize, Snap Layouts) on an isolated virtua…"
@@ -450,11 +822,11 @@ func (msgs Messages) DiagAdbFound(version string) string {
 	return Catalog.Format(msgs.locale, "DiagAdbFound", map[string]any{"version": version})
 }
 
-// DiagAdbMissing says "Not found in PATH or standard Android SDK platform-tools (Miracast DeX does not require ADB)"
+// DiagAdbMissing says "Not found in PATH or standard Android SDK platform-tools"
 // in the language the app shows.
 func DiagAdbMissing() string { return In(i18n.Locale()).DiagAdbMissing() }
 
-// DiagAdbMissing says "Not found in PATH or standard Android SDK platform-tools (Miracast DeX does not require ADB)"
+// DiagAdbMissing says "Not found in PATH or standard Android SDK platform-tools"
 // in the language of msgs.
 func (msgs Messages) DiagAdbMissing() string {
 	return Catalog.Format(msgs.locale, "DiagAdbMissing", nil)

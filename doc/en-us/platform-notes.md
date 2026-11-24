@@ -6,11 +6,10 @@ This file records only what has actually been built and run. Unverified targets 
 
 | Area | Status | Evidence |
 |---|---|---|
-| Rust core (`core/androfuse-core`) | Verified (M0) | Built natively for `aarch64-pc-windows-msvc` (`rustc 1.99.1`), `cargo clippy -- -D warnings`, `cargo test`, `cargo deny check licenses bans sources` |
-| Go + Rust C-ABI (`internal/core`) & `androfuse-svc check` | Verified (M0) | Loaded real `androfuse_core.dll` via `LoadLibraryEx`, confirmed `native_arch = "arm64"`, `is_emulated = false`, `os_build = 26300`, real Media Foundation MFT & `wlanapi.dll` probes |
-| MyGo Native UI (`internal/gui`) | Verified (M0) | `CGO_ENABLED=0 go test ./...`, `go tool mygo vet .`, `go tool mygo i18n check`; headless `ui.NewTester` rendered all 5 pages across `en`/`zh-Hans`, light/dark, and `1080x700`/`412x915` |
-| ADB Mirroring & Independent App Windows | Not yet implemented (M1) | Pending M1 + Spike S1 |
-| Miracast & ADB Native Samsung DeX | Not yet implemented (M2) | Pending M2 + Spikes S2–S3 |
+| Rust core (`core/androfuse-core`) C ABI v3 | Verified (M1b) | Built natively for `aarch64-pc-windows-msvc` (`rustc 1.99.1`); 6/6 `cargo test` passing including live 64×48 Media Foundation H.264 NV12 decode + `MFT_MESSAGE_COMMAND_DRAIN`, `build_wfd_sink_replies` RTSP responder, `cargo clippy -- -D warnings`, and `cargo deny check licenses bans sources` |
+| DXVA/D3D11 Video Decode & Zero-Alloc NV12 → MyGo `UpdateYUV` | Verified (M1a–M1b) | `androfuse-svc probe` reports `h264_hw_decoder = true`, `hevc_hw_decoder = true`; live Fold 8 USB & TLS Wi-Fi streams decoded via DXVA (`hw=true`) and passed `TestNV12RingZeroAllocSteadyState` (`0` allocs/frame) + MyGo `Bitmap.UpdateYUV` |
+| Miracast / Wi-Fi Direct Sink (`Spike S3` & Live Receiver) | Hidden / Disabled (Undocumented Windows API) | Requires undocumented `wlanapi.dll!WlanNotifyVsIeProviderInt`; live Fold 8 association on Windows 11 ARM64 (`build 26300`) triggered kernel-mode `BugCheck 0x0000007E` (`0xC0000005`) in Qualcomm **`qcwlan8280.sys`** (`1.0.4122.4000` WiFiCx, WER Event `1019`) even after full WFD/RTSP lifecycle fixes. Hidden across all platforms; wireless DeX uses encrypted TLS Wi-Fi ADB Native DeX |
+| MyGo Native UI (`internal/gui`) | Verified live on desktop (M1b) | Wired USB & TLS Wi-Fi ADB Phone Mirroring and interactive Native Samsung DeX verified live in `androfuse.exe`; `CGO_ENABLED=0 go test ./...`, `go tool mygo vet .`, and `go tool mygo i18n check` passing |
 
 ## Windows 11 x64 (`windows/amd64`) & Windows 10
 
@@ -23,6 +22,6 @@ This file records only what has actually been built and run. Unverified targets 
 
 | Target | Status | Notes |
 |---|---|---|
-| Samsung Galaxy DeX (One UI 6/7/8/9) | Not yet verified on device | Planned in Spikes S2–S4 and M1–M2 |
-| Non-Samsung Android (Android 11–17) | Not yet verified on device | Planned in M1 |
+| Samsung Galaxy Z Fold 8 (`SM-F971U1`, Android 17 / SDK 37, One UI 9.0 `90000`, `SM8850`) | Verified live in `androfuse.exe` over USB & TLS Wi-Fi ADB | **Wired USB & Wireless TLS Wi-Fi (`_adb-tls-connect._tcp`)**: Both Phone Mirroring and interactive Native Samsung DeX (`SemWifiDisplayConfig` loopback, `1920x1080`, DXVA `hw=true`, mouse hover/left/right/scroll/Recents, dynamic `Resize` to `1600x900`) verified live in both automated tests and interactive `androfuse.exe` desktop windows (`leases.json` clean). **Miracast**: hidden/disabled across the project due to undocumented `WlanNotifyVsIeProviderInt` and `qcwlan8280.sys` kernel `BugCheck 0x7E`. **App Window UX**: AndroMeld-style chromeless launcher/icons scheduled next on AVD |
+| Android Emulator (`Pixel_9a_API_36`) & Non-Samsung Android | Offline target ready (AVD) | Used for ongoing ADB mirror, concurrent `--flex-display` app windows, and virtual fallback UI development while physical Fold 8 is offline (`INV-06`) |
 | Android Companion APK (`arm64-v8a`) | Not yet built (M3) | Adaptive icon foreground and `mygo.json` Android metadata prepared in M0 |

@@ -45,8 +45,8 @@
 
 | 功能模式 | 连接方式 | One UI 5.1–6.1.1（Android 13–14） | One UI 7（Android 15） | One UI 8 / 8.5 / 9（Android 16–17） | 普通 Android 11–17（非三星） | Windows 11 x64 / 原生 ARM64 |
 |---|---|---|---|---|---|---|
-| **Samsung DeX 完整桌面（无线 Miracast）** | Wi-Fi Direct / Miracast（**无需 USB 调试**） | `[上游规范证实]` 无线 DeX 原生支持（依赖网卡 WFD/IE） | `[上游规范证实]` 无线 DeX 仍存在 | `[上游证实]` DeXDesk 在 Fold7 / Android 17 验证（实测 1080p30，无真 HID 鼠标） | `[系统限制]` 不适用（非三星无 DeX） | 依赖无线网卡 Wi-Fi Direct 驱动与 `WlanNotifyVsIeProviderInt`；ARM64 驱动兼容待 Spike S3 实测 |
-| **Samsung DeX 完整桌面（ADB 原生回环）** | USB / TLS Wi-Fi ADB（`SemWifiDisplayConfig` `127.0.0.1:7236`） | `[上游证实]` SDK 30+ 存在该 API（需确认旧版 One UI 多窗口/指针行为） | `[上游证实]` 替代停更官方 DeX for PC 的主力方案 | `[上游证实]` DX-Manager 在 S26 Ultra / One UI 9 / Android 17 实测通过，支持 60 FPS 与 `/dev/uhid` 真鼠标 | `[系统限制]` 不适用（检测非三星或无 `SemWifiDisplayConfig` 时拒绝并提示回退） | **x64 与原生 ARM64 均完全可控**（Media Foundation 硬解 + 纯 TCP/ADB 转发，不依赖 WFD 网卡） |
+| **Samsung DeX 完整桌面（无线 Miracast — 已隐藏搁置）** | Wi-Fi Direct / Miracast | `[已隐藏搁置]` 依赖微软未公开私有接口 `wlanapi.dll!WlanNotifyVsIeProviderInt` | `[已隐藏搁置]` 同左 | **`[已隐藏搁置]`** 真机复测证实第三方调用未公开 `WlanNotifyVsIeProviderInt` 在高通 `qcwlan8280.sys`（`1.0.4122.4000` WiFiCx）关联时触发内核 `BugCheck 0x0000007E`（`0xC0000005`） | `[系统限制]` 不适用 | **全平台隐藏禁用**（拒绝依赖未公开且可致系统蓝屏的私有驱动接口；无线 DeX 统一由加密 TLS Wi-Fi ADB Native DeX 承担） |
+| **Samsung DeX 完整桌面（ADB 原生回环）** | USB / TLS Wi-Fi ADB（`SemWifiDisplayConfig` `127.0.0.1:7236`） | `[上游证实]` SDK 30+ 存在该 API（需确认旧版 One UI 多窗口/指针行为） | `[上游证实]` 替代停更官方 DeX for PC 的主力方案 | **`[本仓 Fold 8 真机已验证]`** One UI 9.0 / Android 17 有线 USB 与加密 TLS Wi-Fi ADB 均实测通过（1080p60、DXVA 硬解、鼠标悬停/右键/滚轮/动态缩放） | `[系统限制]` 不适用（检测非三星或无 `SemWifiDisplayConfig` 时拒绝并提示回退） | **`windows/arm64` 已真机验证通过**，`x64` 待 M4 真机验证（纯 TCP/ADB 转发，零未公开无线驱动崩溃风险） |
 | **DeX 桌面回退方案（虚拟/模拟显示）** | USB / TLS Wi-Fi ADB（`--new-display` 或 `overlay_display_devices`） | `[上游证实]` `overlay_display_devices` 可触发完整 DeX（手机端有悬浮窗） | `[上游证实]` `--new-display` 无任务栏/最近任务；`overlay_display_devices` 保留多窗口 | `[上游证实]` 仅作兼容回退，UI 明确标注“兼容/虚拟桌面模式，非完整原生 DeX” | `[可用]` 启动 AOSP 自由窗口桌面模式（非 DeX） | **x64 与原生 ARM64 均可用** |
 | **Android 手机主屏镜像（Display 0）** | USB / TLS Wi-Fi ADB（`scrcpy-server v5.0.1`） | `[上游证实]` 60+ FPS、音频、剪贴板、熄屏投屏均可用 | `[上游证实]` 同左 | `[上游证实]` 同左（DRM/`FLAG_SECURE` 应用呈黑屏提示） | `[上游证实]` 全面兼容 Android 11–17 | **x64 与原生 ARM64 原生支持**（Media Foundation DXVA NV12 硬解） |
 | **独立 APP 原生窗口（每应用独立窗口）** | USB / TLS Wi-Fi ADB（`--new-display` + `--flex-display` + `--start-app`） | `[待实机验证]` 支持独立虚拟显示；旧系统动态 resize 表现待测 | `[待实机验证]` 单应用隔离可行；不占用手机主屏 | `[上游证实]` `scrcpy v5.0.1` `--flex-display` 支持 Snap Layouts 动态调分辨率；硬件编码器并发上限约 2–4 路（待 Spike S4 实测） | `[上游证实]` 支持 Android 11+（`resizeableActivity=false` 或系统独占应用除外） | **x64 与原生 ARM64 原生支持**（Win32 独立窗口、任务栏、Alt+Tab、Snap Layouts） |
@@ -135,21 +135,24 @@ flowchart TB
 ## 5. 三种工作模式详细设计与并存方案
 
 ### 5.1 模式一：Samsung DeX 桌面
-1. **双通道自动选择与手动切换**：
-   - 仅打开手机「无线 DeX」且未开启 USB 调试 → 自动走 **Miracast DeX（DeXDesk 协议栈）**；
-   - 设备已通过 USB 或 TLS Wi-Fi ADB 连接且检测为支持 `SemWifiDisplayConfig` 的三星设备 → 默认优先 **ADB Native DeX 回环**（支持真 60 FPS、原生 `/dev/uhid` 光标、音频和剪贴板），同时允许在界面手动切换至 Miracast 或 **虚拟/模拟显示回退**。
-2. **完整 DeX 验收探针**：启动后检查是否真正进入 `com.sec.android.app.desktoplauncher` 桌面环境、多窗口 Freeform 调整、底部任务栏、最近任务（`|||`）和右键/滚轮/悬停行为；若仅能以 `--new-display` 启动全屏桌面（如未触发完整 DeX 模式），UI 必须明确标识为「虚拟桌面兼容模式」并提示原因与回退选项（`overlay_display_devices` 或 Miracast）。
+1. **有线 + 加密无线 ADB 双通道与安全回退（Miracast 因依赖未公开接口已隐藏）**：
+   - 设备通过 **有线 USB ADB** 或 **加密 TLS Wi-Fi ADB（`_adb-tls-connect._tcp`）** 连接且检测为支持 `SemWifiDisplayConfig` 的三星设备 → 默认走 **ADB Native DeX 回环**（支持真 60 FPS、原生鼠标悬停/右键/滚轮、动态缩放、音频与剪贴板，零未公开 Windows 无线驱动崩溃风险），同时允许手动切换至 **虚拟/模拟显示回退**；
+   - **Miracast 方案已全平台隐藏搁置**：第三方 Windows Miracast Sink 必须调用未公开私有接口 `wlanapi.dll!WlanNotifyVsIeProviderInt`，真机实测引发 `qcwlan8280.sys` 内核 `BugCheck 0x0000007E` 蓝屏，故不在界面暴露或运行期启用。
+2. **完整 DeX 验收探针**：启动后校验三星设备身份与 `SemWifiDisplayConfig` 活跃桌面显示、多窗口 Freeform 调整、底部任务栏、最近任务（`|||`）和右键/滚轮/悬停行为；若仅能以 `--new-display` 启动虚拟桌面，UI 必须明确标识为「虚拟桌面兼容模式」（`INV-06`）。
 
 ### 5.2 模式二：Android 手机主屏镜像
 - 基于 `scrcpy-server v5.0.1` Display `0`；
 - 支持：USB / TLS Wi-Fi ADB、UHID 真键盘鼠标或触控模拟切换、设备音频透传、双向剪贴板同步、横竖屏自适应窗口大小、无边框全屏、PNG 截图与直存 MP4 录屏；
 - **亮屏 / 熄屏投屏开关**：通过 `SET_DISPLAY_POWER` 熄灭物理面板同时保持系统未锁屏（提示用户不要按物理电源键以免连带锁屏 DeX），断开时自动恢复亮屏。
 
-### 5.3 模式三：独立 APP 原生窗口
-- 每个选定应用启动一个独立 `mygo.NewWindow`（具备独立 Windows 任务栏图标、Alt+Tab 项、标题栏与缩放边界）；
-- 通过 `scrcpy-server` `--new-display=<W>x<H>/<DPI>` + `--flex-display` + `--start-app=<pkg>` 运行于手机隔离虚拟显示，**手机物理主屏幕可继续自由打开和操作其他应用**；
-- **多窗口并发与 Snap Layouts**：拖动或 Windows Snap Layouts 改变原生窗口宽高时，防抖向对应 `scid` 发送显示尺寸协商或重建指令；
-- **单实例与关闭恢复策略**：若目标应用已在手机主屏运行，检测并提示「迁移到当前窗口」或「留驻主屏」；关闭 Windows 窗口时支持配置「保留后台并移回主屏」或「仅关闭虚拟显示」；启动器中明确标注不兼容 `virtualDisplay` 的应用（如强制锁定竖屏不可缩放、`FLAG_SECURE` 银行/流媒体应用）。
+### 5.3 模式三：独立 APP 原生窗口（对标 AndroMeld 交互体验，下一阶段在 Android 模拟器深入打磨）
+- **当前原型差距记录（2026-11-24 真机桌面实测反馈）**：
+  1. 现有基于 `cmd package query-activities --brief` 的临时芯片栏仅能截取包名尾段（出现 `A4ccf86b27d69a6e1_v2` WebAPK 哈希、`Androidx`、`Ang`、`App` 等无意义缩写），缺少真实本地化应用名称与高清图标；
+  2. 独立窗口尚未剥离虚拟屏的系统装饰与桌面感，体验与 `AndroMeld` 差距明显。
+- **Android 模拟器（`Pixel_9a_API_36`）专项重构设计（洁净室实现，`INV-13`）**：
+  1. **真实应用图标与名称提取器（无需等待 APK 亦可工作）**：在设备端辅助 JAR（`app_process` 调用 `LauncherApps` / `PackageManager.loadLabel` + Adaptive Icon 渲染 PNG，或 M3 Companion APK）拉取真实本地化名称、高清 PNG 图标并自动过滤 WebAPK/测试桩 Activity，桌面端缓存至本地图标目录并以 **独立应用抽屉网格（App Launcher Grid）** 呈现，点击图标即刻单点启动；
+  2. **无系统边框纯应用融合窗口（`vd_system_decorations=false`）**：通过 `scrcpy-server v5.0.1` 显式启用无系统装饰独立虚拟显示（隐藏虚拟屏内的 Android 状态栏、导航栏与桌面壁纸），将对应应用的 PNG 图标与真实应用名直接绑定至 Windows 原生 `mygo.Window` 标题栏与任务栏图标，初始窗口宽高比跟随应用类型（移动端竖屏/自适应横屏），标题栏内聚极简返回/菜单操作；
+  3. **多窗口并发、Snap Layouts 与单实例迁移**：拖动或 Windows Snap Layouts 改变原生窗口宽高时防抖触发 `TYPE_RESIZE_DISPLAY`；通过 `+pkg` 或任务栈迁移避免与手机主屏锁死，关闭窗口时支持配置「保留后台」或「迁回主屏」（`vd_destroy_content=false`），并在启动器标注 `FLAG_SECURE`/强制不可缩放应用。
 
 ### 5.4 三模式并存真值表
 - **主屏镜像 + 独立 APP 窗口（≥2 个）**：允许并存，音频默认跟随当前激活或用户指定的窗口。
@@ -166,6 +169,19 @@ flowchart TB
    - **USB ADB**：自动识别厂商提示与授权对话框引导；不支持时诊断驱动/线缆（例如仅充电线缆速率或连接失败）。
 2. **自动重连与热切换**：记录设备物理硬件序列号关联；USB 意外拔线时在 30 秒宽限期内尝试切至同设备的已配对 TLS Wi-Fi ADB 续接 DeX 或虚拟显示会话（防止重新登录或丢失应用状态）。
 3. **原生视频解码与渲染**：Rust 核心直接调用 Windows Media Foundation `IMFTransform`（DXVA2/D3D11 硬件解码输出 NV12），经零拷贝切片传给 MyGo `ui.Bitmap.UpdateYUV` 由 Direct3D 11 渲染着色器完成色彩空间转换与显示；硬件解码失败时明确回退软解并在 HUD 标注 `[SW]`。
+4. **异网与 5G 远程连接架构（手机 Companion App + 用户自有 VPN / EasyTier 组网，M3–M4 规划）**：
+   - **场景 A：不同 Wi-Fi / 跨子网 + VPN 或 EasyTier**：原生 Android 无线调试（`_adb-tls-connect._tcp`）在切换 Wi-Fi 后随机分配端口。已提前配对密钥的情况下，Android Companion APK（M3）在手机端通过 `NsdManager` 监听本机 `_adb-tls-connect._tcp` 端口变化，并通过 VPN/EasyTier 加密隧道将最新 `<vpn_ip>:<tls_port>` 告知桌面端，直接驱动完整 `scrcpy v5.0.1`、独立 APP 窗口与 **ADB Native DeX**（M1b 桌面端现已支持直接输入 VPN/EasyTier `host:port` 连接）；
+   - **场景 B：纯 5G 蜂窝网络（无 Wi-Fi，无 Root）**：诚实受限于 Android 系统策略（原厂非 Root `adbd` 无线调试要求 `TRANSPORT_WIFI` 网络接口，纯蜂窝链路下原生 `adbd` 无线调试不可开启）；因此纯 5G 场景由手机 Companion APK 通过用户自有 VPN（Tailscale/WireGuard）或 **EasyTier 组网**建立原生 `MediaProjection` + `MediaCodec` H.264/HEVC 视频通道与分级授权 `AccessibilityService` 触控回传通道（全程不绕过 `FLAG_SECURE`/DRM，`INV-09`）；
+   - **EasyTier `--no-tun` 用户态避让设计**：由于 Android 仅允许同时激活一个系统级 `VpnService`，`core/androfuse-core` 集成的 EasyTier 以 **用户态（`--no-tun` + 局部代理/端口映射，不接管全局 `VpnService`）** 运行且默认关闭（`INV-07`），既允许用户继续保留原有 WireGuard/Tailscale/校园 VPN，也可零冲突实现 P2P UDP 打洞直连或私有节点中继，并在广域网高抖动下按 RTT/丢包自适应调节码率与 `TYPE_RESET_VIDEO` IDR 恢复。
+
+### 6.5 Android 模拟器（AVD）持续迭代与 Fold 8 阶段测试分工
+
+| 验证项 | 无真机期间用 Android 模拟器（`Pixel_9a_API_36` 等）覆盖 | 必须真实 Samsung Fold 8 / DeX 硬件（本次已完成实测，发布前复验） |
+|---|---|---|
+| ADB TLS 发现/配对、Emulator 与 VPN 地址连接、`--user 0` 应用清单与权限 | **可全程开发与回归** | 验证 One UI `--user 0` 特殊包行为 |
+| `scrcpy v5.0.1` Display `0` 主屏镜像、独立 APP 窗口（`--flex-display` 多窗口与 Snap Layouts）、Mouse/Touch/IME 控制 | **可全程开发与回归**（非三星设备亦可用于验证 `INV-06` 虚拟回退提示） | 验证 Snapdragon 8850（`SM8850`）多路编码器实测并发上限 |
+| Media Foundation NV12 + `ui.Bitmap.UpdateYUV` 多窗口渲染、HUD、剪贴板、音频、录屏、Companion APK (`M3`) | **可全程开发与回归** | 长期烤机稳定性（30 min 压测） |
+| Samsung Native DeX（`SemWifiDisplayConfig` `127.0.0.1:7236`）、Miracast Wireless DeX（`0.0.0.0:7236`） | **无法替代**（AOSP 模拟器无三星 `SemWifiDisplayConfig` 与无线网卡 P2P） | **本次已采集完整实测数据，后续改动相关协议需保留离线单测，并在正式发布前由用户带真机复测** |
 
 ---
 
@@ -202,35 +218,44 @@ flowchart TB
 
 ## 9. 里程碑规划、先行 Spike 与交付顺序
 
-### M0：项目初始化、深度调研与自检基线（✅ 已完成初始化，紧接 Spike `S1–S4`）
+### M0：项目初始化、深度调研与自检基线（✅ 已完成）
 - **已完成**：仓库初始化（`GPL-3.0-only`）、参考项目代码/许可证审计、`PLAN.md` 与 `doc/en-us/` ↔ `doc/zh-cn/` 双语文档体系、`resources/icon.svg` 全平台 PNG 管线、`core/androfuse-core` ABI v1 + 真实主机自检（Windows 11 ARM64 原生验证、Media Foundation MFT 探针、Wi-Fi Direct 探针）、MyGo 原生 UI 外壳与 `androfuse-svc check`。
-- **紧接技术 Spike（进入 M1 前必须取得实测数据）**：
-  - `S1`：`scrcpy-server v5.0.1` 裸流直连 Media Foundation NV12 硬解 → MyGo `ui.Bitmap.UpdateYUV` 帧延迟、内存与零分配验证；
-  - `S2`：三星真机实测 `SemWifiDisplayConfig` 回环激活与 One UI 7/8/9 DeX 完整性（任务栏、多窗口、最近任务 `|||`、`uhid` 鼠标）；
-  - `S3`：`DeXDesk` Miracast Sink 在 Windows 11 `x64` 与 `ARM64` 无线网卡实测（确认驱动兼容、帧率上限与 UIBC 指针）；
-  - `S4`：单台设备并发多路 `--new-display`（主屏 + DeX + 2 个独立窗口）的硬件编码器极限探测。
 
-### M1：首个可用版本（`0.1.0` — 核心可用闭环）
-- **交付范围**：
-  1. `androfuse-svc` 设备发现（USB ADB + TLS Wi-Fi ADB 二维码/6 位码 mDNS 配对）与集中会话管理 + `leases.json` 租约账本；
-  2. 模式二（Android 手机主屏镜像）：键鼠/UHID、音频、剪贴板、横竖屏、全屏、截图、录屏、亮屏/熄屏；
-  3. 模式三（独立 APP 窗口）：**至少 2 个独立 APP 原生窗口并发运行**（独立任务栏/Alt+Tab/缩放/Snap Layouts、窗口级输入隔离、手机物理主屏可继续正常使用）；
-  4. 异常断线、进程强杀重启后自动清理残留虚拟显示。
-- **Done When**：在真实手机与 Windows 11 上稳定跑通上述闭环且无虚拟屏残留。
+### M1a：协议引擎、原生 NV12 解码、双通道 DeX 与真机 Spike 验证（✅ 协议、离线回放与 Fold 8 实时 S1/S2/S4 均已实测通过）
+- **已完成**：
+  1. `tools/fetchdeps`（固定 SHA-256 校验下载 Apache-2.0 `scrcpy-server-v5.0.1` 至 `.dev/cache/`）与 `tools/builddex` + `server/dexhelper`（无 Root UID 2000 `androfuse-dex-helper.jar`：`probe`/`serve`/`recover`，`SemWifiDisplayConfig` 回环、`127.0.0.1:7236` RTSP M1–M7 与初始 DPI ≥ 160 规则）；
+  2. `core/androfuse-core` **C-ABI v2**：`scrcpy.rs`（`scrcpy v5.0.1` 线协议 + UHID 键鼠描述符）、`miracast.rs`（RTSP/RTP/MPEG-TS/UIBC + Windows `WiFiDirectAdvertisementPublisher`/`WlanNotifyVsIeProviderInt` 接收端广播）、`mf_video.rs`（Media Foundation + D3D11 DXVA H.264/HEVC NV12 解码与 `MF_MT_FRAME_SIZE`/`MF_MT_MINIMUM_DISPLAY_APERTURE` 对齐）及 `androfuse_decoder_open/push/pull_nv12/close`；
+  3. Go 运行时包：`internal/core`（`NV12Ring` 零分配双缓冲）、`internal/lease`（`leases.json` 原子租约账本 `INV-03`）、`internal/adb`（`MaskSerial`/`DeviceHash`/`--user 0` 安全探测）、`internal/scrcpy`（协议编解码、直连 `Session`、脱敏回放样本与 `ui.Bitmap.UpdateYUV` 渲染闭环测试）与 `internal/dex`（回环会话与 One UI 9 `EvaluateTruth` 校验 `INV-06`）；`androfuse-svc probe [--json] [--test-miracast]`；
+  4. **真机与主机实测结果（Fold 8 `SM-F971U1`，Android 17 / SDK 37，One UI 9.0 `90000`，`SM8850` + Windows 11 ARM64 build `26300`）**：
+     - **`Spike S1`（Display 0 → Media Foundation DXVA → `ui.Bitmap.UpdateYUV`）**：H.264（`810x1280`，`hw=true`，`avg_decode_us=4454`）与 HEVC（`810x1280`，`hw=true`，`avg_decode_us=3227`）均在真机实测通过；离线 64×48 回放与稳态 0 分配测试常驻通过；
+     - **`Spike S2`（ADB Native DeX 回环 + UHID）**：`androfuse-dex-helper.jar` 在 One UI 9.0 成功调用 `SemWifiDisplayConfig$Builder` 拉起完整 DeX（`id=12`、`wfd=2`、`1920x1080`、`hw=true`、注入 UHID 鼠标移动；首测发现息屏冷启动偶发连接中止，亮屏后稳定连接，已同步提示至平台文档）；
+     - **`Spike S3`（Miracast 接收端调研结论 — 已全平台隐藏搁置）**：第三方 Windows Miracast 接收必须依赖微软未公开的私有接口 `wlanapi.dll!WlanNotifyVsIeProviderInt`；2026-11-24 在 Windows 11 ARM64（`build 26300`）+ Fold 8 真机实测与重写复测中，外部手机发起 P2P Miracast 关联均直接触发高通无线网卡内核驱动 **`qcwlan8280.sys`（`1.0.4122.4000` WiFiCx）`BugCheck 0x0000007E`（`0xC0000005`，WER 事件 `1019`）蓝屏重启**。鉴于依赖未公开系统内部接口违反稳定性原则，Miracast 方案已在全平台 UI 中隐藏并在运行期禁用，无线 DeX 统一采用已真机验证稳定的 **加密 TLS Wi-Fi ADB Native DeX**；
+     - **`Spike S4`（四路并发 + `flex_display` + `INV-03` 清理）**：真机同屏稳定并发 4 路流（Native DeX `1920x1080` + 计算器 `1080x720` + 时钟 `1080x720` + 主屏 `1080x814`），并实测 `flex_display` 动态 resize 至 `1280x800`（`resizedAck=true`）；退出后 `dumpsys display`（`activeDisplayState=0`）、`adb forward --list` 与 `leases.json` 均为零残留。
 
-### M2：Samsung DeX 双通道（`0.2.0`）
+### M1b：桌面可用闭环（`0.1.0` — 交互桌面窗口与无线接入已部分先行落地，其余可基于模拟器离线开发）
+- **已完成（基于 Fold 8 实时双通道收尾）**：
+  1. **有线 + 无线双通道真实窗口闭环**：`internal/adb` 接入 TLS 无线 mDNS 发现/配对/直连、`MaskEndpoint`（`INV-08`）、`WakeScreen` 冷启动唤醒、`emulator-*` 识别与 `--user 0` 应用枚举；`internal/scrcpy` 接入 `PointerIDMouse`（分显示路由悬停/左键/右键/拖拽）、定点数滚轮、`InjectKeycode`/`InjectText` 与熄屏控制；
+  2. **Rust `androfuse-core` C ABI v3 与桌面原生窗口验证**：桌面端 `androfuse.exe` 在真机上实测验证了有线 USB 与加密 TLS Wi-Fi ADB 下的手机主屏镜像与 **Samsung Native DeX 桌面窗口**（真实画面与键鼠操作正常，崩溃重启前后 `leases.json` 正常回收无残留）；Miracast Sink 因触发 Win11 ARM64 高通网卡驱动 `BugCheck 0x0000007E` 已在代码层默认熔断并在界面移除入口；
+  3. **Fold 8 无线实机验收数据（`TestLiveFold8WirelessAndInteractiveDeX`）**：通过 `_adb-tls-connect._tcp`（`192.*.*.*:38605`）无线直连实现 Native DeX（`id=27`、`1920x1080`、DXVA 硬解 `decode_us=3198`、鼠标悬停/左键/右键/滚轮/Recents 注入通过、动态 `Resize` 至 `1600x900` 自动触发 `scrcpy` 会话重协商 `sessions=2`）与无线主屏镜像（`682x1080` + 熄屏切换）+ 独立计算器窗口（`1080x720`），全链路退出零残留。
+- **待基于 Android 模拟器（`Pixel_9a_API_36`）继续完成 M1b 剩余项**：
+  1. **对标 AndroMeld 重构「独立 APP 窗口」（最高优先级）**：真实应用名称与高清图标提取、独立应用抽屉网格、`vd_system_decorations=false` 纯净无状态栏窗口、Windows 任务栏独立图标与宽高比适配；
+  2. `androfuse-svc run` 守护进程 + `internal/localapi`（Windows AF_UNIX NDJSON + `SIO_AF_UNIX_GETPEERPID` 校验）；
+  3. WASAPI 音频转发、双向剪贴板同步、PNG 截图与直存 MP4 录屏；
+  4. **Done When**：在 Android 模拟器与离线回放套件上通过全套独立应用窗口、多窗口交互与异常恢复集成测试。
+
+### M2：Samsung DeX 完整体验完善与多设备稳态（`0.2.0`）
 - **交付范围**：
-  1. 接入 **ADB Native DeX**（USB & TLS Wi-Fi ADB，`SemWifiDisplayConfig` 回环）与 **Miracast 无线 DeX**（无需开启 USB 调试）；
-  2. 按设备型号与 One UI 版本自动选路、支持用户手动切换通道与安全回退至虚拟/模拟显示，界面明确展示当前实际方案；
+  1. 深化 **ADB Native DeX**（有线 USB & 加密 TLS Wi-Fi ADB，`SemWifiDisplayConfig` 回环；Miracast 方案因依赖未公开接口保持隐藏）与会话中途断线宽限续接；
+  2. 按设备型号与 One UI 版本自动选路、支持用户手动切换至安全回退虚拟显示，界面明确展示当前实际方案（`INV-06`）；
   3. 验证 DeX 多窗口、任务栏、最近任务、右键/滚轮/悬停完整度；支持模式一、模式二、模式三在硬件允许下按并存矩阵协同运行。
-- **Done When**：至少一台支持 DeX 的三星真机完成 Miracast 与 ADB 双通道完整 DeX 验收，非 DeX 机器正确拒绝或走提示后的回退流程。
+- **Done When**：至少一台支持 DeX 的三星真机完成有线 USB 与加密 TLS Wi-Fi 双通道完整 DeX 验收，非 DeX 机器正确拒绝或走提示后的回退流程。
 
 ### M3：Android Companion APK 与跨端协同（`0.3.0`）
 - **交付范围**：
   1. 同仓构建并签名发布可选 **Android Companion APK**（`arm64-v8a`、16 KB 对齐）；
   2. 实现 P1 全部增强能力：应用清单与图标、通知同步与回复、双向剪贴板协助、SAF 文件浏览/双向传输/拖放、设备状态与温控、APP 接力、断线虚拟显示恢复守护（分级权限开关）；
-  3. USB 拔线 30 秒宽限期自动热切换至 TLS Wi-Fi ADB 重连。
-- **Done When**：卸载 Companion APK 时基础 Miracast 与基础 ADB 模式 100% 正常；安装并显式授权后 P1 全部跨端协同功能通过真机端到端验收。
+  3. USB 拔线 30 秒宽限期自动热切换至 TLS Wi-Fi ADB 重连，以及跨 Wi-Fi/5G 结合 VPN 或用户态 EasyTier（`--no-tun`）异网直连。
+- **Done When**：卸载 Companion APK 时基础有线/无线 ADB 模式 100% 正常；安装并显式授权后 P1 全部跨端协同功能通过真机端到端验收。
 
 ### M4：双架构正式发布、Windows 10 评估与长稳打磨（`0.4.0`）
 - **交付范围**：
@@ -257,7 +282,7 @@ flowchart TB
 ### 核心技术风险与缓解预案
 | 风险项 | 影响 | 缓解预案 |
 |---|---|---|
-| Windows `WlanNotifyVsIeProviderInt` 未公开接口在系统更新或部分 ARM64 无线网卡失效 | 无线 Miracast DeX 不可用 | 自检模块提前报错并引导使用 **TLS Wi-Fi ADB Native DeX** 作为等价无线高帧率替代方案 |
+| Windows `WlanNotifyVsIeProviderInt` 未公开接口缺乏稳定性契约且触发高通 `qcwlan8280.sys` 内核蓝屏 | 第三方 Miracast 接收方案不可靠 | **已在全平台隐藏禁用 Miracast 方案**，无线 DeX 统一采用公开稳定的 **加密 TLS Wi-Fi ADB Native DeX** |
 | 三星未来 One UI 更新移除或限制 `SemWifiDisplayConfig` 回环 | ADB Native DeX 失效 | 通过 `CompatCheck` 精确检测并自动提示切换至 Miracast DeX 或透明标注的虚拟/模拟显示回退 |
 | 多独立 APP 窗口触发手机硬件编码器并发上限 | 第 3/4 个窗口初始化失败或黑屏 | Spike S4 实测各芯片典型上限，界面实时显示编码通道余量，超限时拦截新窗口并提示关闭闲置窗口 |
 | Windows 11 ARM64 上第三方工具链夹带 x64 二进制 | 违反原生 ARM64 承诺 | CI 校验所有输出 PE 机器码为 `IMAGE_FILE_MACHINE_ARM64` (`0xAA64`)，且核心自检暴露转译告警 |

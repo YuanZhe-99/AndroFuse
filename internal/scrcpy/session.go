@@ -1,0 +1,622 @@
+package scrcpy
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"os/exec"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/YuanZhe-99/AndroFuse/internal/adb"
+	"github.com/YuanZhe-99/AndroFuse/internal/core"
+	"github.com/YuanZhe-99/AndroFuse/internal/lease"
+)
+
+// LaunchConfig configures a single scrcpy-server v5.0.1 session (Mode 1/2/3).
+//
+// Notes: DisplayID and NewDisplay are mutually exclusive on scrcpy-server CLI;
+// StartAppPackage is sent over the control socket via TYPE_START_APP after attach.
+type LaunchConfig struct {
+	SessionID       string
+	Serial          string
+	DisplayID       int
+	NewDisplay      string // e.g. "1280x800/160" or ""
+	FlexDisplay     bool
+	StartAppPackage string
+	CodecID         uint32 // 0 defaults to CodecH264
+	MaxSize         int
+	MaxFPS          float64
+	VideoBitRate    int
+	EnableControl   bool
+	EnableUHID      bool
+	InitialWidth    uint32
+	InitialHeight   uint32
+	OnFrame         func(core.NV12Frame)
+}
+
+// SessionStats captures honest runtime telemetry for a session (INV-05).
+type SessionStats struct {
+	DeviceName          string  `json:"device_name"`
+	CodecID             uint32  `json:"codec_id"`
+	NegotiatedWidth     uint32  `json:"negotiated_width"`
+	NegotiatedHeight    uint32  `json:"negotiated_height"`
+	SessionCount        int     `json:"session_count"`
+	ClientResizedAck    bool    `json:"client_resized_ack"`
+	PacketsReceived     int     `json:"packets_received"`
+	FramesDecoded       int     `json:"frames_decoded"`
+	AvgDecodeUs         int64   `json:"avg_decode_us"`
+	MeasuredFPS         float64 `json:"measured_fps"`
+	HardwareAccelerated bool    `json:"hardware_accelerated"`
+}
+
+// Session manages sockets, native decoding, control events, and teardown for one
+// scrcpy-server v5.0.1 stream.
+type Session struct {
+	cfg        LaunchConfig
+	adb        *adb.Client
+	lib        *core.Lib
+	leases     *lease.Store
+	scid       uint32
+	fwdPort    int
+	serverCmd  *exec.Cmd
+	videoConn  net.Conn
+	ctrlConn   net.Conn
+	decoder    *core.Decoder
+	ring       core.NV12Ring
+	lastConfig []byte
+	accessUnit []byte
+	readBuf    []byte
+
+	ctrlMu  sync.Mutex
+	mu      sync.Mutex
+	stats   SessionStats
+	lastErr error
+	doneCh  chan struct{}
+	errCh   chan error
+	closed  bool
+}
+
+// BuildServerArgs constructs valid scrcpy-server v5.0.1 key=value options.
+//
+// Notes: Never combines display_id and new_display (scrcpy asserts mutual exclusion),
+// and omits client-only CLI flags like mouse=uhid or start_app.
+func BuildServerArgs(scid uint32, cfg LaunchConfig) []string {
+	codecName := "h264"
+	if cfg.CodecID == CodecH265 {
+		codecName = "h265"
+	}
+	bitRate := cfg.VideoBitRate
+	if bitRate <= 0 {
+		bitRate = 8_000_000
+	}
+	ctrl := cfg.EnableControl
+	if cfg.EnableUHID || cfg.FlexDisplay || cfg.StartAppPackage != "" {
+		ctrl = true
+	}
+
+	args := []string{
+		ServerVersion,
+		fmt.Sprintf("scid=%08x", scid),
+		"log_level=info",
+		"tunnel_forward=true",
+		"audio=false",
+		"video=true",
+		"control=" + strconv.FormatBool(ctrl),
+		"video_codec=" + codecName,
+		fmt.Sprintf("video_bit_rate=%d", bitRate),
+		"cleanup=true",
+		"power_on=true",
+	}
+	if cfg.MaxSize > 0 {
+		args = append(args, fmt.Sprintf("max_size=%d", cfg.MaxSize))
+	}
+	if cfg.MaxFPS > 0 {
+		args = append(args, fmt.Sprintf("max_fps=%.2f", cfg.MaxFPS))
+	}
+	if cfg.NewDisplay != "" {
+		args = append(args, "new_display="+cfg.NewDisplay)
+		if cfg.FlexDisplay {
+			args = append(args, "flex_display=true")
+		}
+	} else if cfg.DisplayID > 0 {
+		args = append(args, fmt.Sprintf("display_id=%d", cfg.DisplayID))
+	}
+	return args
+}
+
+// StartADB pushes scrcpy-server-v5.0.1, acquires its lease, forwards the abstract
+// socket, launches app_process, and connects directly to TCP without spawning scrcpy.exe.
+func StartADB(ctx context.Context, client *adb.Client, lib *core.Lib, store *lease.Store, cfg LaunchConfig) (*Session, error) {
+	if client == nil || lib == nil {
+		return nil, errors.New("adb client and core library are required")
+	}
+	serverPath, err := FindCachedServer()
+	if err != nil {
+		return nil, err
+	}
+	scid, err := RandomSCID()
+	if err != nil {
+		return nil, err
+	}
+	if cfg.CodecID == 0 {
+		cfg.CodecID = CodecH264
+	}
+	if cfg.SessionID == "" {
+		cfg.SessionID = fmt.Sprintf("scrcpy-%08x", scid)
+	}
+	if err := client.PushFile(ctx, cfg.Serial, serverPath, RemoteServerPath); err != nil {
+		return nil, fmt.Errorf("push scrcpy-server: %w", err)
+	}
+
+	port, err := client.ForwardTCP(ctx, cfg.Serial, 0, SocketName(scid))
+	if err != nil {
+		return nil, fmt.Errorf("forward %s: %w", SocketName(scid), err)
+	}
+	if store != nil {
+		kind := lease.KindMirror
+		if cfg.NewDisplay != "" {
+			kind = lease.KindVirtualDisplay
+		}
+		if err := store.Acquire(lease.Lease{
+			SessionID:   cfg.SessionID,
+			DeviceHash:  adb.DeviceHash(cfg.Serial),
+			Kind:        kind,
+			DisplayID:   cfg.DisplayID,
+			ForwardPort: port,
+			AppPackage:  cfg.StartAppPackage,
+		}); err != nil {
+			_ = client.RemoveForward(context.Background(), cfg.Serial, port)
+			return nil, err
+		}
+	}
+
+	serverArgs := BuildServerArgs(scid, cfg)
+	shellCmd := fmt.Sprintf("CLASSPATH=%s app_process / com.genymobile.scrcpy.Server %s",
+		RemoteServerPath, strings.Join(serverArgs, " "))
+	cmd := exec.Command(client.Path, "-s", cfg.Serial, "shell", shellCmd)
+	var outBuf bytes.Buffer
+	cmd.Stdout = &outBuf
+	cmd.Stderr = &outBuf
+	if err := cmd.Start(); err != nil {
+		_ = client.RemoveForward(context.Background(), cfg.Serial, port)
+		if store != nil {
+			_ = store.Release(cfg.SessionID)
+		}
+		return nil, fmt.Errorf("start scrcpy-server: %w", err)
+	}
+
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	videoConn, err := dialWithRetry(ctx, addr, 10*time.Second)
+	if err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		_ = client.RemoveForward(context.Background(), cfg.Serial, port)
+		if store != nil {
+			_ = store.Release(cfg.SessionID)
+		}
+		return nil, fmt.Errorf("connect video socket (%s): %w (%s)", addr, err, strings.TrimSpace(outBuf.String()))
+	}
+
+	ctrlNeeded := cfg.EnableControl || cfg.EnableUHID || cfg.FlexDisplay || cfg.StartAppPackage != ""
+	var ctrlConn net.Conn
+	if ctrlNeeded {
+		ctrlConn, err = net.DialTimeout("tcp", addr, 5*time.Second)
+		if err != nil {
+			_ = videoConn.Close()
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+			_ = client.RemoveForward(context.Background(), cfg.Serial, port)
+			if store != nil {
+				_ = store.Release(cfg.SessionID)
+			}
+			return nil, fmt.Errorf("connect control socket: %w", err)
+		}
+	}
+
+	s, err := StartFromConns(lib, store, client, scid, port, cmd, videoConn, ctrlConn, true, cfg)
+	if err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+// StartFromConns attaches a Session over already-opened video/control sockets
+// (used by both live ADB sessions and offline MockServer replay tests).
+func StartFromConns(
+	lib *core.Lib,
+	store *lease.Store,
+	client *adb.Client,
+	scid uint32,
+	fwdPort int,
+	cmd *exec.Cmd,
+	videoConn net.Conn,
+	ctrlConn net.Conn,
+	hasDummyByte bool,
+	cfg LaunchConfig,
+) (*Session, error) {
+	hs, err := ReadVideoHandshake(videoConn, hasDummyByte)
+	if err != nil {
+		if ctrlConn != nil {
+			_ = ctrlConn.Close()
+		}
+		_ = videoConn.Close()
+		return nil, err
+	}
+	w, h := cfg.InitialWidth, cfg.InitialHeight
+	if w == 0 || h == 0 {
+		w, h = 1280, 720
+	}
+	dec, err := lib.OpenDecoder(hs.CodecID, w, h)
+	if err != nil {
+		if ctrlConn != nil {
+			_ = ctrlConn.Close()
+		}
+		_ = videoConn.Close()
+		return nil, err
+	}
+
+	s := &Session{
+		cfg:       cfg,
+		adb:       client,
+		lib:       lib,
+		leases:    store,
+		scid:      scid,
+		fwdPort:   fwdPort,
+		serverCmd: cmd,
+		videoConn: videoConn,
+		ctrlConn:  ctrlConn,
+		decoder:   dec,
+		stats: SessionStats{
+			DeviceName: hs.DeviceName,
+			CodecID:    hs.CodecID,
+		},
+		doneCh: make(chan struct{}),
+		errCh:  make(chan error, 1),
+	}
+
+	if ctrlConn != nil {
+		if cfg.EnableUHID {
+			if err := s.SendControl(EncodeUhidCreate(1, 0x18d1, 0xaf01, "AndroFuse Mouse", UHIDMouseReportDesc)); err != nil {
+				s.Close()
+				return nil, err
+			}
+			if err := s.SendControl(EncodeUhidCreate(2, 0x18d1, 0xaf02, "AndroFuse Keyboard", UHIDKeyboardReportDesc)); err != nil {
+				s.Close()
+				return nil, err
+			}
+		}
+		if cfg.StartAppPackage != "" {
+			if err := s.SendControl(EncodeStartApp(cfg.StartAppPackage)); err != nil {
+				s.Close()
+				return nil, err
+			}
+		}
+		go s.controlReadLoop()
+	}
+
+	go s.videoLoop()
+	return s, nil
+}
+
+// SendControl writes one encoded control packet on the scrcpy control socket.
+func (s *Session) SendControl(pkt []byte) error {
+	s.mu.Lock()
+	c := s.ctrlConn
+	s.mu.Unlock()
+	if c == nil {
+		return errors.New("control socket unavailable")
+	}
+	s.ctrlMu.Lock()
+	defer s.ctrlMu.Unlock()
+	_ = c.SetWriteDeadline(time.Now().Add(500 * time.Millisecond))
+	_, err := c.Write(pkt)
+	_ = c.SetWriteDeadline(time.Time{})
+	return err
+}
+
+// Resize requests a dynamic flex-display size update (TYPE_RESIZE_DISPLAY).
+func (s *Session) Resize(width, height uint16) error {
+	return s.SendControl(EncodeResizeDisplay(width, height))
+}
+
+// InjectTouch sends an absolute touch or mouse MotionEvent onto the session display (INV-12).
+func (s *Session) InjectTouch(action byte, pointerID uint64, x, y int32, screenW, screenH, pressure uint16, actionButton, buttons uint32) error {
+	return s.SendControl(EncodeInjectTouch(action, pointerID, x, y, screenW, screenH, pressure, actionButton, buttons))
+}
+
+// InjectScroll sends a horizontal/vertical scroll event at (x, y) on the session display.
+func (s *Session) InjectScroll(x, y int32, screenW, screenH uint16, hScroll, vScroll float64, buttons uint32) error {
+	return s.SendControl(EncodeInjectScroll(x, y, screenW, screenH, hScroll, vScroll, buttons))
+}
+
+// InjectKeycode sends a key down/up event with Android meta modifier flags.
+func (s *Session) InjectKeycode(action byte, keycode, repeat, metaState uint32) error {
+	return s.SendControl(EncodeInjectKeycode(action, keycode, repeat, metaState))
+}
+
+// TapKeycode sends a press and release for a single Android keycode (e.g. Back, Home, Recents).
+func (s *Session) TapKeycode(keycode uint32) error {
+	if err := s.InjectKeycode(KeyActionDown, keycode, 0, 0); err != nil {
+		return err
+	}
+	return s.InjectKeycode(KeyActionUp, keycode, 0, 0)
+}
+
+// InjectText inserts UTF-8 text via scrcpy TYPE_INJECT_TEXT (1).
+func (s *Session) InjectText(text string) error {
+	if text == "" {
+		return nil
+	}
+	return s.SendControl(EncodeInjectText(text))
+}
+
+// SetDisplayPower toggles the device's physical panel power while keeping mirroring active.
+func (s *Session) SetDisplayPower(on bool) error {
+	return s.SendControl(EncodeSetDisplayPower(on))
+}
+
+// RotateDevice requests device orientation rotation via TYPE_ROTATE_DEVICE (11).
+func (s *Session) RotateDevice() error {
+	return s.SendControl(EncodeRotateDevice())
+}
+
+// MoveUHIDMouse injects a relative HID mouse movement packet onto UHID device 1.
+func (s *Session) MoveUHIDMouse(buttons uint8, dx, dy, wheel int8) error {
+	return s.SendControl(EncodeUhidInput(1, []byte{buttons & 0x1F, byte(dx), byte(dy), byte(wheel)}))
+}
+
+// Done closes when the video read loop exits.
+func (s *Session) Done() <-chan struct{} {
+	return s.doneCh
+}
+
+// Err returns the terminal error of the video loop once Done() closes (nil on clean EOF/close).
+func (s *Session) Err() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if errors.Is(s.lastErr, io.EOF) {
+		return nil
+	}
+	return s.lastErr
+}
+
+// Stats returns a snapshot of honest runtime video telemetry (INV-05).
+func (s *Session) Stats() SessionStats {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.stats
+}
+
+// WaitDecoded blocks until at least minFrames are decoded or timeout expires.
+func (s *Session) WaitDecoded(minFrames int, timeout time.Duration) (SessionStats, error) {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		st := s.Stats()
+		if st.FramesDecoded >= minFrames {
+			return st, nil
+		}
+		select {
+		case err := <-s.errCh:
+			if err != nil && !errors.Is(err, io.EOF) {
+				return st, err
+			}
+			return s.Stats(), nil
+		default:
+		}
+		time.Sleep(15 * time.Millisecond)
+	}
+	st := s.Stats()
+	if st.FramesDecoded >= minFrames {
+		return st, nil
+	}
+	return st, fmt.Errorf("timed out waiting for %d decoded frames (got %d packets, %d decoded)", minFrames, st.PacketsReceived, st.FramesDecoded)
+}
+
+// Close tears down sockets, waits for scrcpy-server cleanup, removes ADB port forwards,
+// destroys the native decoder, and releases the session lease.
+func (s *Session) Close() {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return
+	}
+	s.closed = true
+	ctrl := s.ctrlConn
+	vid := s.videoConn
+	dec := s.decoder
+	cmd := s.serverCmd
+	s.mu.Unlock()
+
+	if ctrl != nil {
+		_ = ctrl.Close()
+	}
+	if vid != nil {
+		_ = vid.Close()
+	}
+	<-s.doneCh
+
+	if cmd != nil && cmd.Process != nil {
+		done := make(chan error, 1)
+		go func() { done <- cmd.Wait() }()
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+			_ = cmd.Process.Kill()
+			<-done
+		}
+	}
+	if dec != nil {
+		dec.Close()
+	}
+	if s.adb != nil && s.fwdPort > 0 {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		_ = s.adb.RemoveForward(ctx, s.cfg.Serial, s.fwdPort)
+		cancel()
+	}
+	if s.leases != nil && s.cfg.SessionID != "" {
+		_ = s.leases.Release(s.cfg.SessionID)
+	}
+}
+
+func (s *Session) controlReadLoop() {
+	for {
+		_, err := ReadDeviceMessage(s.ctrlConn)
+		if err != nil {
+			return
+		}
+	}
+}
+
+func (s *Session) videoLoop() {
+	defer close(s.doneCh)
+	started := time.Now()
+	winStart := started
+	var winFrames int
+	var totalDecodeUs int64
+
+	recordFrame := func(frame core.NV12Frame) {
+		totalDecodeUs += int64(frame.DecodeUs)
+		winFrames++
+		now := time.Now()
+		s.mu.Lock()
+		s.stats.FramesDecoded++
+		if frame.Width > 0 && frame.Height > 0 {
+			s.stats.NegotiatedWidth = uint32(frame.Width)
+			s.stats.NegotiatedHeight = uint32(frame.Height)
+		}
+		s.stats.HardwareAccelerated = frame.Hardware
+		if s.stats.FramesDecoded > 0 {
+			s.stats.AvgDecodeUs = totalDecodeUs / int64(s.stats.FramesDecoded)
+		}
+		if dt := now.Sub(winStart).Seconds(); dt >= 0.5 {
+			s.stats.MeasuredFPS = float64(winFrames) / dt
+			winStart = now
+			winFrames = 0
+		} else if tot := now.Sub(started).Seconds(); tot > 0 && s.stats.MeasuredFPS == 0 {
+			s.stats.MeasuredFPS = float64(s.stats.FramesDecoded) / tot
+		}
+		s.mu.Unlock()
+		if s.cfg.OnFrame != nil {
+			s.cfg.OnFrame(frame)
+		}
+	}
+
+	failLoop := func(err error) {
+		s.mu.Lock()
+		s.lastErr = err
+		s.mu.Unlock()
+		select {
+		case s.errCh <- err:
+		default:
+		}
+	}
+
+	for {
+		pkt, err := ReadVideoPacket(s.videoConn, &s.readBuf)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				_ = s.decoder.Flush()
+				if frame, ok, pErr := s.decoder.PullInto(&s.ring); pErr == nil && ok {
+					recordFrame(frame)
+				}
+			}
+			failLoop(err)
+			return
+		}
+		if pkt.IsSession {
+			s.mu.Lock()
+			s.stats.NegotiatedWidth = pkt.Width
+			s.stats.NegotiatedHeight = pkt.Height
+			s.stats.SessionCount++
+			if pkt.ClientResized {
+				s.stats.ClientResizedAck = true
+			}
+			s.mu.Unlock()
+			continue
+		}
+
+		s.mu.Lock()
+		s.stats.PacketsReceived++
+		s.mu.Unlock()
+
+		if pkt.IsConfig {
+			s.lastConfig = append(s.lastConfig[:0], pkt.Payload...)
+			continue
+		}
+
+		s.accessUnit = s.accessUnit[:0]
+		if pkt.IsKeyframe && len(s.lastConfig) > 0 && !bytes.HasPrefix(pkt.Payload, s.lastConfig) {
+			s.accessUnit = append(s.accessUnit, s.lastConfig...)
+		}
+		s.accessUnit = append(s.accessUnit, pkt.Payload...)
+
+		if err := s.decoder.Push(s.accessUnit, pkt.PtsUs, pkt.IsKeyframe); err != nil {
+			failLoop(err)
+			return
+		}
+		frame, ok, err := s.decoder.PullInto(&s.ring)
+		if err != nil {
+			failLoop(err)
+			return
+		}
+		if ok {
+			recordFrame(frame)
+		}
+	}
+}
+
+func dialWithRetry(ctx context.Context, addr string, timeout time.Duration) (net.Conn, error) {
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		c, err := net.DialTimeout("tcp", addr, 500*time.Millisecond)
+		if err == nil {
+			// Wait briefly for the first readable byte (dummy byte) because adb forward accepts immediately.
+			_ = c.SetReadDeadline(time.Now().Add(400 * time.Millisecond))
+			if tcp, ok := c.(*net.TCPConn); ok {
+				_ = tcp.SetNoDelay(true)
+			}
+			var peek [1]byte
+			_, pErr := c.Read(peek[:])
+			if pErr == nil {
+				_ = c.SetReadDeadline(time.Time{})
+				// Wrap conn with already-consumed first byte preserved.
+				return &prefixedConn{Conn: c, first: peek[0], unread: true}, nil
+			}
+			_ = c.Close()
+			lastErr = pErr
+		} else {
+			lastErr = err
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return nil, fmt.Errorf("scrcpy socket not ready: %w", lastErr)
+}
+
+type prefixedConn struct {
+	net.Conn
+	first  byte
+	unread bool
+}
+
+func (p *prefixedConn) Read(b []byte) (int, error) {
+	if p.unread && len(b) > 0 {
+		b[0] = p.first
+		p.unread = false
+		if len(b) == 1 {
+			return 1, nil
+		}
+		n, err := p.Conn.Read(b[1:])
+		return n + 1, err
+	}
+	return p.Conn.Read(b)
+}
