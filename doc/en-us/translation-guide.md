@@ -23,3 +23,6 @@ Authoritative English → Simplified Chinese glossary for AndroFuse documentatio
 | Android Emulator (AVD) | Android 模拟器（AVD） | Local virtual Android target (`emulator-*`) for offline iteration |
 | Mouse Mode | 鼠标模式 | Per-display `PointerIDMouse` hover, click, right-click, and scroll forwarding |
 | Touch Mode | 触控模式 | `PointerIDGenericFinger` direct touchscreen/swipe emulation |
+| App Launcher Grid | 应用启动器网格 | Tile grid displaying real localized Android app names and cached 96x96 PNG icons |
+| Chromeless App Window | 无系统边框独立应用窗口 | Virtual-display app window launched with `vd_system_decorations=false` and native titlebar |
+| Fragmented MP4 Recording | 分片 MP4 直存录屏 | Zero-reencode H.264 Annex-B muxing into `ftyp`/`moov`/`moof`/`mdat` |

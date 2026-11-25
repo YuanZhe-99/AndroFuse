@@ -24,22 +24,32 @@ const (
 	winGlyph    float32 = 10
 	mobileBreak float32 = 640
 
-	hudHeight     float32 = 42
-	stageBgHex    string  = "#0B0F12"
-	hudBgDark     string  = "#161E24"
-	pillRadius    float32 = 999
-	badgePadV     float32 = 3
-	badgePadH     float32 = 8
-	sessionDefW   int     = 1180
-	sessionDefH   int     = 720
-	mirrorDefW    int     = 460
-	mirrorDefH    int     = 840
-	appWinDefW    int     = 960
-	appWinDefH    int     = 680
-	sessionMinW   int     = 360
-	sessionMinH   int     = 320
-	resizeSnapPx  int     = 8
-	resizeMinDiff float32 = 24
+	hudHeight       float32 = 42
+	stageBgHex      string  = "#0B0F12"
+	hudBgDark       string  = "#161E24"
+	pillRadius      float32 = 999
+	badgePadV       float32 = 3
+	badgePadH       float32 = 8
+	sessionDefW     int     = 1180
+	sessionDefH     int     = 720
+	mirrorDefW      int     = 460
+	mirrorDefH      int     = 840
+	appWinDefW      int     = 960
+	appWinDefH      int     = 680
+	appWinPortraitW int     = 420
+	appWinPortraitH int     = 780
+	appTileW        float32 = 96
+	appTileIconSz   float32 = 44
+	appTilePadV     float32 = 10
+	appTilePadH     float32 = 6
+	appTileRadius   float32 = 10
+	appTitleBarH    float32 = 38
+	appTitleIconSz  float32 = 18
+	appMinResizePx  int     = 320
+	sessionMinW     int     = 360
+	sessionMinH     int     = 320
+	resizeSnapPx    int     = 16
+	resizeMinDiff   float32 = 24
 )
 
 var (

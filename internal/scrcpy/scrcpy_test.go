@@ -21,10 +21,12 @@ import (
 
 func TestBuildServerArgsAndEncoders(t *testing.T) {
 	args := BuildServerArgs(0x1234abcd, LaunchConfig{
-		NewDisplay:      "1280x800/160",
-		FlexDisplay:     true,
-		StartAppPackage: "com.sec.android.app.clockpackage",
-		DisplayID:       4, // must be ignored when NewDisplay is set
+		NewDisplay:            "1280x800/160",
+		FlexDisplay:           true,
+		HideSystemDecorations: true,
+		KeepContentOnClose:    true,
+		StartAppPackage:       "com.sec.android.app.clockpackage",
+		DisplayID:             4, // must be ignored when NewDisplay is set
 	})
 	joined := strings.Join(args, " ")
 	if strings.Contains(joined, "display_id=") {
@@ -33,7 +35,10 @@ func TestBuildServerArgsAndEncoders(t *testing.T) {
 	if strings.Contains(joined, "start_app=") || strings.Contains(joined, "uhid") {
 		t.Fatalf("unexpected control-only flag in server args: %s", joined)
 	}
-	if !strings.Contains(joined, "new_display=1280x800/160") || !strings.Contains(joined, "flex_display=true") {
+	if !strings.Contains(joined, "new_display=1280x800/160") ||
+		!strings.Contains(joined, "flex_display=true") ||
+		!strings.Contains(joined, "vd_system_decorations=false") ||
+		!strings.Contains(joined, "vd_destroy_content=false") {
 		t.Fatalf("missing virtual display args: %s", joined)
 	}
 

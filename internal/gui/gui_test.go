@@ -1,7 +1,13 @@
 package gui
 
 import (
+	"bytes"
+	"image"
+	"image/color"
+	"image/png"
 	"math"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/egoist/mygo/i18n"
@@ -69,11 +75,10 @@ func testApp(t *testing.T) *App {
 				Label:        "Samsung Native DeX (ADB Loopback)",
 			},
 			Apps: []adb.AppEntry{
-				{Package: "com.android.settings", Label: "Settings"},
-				{Package: "com.android.calculator2", Label: "Calculator2"},
+				{Package: "com.android.settings", Label: "Settings", System: true, Resizeable: true},
+				{Package: "com.android.calculator2", Label: "Calculator", System: false, Resizeable: true},
 			},
-			SelectedApp: "com.android.calculator2",
-			Probed:      true,
+			Probed: true,
 		},
 		{
 			Target: adb.Device{
@@ -94,6 +99,10 @@ func testApp(t *testing.T) *App {
 				Backend:      dex.BackendVirtualFallback,
 				IsGenuineDeX: false,
 				Label:        "Virtual Desktop Fallback (Non-Samsung)",
+			},
+			Apps: []adb.AppEntry{
+				{Package: "com.android.settings", Label: "Settings", System: true, Resizeable: true},
+				{Package: "com.google.android.deskclock", Label: "Clock", System: true, Resizeable: false},
 			},
 			Probed: true,
 		},
@@ -217,6 +226,59 @@ func TestSessionWindowRenderAndInputMapping(t *testing.T) {
 			img := tt.Image()
 			if img.Bounds().Dx() != 960 || img.Bounds().Dy() != 640 {
 				t.Fatalf("unexpected SessionWindow bounds: %v", img.Bounds())
+			}
+		}
+	}
+
+	// Render chromeless Independent App Window with a decoded PNG app icon.
+	iconImg := image.NewRGBA(image.Rect(0, 0, 24, 24))
+	for y := range 24 {
+		for x := range 24 {
+			iconImg.Set(x, y, color.RGBA{R: 29, G: 111, B: 79, A: 255})
+		}
+	}
+	var iconBuf bytes.Buffer
+	if err := png.Encode(&iconBuf, iconImg); err != nil {
+		t.Fatalf("png.Encode: %v", err)
+	}
+	iconPath := filepath.Join(t.TempDir(), "calc.png")
+	if err := os.WriteFile(iconPath, iconBuf.Bytes(), 0o600); err != nil {
+		t.Fatalf("WriteFile icon: %v", err)
+	}
+	iconRaw, _ := os.ReadFile(iconPath)
+	appIconBmp, err := ui.DecodeBitmap(iconRaw)
+	if err != nil {
+		t.Fatalf("ui.DecodeBitmap: %v", err)
+	}
+	appWin := newSessionWindow(nil, SessionSpec{
+		ID:           "app-test",
+		Title:        "Calculator",
+		Mode:         SessionModeApp,
+		Transport:    "Emulator",
+		BackendLabel: "Calculator",
+		TargetSpec:   "540×960 flex · 60 fps",
+		AllowResize:  true,
+		AppIcon:      appIconBmp,
+		AppPackage:   "com.android.calculator2",
+	})
+	appWin.PushNV12(core.NV12Frame{
+		Width:    vw,
+		Height:   vh,
+		Y:        yuv[:vw*vh],
+		UV:       yuv[vw*vh:],
+		YStride:  vw,
+		UVStride: vw,
+		Hardware: true,
+		DecodeUs: 1900,
+	}, 60.0, 1900)
+	for _, lang := range []string{"en", "zh-Hans"} {
+		i18n.SetLocaleFunc(func() string { return lang })
+		for _, dark := range []bool{false, true} {
+			tt := ui.NewTester(appWin.view, appWinPortraitW, appWinPortraitH)
+			tt.SetDark(dark)
+			tt.Frame()
+			if tt.Image().Bounds().Dx() != appWinPortraitW {
+				t.Fatalf("unexpected appWin bounds: %v", tt.Image().Bounds())
 			}
 		}
 	}

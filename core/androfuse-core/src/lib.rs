@@ -6,15 +6,17 @@ pub mod diag;
 pub mod mf_video;
 pub mod miracast;
 pub mod scrcpy;
+#[cfg(windows)]
+pub mod wasapi_audio;
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 /// C ABI version spoken between Go (`internal/core`) and `androfuse-core`.
-pub const ABI_VERSION: u32 = 3;
+pub const ABI_VERSION: u32 = 4;
 
 static STATE: OnceLock<Mutex<Option<CoreState>>> = OnceLock::new();
 static NEXT_DECODER_ID: AtomicU64 = AtomicU64::new(1);
@@ -38,6 +40,22 @@ fn miracast_map() -> &'static Mutex<HashMap<u64, Mutex<miracast::MiracastReceive
 #[cfg(not(windows))]
 fn miracast_map() -> &'static Mutex<HashMap<u64, ()>> {
     MIRACAST_SESSIONS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+#[cfg(windows)]
+static AUDIO_PLAYERS: OnceLock<Mutex<HashMap<u64, Arc<wasapi_audio::WasapiAudioPlayer>>>> =
+    OnceLock::new();
+#[cfg(not(windows))]
+static AUDIO_PLAYERS: OnceLock<Mutex<HashMap<u64, ()>>> = OnceLock::new();
+
+#[cfg(windows)]
+fn audio_map() -> &'static Mutex<HashMap<u64, Arc<wasapi_audio::WasapiAudioPlayer>>> {
+    AUDIO_PLAYERS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+#[cfg(not(windows))]
+fn audio_map() -> &'static Mutex<HashMap<u64, ()>> {
+    AUDIO_PLAYERS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 #[derive(Debug, Clone)]
@@ -301,6 +319,9 @@ pub extern "C" fn androfuse_stop() {
     }
     if let Ok(mut m) = miracast_map().lock() {
         m.clear();
+    }
+    if let Ok(mut a) = audio_map().lock() {
+        a.clear();
     }
     let mut guard = match state_lock().lock() {
         Ok(g) => g,
@@ -627,6 +648,95 @@ pub extern "C" fn androfuse_miracast_input(
 #[unsafe(no_mangle)]
 pub extern "C" fn androfuse_miracast_stop(handle: u64) {
     if let Ok(mut map) = miracast_map().lock() {
+        map.remove(&handle);
+    }
+}
+
+/// Opens a shared-mode WASAPI PCM audio output stream (`sample_rate` Hz, `channels` channels, s16le).
+///
+/// Ownership: Caller owns the returned opaque handle in `*out_handle` and must release it with
+/// `androfuse_audio_close`.
+///
+/// # Safety
+/// `out_handle` must be a valid writable pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn androfuse_audio_open(
+    sample_rate: u32,
+    channels: u16,
+    out_handle: *mut u64,
+) -> i32 {
+    if out_handle.is_null() {
+        return -1;
+    }
+    catch_unwind(AssertUnwindSafe(|| {
+        #[cfg(windows)]
+        {
+            match wasapi_audio::WasapiAudioPlayer::open(sample_rate, channels) {
+                Ok(player) => {
+                    let id = NEXT_DECODER_ID.fetch_add(1, Ordering::Relaxed);
+                    let mut map = match audio_map().lock() {
+                        Ok(g) => g,
+                        Err(p) => p.into_inner(),
+                    };
+                    map.insert(id, Arc::new(player));
+                    // SAFETY: `out_handle` was checked non-null and is guaranteed writable by caller.
+                    unsafe {
+                        *out_handle = id;
+                    }
+                    0
+                }
+                Err(_) => -3,
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = (sample_rate, channels);
+            -2
+        }
+    }))
+    .unwrap_or(-99)
+}
+
+/// Pushes interleaved signed 16-bit PCM frames to an open WASAPI audio output stream.
+///
+/// # Safety
+/// If `len > 0`, `data` must be valid for `len` readable bytes for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn androfuse_audio_push_pcm(handle: u64, data: *const u8, len: usize) -> i32 {
+    catch_unwind(AssertUnwindSafe(|| {
+        #[cfg(windows)]
+        {
+            // SAFETY: Forwarded from FFI contract requiring `data` valid for `len` bytes.
+            let slice = match unsafe { read_slice(data, len) } {
+                Ok(s) => s,
+                Err(_) => return -1,
+            };
+            let player = {
+                let map = match audio_map().lock() {
+                    Ok(g) => g,
+                    Err(p) => p.into_inner(),
+                };
+                map.get(&handle).cloned()
+            };
+            let Some(player) = player else {
+                return -2;
+            };
+            player.push_pcm(slice);
+            0
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = (handle, data, len);
+            -2
+        }
+    }))
+    .unwrap_or(-99)
+}
+
+/// Closes a WASAPI audio output stream handle and joins its render thread.
+#[unsafe(no_mangle)]
+pub extern "C" fn androfuse_audio_close(handle: u64) {
+    if let Ok(mut map) = audio_map().lock() {
         map.remove(&handle);
     }
 }

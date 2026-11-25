@@ -23,3 +23,6 @@ AndroFuse 文档（`doc/en-us/` → `doc/zh-cn/`）的权威英文→简体中�
 | Android Emulator (AVD) | Android 模拟器（AVD） | 无真机期间用于线下迭代的本地 Android 虚拟设备（`emulator-*`） |
 | Mouse Mode | 鼠标模式 | 按 `display_id` 路由的 `PointerIDMouse` 悬停、左/右键点击与滚轮控制 |
 | Touch Mode | 触控模式 | `PointerIDGenericFinger` 触屏点击与滑动模拟 |
+| App Launcher Grid | 应用启动器网格 | 展示真实本地化 Android 应用名称与 96x96 PNG 缓存图标的瓷砖启动网格 |
+| Chromeless App Window | 无系统边框独立应用窗口 | 通过 `vd_system_decorations=false` 启动并绑定原生标题栏的虚拟屏应用窗口 |
+| Fragmented MP4 Recording | 分片 MP4 直存录屏 | 零重编码将 H.264 Annex-B 封装为 `ftyp`/`moov`/`moof`/`mdat` 分片 MP4 |

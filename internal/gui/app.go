@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -64,6 +65,8 @@ type App struct {
 	pairAddr        string
 	pairCode        string
 	appFilter       string
+	showSystemApps  bool
+	appIcons        map[string]*ui.Bitmap
 	sessions        map[string]*SessionWindow
 }
 
@@ -99,6 +102,7 @@ func New(profile, stateDir string) *App {
 		stateDir: stateDir,
 		prefs:    Prefs{Theme: "system"},
 		page:     string(pageDevices),
+		appIcons: make(map[string]*ui.Bitmap),
 		sessions: make(map[string]*SessionWindow),
 	}
 	a.loadPrefs()
@@ -667,52 +671,127 @@ func (a *App) devicesPage(c *ui.Context, k tokens) {
 				})
 
 				if len(d.Apps) > 0 {
-					ui.Row(c.Key(devKey + "-appbar")).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
-						ui.TextInput(c.Key(devKey+"-filter"), &a.appFilter).Placeholder(L.AppFilterHint()).Grow(1)
-						selLabel := d.SelectedApp
-						for _, ap := range d.Apps {
-							if ap.Package == d.SelectedApp {
-								selLabel = ap.Label
-								break
-							}
-						}
-						if ui.Button(c.Key(devKey+"-openapp"), L.ActionLaunchApp()+": "+selLabel).Children(func() {
-							ui.Icon(c, iconApps).Size(14, 14)
-						}).Clicked() {
-							a.LaunchAppWindow(d, d.SelectedApp, selLabel)
-						}
-					})
-					filter := strings.ToLower(strings.TrimSpace(a.appFilter))
-					ui.Row(c.Key(devKey + "-apps")).Gap(6).Wrap().Children(func() {
-						shown := 0
-						for _, ap := range d.Apps {
-							if filter != "" && !strings.Contains(strings.ToLower(ap.Label), filter) && !strings.Contains(strings.ToLower(ap.Package), filter) {
-								continue
-							}
-							if shown >= 8 {
-								break
-							}
-							shown++
-							chosen := ap.Package == d.SelectedApp
-							lbl := ap.Label
-							if chosen {
-								lbl = "✓ " + lbl
-							}
-							if ui.Button(c.Key(devKey+"-ap-"+ap.Package), lbl).Clicked() {
-								a.mu.Lock()
-								for i := range a.devices {
-									if a.devices[i].Target.Serial == d.Target.Serial {
-										a.devices[i].SelectedApp = ap.Package
-									}
-								}
-								a.mu.Unlock()
-							}
-						}
-					})
+					a.appLauncherSection(c, k, devKey, d)
 				}
 			})
 		}
 	})
+}
+
+func (a *App) appIconFor(iconPath string) *ui.Bitmap {
+	if iconPath == "" {
+		return nil
+	}
+	a.mu.Lock()
+	bmp := a.appIcons[iconPath]
+	a.mu.Unlock()
+	return bmp
+}
+
+func (a *App) appLauncherSection(c *ui.Context, k tokens, devKey string, d DiscoveredDevice) {
+	t := c.Theme()
+	a.mu.Lock()
+	showSys := a.showSystemApps
+	a.mu.Unlock()
+
+	userCount := 0
+	for _, ap := range d.Apps {
+		if !ap.System {
+			userCount++
+		}
+	}
+	includeSystem := showSys || userCount == 0
+
+	filter := strings.ToLower(strings.TrimSpace(a.appFilter))
+	var visible []adb.AppEntry
+	for _, ap := range d.Apps {
+		if !includeSystem && ap.System && filter == "" {
+			continue
+		}
+		if filter != "" &&
+			!strings.Contains(strings.ToLower(ap.Label), filter) &&
+			!strings.Contains(strings.ToLower(ap.Package), filter) {
+			continue
+		}
+		visible = append(visible, ap)
+	}
+
+	ui.Column(c.Key(devKey + "-launcher")).FillWidth().Gap(10).Children(func() {
+		ui.Row(c.Key(devKey + "-appbar")).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
+			ui.Icon(c, iconApps).Size(16, 16).TextColor(k.brand)
+			ui.Text(c, L.AppLauncherTitle()).Bold().FontSize(sizeBody)
+			ui.Row(c).Padding(badgePadV, badgePadH).Radius(pillRadius).Background(k.brandSoft).Children(func() {
+				ui.Text(c, L.AppCountBadge(len(visible))).FontSize(sizeSmall).TextColor(k.brand).Bold().SingleLine()
+			})
+			ui.TextInput(c.Key(devKey+"-filter"), &a.appFilter).Placeholder(L.AppFilterHint()).Grow(1)
+			if userCount > 0 {
+				sysLbl := L.AppShowSystem()
+				if showSys {
+					sysLbl = L.AppHideSystem()
+				}
+				if ui.Button(c.Key(devKey+"-togglesys"), sysLbl).Clicked() {
+					a.mu.Lock()
+					a.showSystemApps = !a.showSystemApps
+					a.mu.Unlock()
+				}
+			}
+		})
+
+		const maxVisibleTiles = 48
+		shown := visible
+		if len(shown) > maxVisibleTiles {
+			shown = shown[:maxVisibleTiles]
+		}
+		ui.Row(c.Key(devKey + "-appgrid")).FillWidth().Gap(8).Wrap().Children(func() {
+			for _, ap := range shown {
+				appItem := ap
+				tip := appItem.Label + " (" + appItem.Package + ")"
+				if !appItem.Resizeable {
+					tip += " · " + L.AppUnresizeableNote()
+				}
+				tile := ui.ButtonBase(c.Key(devKey+"-tile-"+appItem.Package)).
+					Width(appTileW).
+					Padding(appTilePadV, appTilePadH).
+					Radius(appTileRadius).
+					Center().
+					Label(appItem.Label).
+					Tooltip(tip)
+				if tile.Hovered() {
+					tile.Background(t.SurfaceHover)
+				} else {
+					tile.Background(t.Background)
+				}
+				tile.Border(1, t.Border)
+				tile.Children(func() {
+					ui.Column(c).Gap(6).AlignItems(ui.Center).FillWidth().Children(func() {
+						if bmp := a.appIconFor(appItem.IconPath); bmp != nil {
+							ui.Image(c, bmp).Size(appTileIconSz, appTileIconSz).Radius(10)
+						} else {
+							ui.Box(c).Size(appTileIconSz, appTileIconSz).Radius(10).Background(k.brandSoft).Center().Children(func() {
+								ui.Text(c, appInitial(appItem.Label)).Bold().FontSize(sizeHeading).TextColor(k.brand)
+							})
+						}
+						ui.Text(c, appItem.Label).FontSize(sizeSmall).SingleLine()
+					})
+				})
+				if tile.Clicked() {
+					a.LaunchAppWindow(d, appItem)
+				}
+			}
+		})
+	})
+}
+
+func appInitial(label string) string {
+	label = strings.TrimSpace(label)
+	if label == "" {
+		return "?"
+	}
+	r, _ := utf8.DecodeRuneInString(label)
+	if r == utf8.RuneError {
+		return "?"
+	}
+	return strings.ToUpper(string(r))
 }
 
 func (a *App) modesPage(c *ui.Context, k tokens) {

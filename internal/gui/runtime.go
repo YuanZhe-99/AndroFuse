@@ -5,10 +5,13 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/egoist/mygo/ui"
 
 	"github.com/YuanZhe-99/AndroFuse/internal/adb"
 	"github.com/YuanZhe-99/AndroFuse/internal/core"
@@ -19,17 +22,16 @@ import (
 	L "github.com/YuanZhe-99/AndroFuse/locales"
 )
 
-// DiscoveredDevice holds inspected metadata, DeX capabilities, and selectable user-0 apps
+// DiscoveredDevice holds inspected metadata, DeX capabilities, and user-0 launchable apps
 // for one online ADB transport (USB wired, TLS Wi-Fi wireless, or Android Emulator).
 type DiscoveredDevice struct {
-	Target      adb.Device
-	Profile     adb.DeviceProfile
-	DexProbe    dex.ProbeReport
-	TruthDeX    dex.TruthVerdict
-	Apps        []adb.AppEntry
-	SelectedApp string
-	Probed      bool
-	ProbeErr    string
+	Target   adb.Device
+	Profile  adb.DeviceProfile
+	DexProbe dex.ProbeReport
+	TruthDeX dex.TruthVerdict
+	Apps     []adb.AppEntry
+	Probed   bool
+	ProbeErr string
 }
 
 // ActiveSessionSummary describes an open SessionWindow for the dashboard strip.
@@ -129,12 +131,6 @@ func (a *App) RefreshDevices() {
 		return
 	}
 	a.scanningDevices = true
-	prevApps := make(map[string]string, len(a.devices))
-	for _, d := range a.devices {
-		if d.SelectedApp != "" {
-			prevApps[d.Target.Serial] = d.SelectedApp
-		}
-	}
 	a.mu.Unlock()
 	a.update(func() {})
 
@@ -147,7 +143,7 @@ func (a *App) RefreshDevices() {
 			})
 			return
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 		defer cancel()
 
 		devs, dErr := client.Devices(ctx)
@@ -161,10 +157,10 @@ func (a *App) RefreshDevices() {
 		a.rt.coreMu.Unlock()
 
 		var inspected []DiscoveredDevice
+		decodedIcons := make(map[string]*ui.Bitmap)
 		for _, d := range devs {
 			item := DiscoveredDevice{
-				Target:      d,
-				SelectedApp: prevApps[d.Serial],
+				Target: d,
 			}
 			if d.State == "device" {
 				prof, pErr := client.ProbeDevice(ctx, d.Serial)
@@ -183,10 +179,25 @@ func (a *App) RefreshDevices() {
 					} else {
 						item.TruthDeX = dex.EvaluateTruth(prof, dex.ProbeReport{}, "", dex.BackendVirtualFallback)
 					}
-					if apps, aErr := client.ListLaunchableApps(ctx, d.Serial); aErr == nil {
+					iconDir := filepath.Join(a.stateDir, "icon-cache", d.DeviceHash)
+					if a.stateDir == "" {
+						iconDir = filepath.Join(os.TempDir(), "androfuse-icon-cache", d.DeviceHash)
+					}
+					apps, aErr := dex.ListAppsWithIcons(ctx, client, d.Serial, iconDir)
+					if aErr != nil {
+						apps, aErr = client.ListLaunchableApps(ctx, d.Serial)
+					}
+					if aErr == nil {
 						item.Apps = apps
-						if item.SelectedApp == "" && len(apps) > 0 {
-							item.SelectedApp = pickDefaultApp(apps)
+						for _, ap := range apps {
+							if ap.IconPath == "" || decodedIcons[ap.IconPath] != nil {
+								continue
+							}
+							if raw, rErr := os.ReadFile(ap.IconPath); rErr == nil {
+								if bmp, bErr := ui.DecodeBitmap(raw); bErr == nil {
+									decodedIcons[ap.IconPath] = bmp
+								}
+							}
 						}
 					}
 				}
@@ -203,26 +214,14 @@ func (a *App) RefreshDevices() {
 			a.devices = inspected
 			a.mdnsServices = svcs
 			a.deviceNotice = notice
+			if a.appIcons == nil {
+				a.appIcons = make(map[string]*ui.Bitmap)
+			}
+			for path, bmp := range decodedIcons {
+				a.appIcons[path] = bmp
+			}
 		})
 	}()
-}
-
-func pickDefaultApp(apps []adb.AppEntry) string {
-	preferred := []string{
-		"com.sec.android.app.popupcalculator",
-		"com.google.android.calculator",
-		"com.android.calculator2",
-		"com.android.settings",
-		"com.sec.android.app.clockpackage",
-	}
-	for _, want := range preferred {
-		for _, a := range apps {
-			if a.Package == want {
-				return a.Package
-			}
-		}
-	}
-	return apps[0].Package
 }
 
 // ConnectWirelessTLS connects to a discovered mDNS or manual TLS Wireless ADB host:port (`INV-07`).
@@ -320,6 +319,8 @@ func (a *App) LaunchDeX(d DiscoveredDevice, forceFallback bool) {
 				IsDeX:        true,
 				AllowResize:  true,
 			})
+			ap, _ := lib.OpenAudioPlayer(48000, 2)
+			sw.attachAudio(ap)
 			var vSess *scrcpy.Session
 			vSess, err = scrcpy.StartADB(ctx, client, lib, store, scrcpy.LaunchConfig{
 				SessionID:     sid + "-vid",
@@ -328,6 +329,7 @@ func (a *App) LaunchDeX(d DiscoveredDevice, forceFallback bool) {
 				MaxFPS:        60,
 				VideoBitRate:  12_000_000,
 				EnableControl: true,
+				Audio:         true,
 				InitialWidth:  uint32(ready.Width),
 				InitialHeight: uint32(ready.Height),
 				OnFrame: func(f core.NV12Frame) {
@@ -338,8 +340,13 @@ func (a *App) LaunchDeX(d DiscoveredDevice, forceFallback bool) {
 						sw.PushNV12(f, 0, int64(f.DecodeUs))
 					}
 				},
+				OnClipboard: sw.OnDeviceClipboard,
+				OnAudioPCM:  sw.PushAudioPCM,
 			})
 			if err != nil {
+				if ap != nil {
+					ap.Close()
+				}
 				dexSess.Stop()
 				a.update(func() { a.deviceNotice = err.Error() })
 				return
@@ -362,6 +369,8 @@ func (a *App) LaunchDeX(d DiscoveredDevice, forceFallback bool) {
 			IsDeX:        true,
 			AllowResize:  false,
 		})
+		ap, _ := lib.OpenAudioPlayer(48000, 2)
+		sw.attachAudio(ap)
 		var vSess *scrcpy.Session
 		vSess, err := scrcpy.StartADB(ctx, client, lib, store, scrcpy.LaunchConfig{
 			SessionID:     sid,
@@ -371,6 +380,7 @@ func (a *App) LaunchDeX(d DiscoveredDevice, forceFallback bool) {
 			MaxFPS:        60,
 			VideoBitRate:  8_000_000,
 			EnableControl: true,
+			Audio:         true,
 			InitialWidth:  1600,
 			InitialHeight: 900,
 			OnFrame: func(f core.NV12Frame) {
@@ -381,8 +391,13 @@ func (a *App) LaunchDeX(d DiscoveredDevice, forceFallback bool) {
 					sw.PushNV12(f, 0, int64(f.DecodeUs))
 				}
 			},
+			OnClipboard: sw.OnDeviceClipboard,
+			OnAudioPCM:  sw.PushAudioPCM,
 		})
 		if err != nil {
+			if ap != nil {
+				ap.Close()
+			}
 			a.update(func() { a.deviceNotice = err.Error() })
 			return
 		}
@@ -422,6 +437,8 @@ func (a *App) LaunchMirror(d DiscoveredDevice) {
 			TargetSpec:   "Display 0 · 60 fps",
 			ScreenOffCap: true,
 		})
+		ap, _ := lib.OpenAudioPlayer(48000, 2)
+		sw.attachAudio(ap)
 		var vSess *scrcpy.Session
 		vSess, err := scrcpy.StartADB(ctx, client, lib, store, scrcpy.LaunchConfig{
 			SessionID:     sid,
@@ -431,6 +448,7 @@ func (a *App) LaunchMirror(d DiscoveredDevice) {
 			MaxFPS:        60,
 			VideoBitRate:  8_000_000,
 			EnableControl: true,
+			Audio:         true,
 			InitialWidth:  1080,
 			InitialHeight: 1920,
 			OnFrame: func(f core.NV12Frame) {
@@ -441,8 +459,13 @@ func (a *App) LaunchMirror(d DiscoveredDevice) {
 					sw.PushNV12(f, 0, int64(f.DecodeUs))
 				}
 			},
+			OnClipboard: sw.OnDeviceClipboard,
+			OnAudioPCM:  sw.PushAudioPCM,
 		})
 		if err != nil {
+			if ap != nil {
+				ap.Close()
+			}
 			a.update(func() { a.deviceNotice = err.Error() })
 			return
 		}
@@ -451,14 +474,20 @@ func (a *App) LaunchMirror(d DiscoveredDevice) {
 	}()
 }
 
-// LaunchAppWindow opens an isolated flex-display native window running pkg on the target device.
-func (a *App) LaunchAppWindow(d DiscoveredDevice, pkg, label string) {
-	pkg = strings.TrimSpace(pkg)
+// LaunchAppWindow opens an isolated chromeless flex-display native window running app on the target device.
+func (a *App) LaunchAppWindow(d DiscoveredDevice, app adb.AppEntry) {
+	pkg := strings.TrimSpace(app.Package)
 	if pkg == "" {
 		return
 	}
+	label := strings.TrimSpace(app.Label)
 	if label == "" {
 		label = pkg
+	}
+	icon := a.appIconFor(app.IconPath)
+	startArg := pkg
+	if !strings.HasPrefix(startArg, "+") {
+		startArg = "+" + startArg
 	}
 	a.update(func() { a.deviceNotice = "" })
 	go func() {
@@ -482,25 +511,31 @@ func (a *App) LaunchAppWindow(d DiscoveredDevice, pkg, label string) {
 		sid := newSessionID("app")
 		sw := newSessionWindow(a, SessionSpec{
 			ID:           sid,
-			Title:        fmt.Sprintf("%s · %s (%s)", label, d.Profile.Model, tLabel),
+			Title:        label,
 			Mode:         SessionModeApp,
 			Transport:    tLabel,
 			BackendLabel: label,
-			TargetSpec:   "1280×800 flex · 60 fps",
+			TargetSpec:   "544×960 flex · 60 fps",
 			AllowResize:  true,
+			AppIcon:      icon,
+			AppPackage:   pkg,
 		})
+		ap, _ := lib.OpenAudioPlayer(48000, 2)
+		sw.attachAudio(ap)
 		var vSess *scrcpy.Session
 		vSess, err := scrcpy.StartADB(ctx, client, lib, store, scrcpy.LaunchConfig{
-			SessionID:       sid,
-			Serial:          d.Target.Serial,
-			NewDisplay:      "1280x800/160",
-			FlexDisplay:     true,
-			StartAppPackage: pkg,
-			MaxFPS:          60,
-			VideoBitRate:    8_000_000,
-			EnableControl:   true,
-			InitialWidth:    1280,
-			InitialHeight:   800,
+			SessionID:             sid,
+			Serial:                d.Target.Serial,
+			NewDisplay:            "544x960/200",
+			FlexDisplay:           true,
+			HideSystemDecorations: true,
+			StartAppPackage:       startArg,
+			MaxFPS:                60,
+			VideoBitRate:          8_000_000,
+			EnableControl:         true,
+			Audio:                 true,
+			InitialWidth:          544,
+			InitialHeight:         960,
 			OnFrame: func(f core.NV12Frame) {
 				if vSess != nil {
 					st := vSess.Stats()
@@ -509,13 +544,18 @@ func (a *App) LaunchAppWindow(d DiscoveredDevice, pkg, label string) {
 					sw.PushNV12(f, 0, int64(f.DecodeUs))
 				}
 			},
+			OnClipboard: sw.OnDeviceClipboard,
+			OnAudioPCM:  sw.PushAudioPCM,
 		})
 		if err != nil {
+			if ap != nil {
+				ap.Close()
+			}
 			a.update(func() { a.deviceNotice = err.Error() })
 			return
 		}
 		a.addSession(sw)
-		a.runOnMain(func() { sw.attachScrcpy(vSess, nil, appWinDefW, appWinDefH) })
+		a.runOnMain(func() { sw.attachScrcpy(vSess, nil, appWinPortraitW, appWinPortraitH) })
 	}()
 }
 

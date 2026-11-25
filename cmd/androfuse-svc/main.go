@@ -8,13 +8,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/YuanZhe-99/AndroFuse/internal/adb"
 	"github.com/YuanZhe-99/AndroFuse/internal/core"
 	"github.com/YuanZhe-99/AndroFuse/internal/dex"
 	"github.com/YuanZhe-99/AndroFuse/internal/gui"
+	"github.com/YuanZhe-99/AndroFuse/internal/lease"
+	"github.com/YuanZhe-99/AndroFuse/internal/localapi"
 	"github.com/YuanZhe-99/AndroFuse/internal/version"
 )
 
@@ -77,10 +81,50 @@ func main() {
 				fmt.Printf("  Probe error: %s\n", d.Error)
 			}
 		}
+	case "run":
+		if err := runDaemon(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 	default:
 		printUsage()
 		os.Exit(2)
 	}
+}
+
+func runDaemon(args []string) error {
+	sockPath := ""
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--socket" && i+1 < len(args) {
+			sockPath = args[i+1]
+			i++
+		}
+	}
+	stateDir := resolveStateDir()
+	profile := os.Getenv("ANDROFUSE_PROFILE")
+	store, err := lease.Open(filepath.Join(stateDir, "leases.json"))
+	if err != nil {
+		return err
+	}
+	adbClient, _ := adb.FindClient()
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	localapi.RecoverLeases(ctx, adbClient, store)
+
+	srv, err := localapi.Listen(localapi.Options{
+		SocketPath: sockPath,
+		StateDir:   stateDir,
+		Profile:    profile,
+		Leases:     store,
+		ADB:        adbClient,
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Printf("androfuse-svc listening on %s\n", srv.SocketPath())
+	return srv.Serve(ctx)
 }
 
 func runFullProbe(testMiracast bool) probeReport {
@@ -174,5 +218,5 @@ func printHostCheck(diag gui.HostDiagnostics) {
 }
 
 func printUsage() {
-	fmt.Fprintln(os.Stderr, "usage: androfuse-svc <version|check [--json]|probe [--json]>")
+	fmt.Fprintln(os.Stderr, "usage: androfuse-svc <version|check [--json]|probe [--json]|run [--socket <path>]>")
 }

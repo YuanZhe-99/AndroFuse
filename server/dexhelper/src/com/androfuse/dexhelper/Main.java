@@ -4,15 +4,26 @@ import android.app.Application;
 import android.app.Instrumentation;
 import android.content.Context;
 import android.content.ContextWrapper;
+import android.content.Intent;
+import android.content.pm.ActivityInfo;
 import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
+import android.content.res.Resources;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.drawable.Drawable;
 import android.os.Build;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.IBinder;
 import android.os.Looper;
 import android.system.Os;
+import android.util.Base64;
+import android.util.DisplayMetrics;
 
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -30,11 +41,14 @@ import java.net.Socket;
 import java.nio.channels.FileLock;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.regex.Pattern;
 
 /**
  * Clean-room app_process DeX helper for AndroFuse (UID 2000 shell, no Root).
@@ -48,6 +62,8 @@ public final class Main {
 
     private static final int RTSP_PORT = 7236;
     private static final int MODE_WIRELESS_DEX = 2;
+    private static final int APP_ICON_SIZE_PX = 96;
+    private static final Pattern HEX_SEGMENT_PATTERN = Pattern.compile("^[0-9a-fA-F]{12,}(_v[0-9]+)?$");
     private static final String DISPLAY_NAME = "AndroFuseDeX";
     private static final String DUMMY_MAC = "02:00:00:41:46:58";
     private static final String LOCK_PATH = "/data/local/tmp/androfuse-dex.lock";
@@ -56,11 +72,16 @@ public final class Main {
 
     public static void main(String[] args) {
         if (args.length < 1) {
-            System.err.println("usage: Main <probe|serve <token> <w> <h> <dpi> <grace_sec>|recover>");
+            System.err.println("usage: Main <probe|apps [--no-icons]|serve <token> <w> <h> <dpi> <grace_sec>|recover>");
             System.exit(2);
         }
         try {
             Looper.prepareMainLooper();
+            if ("apps".equals(args[0])) {
+                boolean includeIcons = !(args.length >= 2 && "--no-icons".equals(args[1]));
+                runApps(includeIcons);
+                return;
+            }
             bootstrapWorkarounds();
             switch (args[0]) {
                 case "probe":
@@ -171,6 +192,175 @@ public final class Main {
         sb.append("]}");
         System.out.println("AFDEX1|PROBE|" + sb);
         System.out.flush();
+    }
+
+    private static void runApps(boolean includeIcons) throws Exception {
+        Context sysCtx = getSystemContextWorkaround();
+        PackageManager pm = sysCtx.getPackageManager();
+        if (pm == null) {
+            throw new IllegalStateException("PackageManager unavailable in system context");
+        }
+        Intent launcherIntent = new Intent(Intent.ACTION_MAIN);
+        launcherIntent.addCategory(Intent.CATEGORY_LAUNCHER);
+        List<ResolveInfo> resolved = pm.queryIntentActivities(launcherIntent, PackageManager.MATCH_ALL);
+        if (resolved == null || resolved.isEmpty()) {
+            resolved = pm.queryIntentActivities(launcherIntent, 0);
+        }
+
+        Set<String> seen = new HashSet<>();
+        int count = 0;
+        if (resolved != null) {
+            for (ResolveInfo ri : resolved) {
+                if (ri == null || ri.activityInfo == null) continue;
+                ActivityInfo act = ri.activityInfo;
+                String pkg = nonNull(act.packageName).trim();
+                if (isNoisyPackage(pkg) || !seen.add(pkg)) {
+                    continue;
+                }
+                ApplicationInfo appInfo = act.applicationInfo;
+                String label = "";
+                try {
+                    CharSequence cs = ri.loadLabel(pm);
+                    if (cs != null) label = sanitizeLine(cs.toString()).trim();
+                } catch (Throwable ignored) {}
+                if (label.isEmpty() && appInfo != null) {
+                    try {
+                        CharSequence cs = appInfo.loadLabel(pm);
+                        if (cs != null) label = sanitizeLine(cs.toString()).trim();
+                    } catch (Throwable ignored) {}
+                }
+                if (label.isEmpty()) {
+                    label = pkg;
+                }
+
+                boolean isSystem = false;
+                if (appInfo != null) {
+                    int f = appInfo.flags;
+                    isSystem = (f & ApplicationInfo.FLAG_SYSTEM) != 0
+                        && (f & ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) == 0;
+                }
+                boolean resizeable = isActivityResizeable(act);
+
+                String iconB64 = "";
+                if (includeIcons) {
+                    try {
+                        Drawable d = loadAppDrawable(sysCtx, pm, ri, act, appInfo);
+                        iconB64 = renderIconBase64(d, APP_ICON_SIZE_PX);
+                    } catch (Throwable t) {
+                        System.err.println("icon error for " + pkg + ": " + t);
+                    }
+                }
+
+                StringBuilder row = new StringBuilder(256);
+                row.append("AFDEX1|APP|{")
+                   .append("\"package\":").append(jsonStr(pkg)).append(',')
+                   .append("\"activity\":").append(jsonStr(nonNull(act.name))).append(',')
+                   .append("\"label\":").append(jsonStr(label)).append(',')
+                   .append("\"system\":").append(isSystem).append(',')
+                   .append("\"resizeable\":").append(resizeable).append(',')
+                   .append("\"icon_b64\":").append(jsonStr(iconB64))
+                   .append('}');
+                System.out.println(row);
+                count++;
+            }
+        }
+        System.out.println("AFDEX1|APPS_DONE|" + count);
+        System.out.flush();
+    }
+
+    private static Drawable loadAppDrawable(Context sysCtx, PackageManager pm, ResolveInfo ri, ActivityInfo act, ApplicationInfo appInfo) {
+        try {
+            Drawable d = ri.loadIcon(pm);
+            if (d != null) return d;
+        } catch (Throwable ignored) {}
+        int resId = ri.getIconResource();
+        if (resId == 0 && act != null) resId = act.icon;
+        if (resId == 0 && appInfo != null) resId = appInfo.icon;
+        if (resId != 0 && appInfo != null) {
+            try {
+                Resources res = pm.getResourcesForApplication(appInfo);
+                Drawable d = res.getDrawableForDensity(resId, DisplayMetrics.DENSITY_XXHIGH, null);
+                if (d != null) return d;
+            } catch (Throwable ignored) {}
+            try {
+                Context pkgCtx = sysCtx.createPackageContext(act.packageName, Context.CONTEXT_IGNORE_SECURITY);
+                Drawable d = pkgCtx.getDrawable(resId);
+                if (d != null) return d;
+            } catch (Throwable ignored) {}
+        }
+        return null;
+    }
+
+    private static Context getSystemContextWorkaround() throws Exception {
+        Class<?> atCls = Class.forName("android.app.ActivityThread");
+        Object at = null;
+        try {
+            at = atCls.getMethod("systemMain").invoke(null);
+        } catch (Throwable ignored) {}
+        if (at == null) {
+            bootstrapWorkarounds();
+            try {
+                at = atCls.getDeclaredMethod("currentActivityThread").invoke(null);
+            } catch (Throwable ignored) {}
+        }
+        if (at == null) {
+            Constructor<?> ctor = atCls.getDeclaredConstructor();
+            ctor.setAccessible(true);
+            at = ctor.newInstance();
+        }
+        try {
+            Object ctx = atCls.getMethod("getSystemContext").invoke(at);
+            if (ctx instanceof Context) {
+                return (Context) ctx;
+            }
+        } catch (Throwable ignored) {}
+        Class<?> ciCls = Class.forName("android.app.ContextImpl");
+        Method createSys = ciCls.getDeclaredMethod("createSystemContext", atCls);
+        createSys.setAccessible(true);
+        return (Context) createSys.invoke(null, at);
+    }
+
+    private static boolean isActivityResizeable(ActivityInfo act) {
+        try {
+            Field f = ActivityInfo.class.getDeclaredField("resizeMode");
+            f.setAccessible(true);
+            return f.getInt(act) != 0;
+        } catch (Throwable ignored) {
+            return true;
+        }
+    }
+
+    private static boolean isNoisyPackage(String pkg) {
+        if (pkg == null || pkg.isEmpty()) return true;
+        if ("com.android.shell".equals(pkg)
+            || pkg.startsWith("org.chromium.webapk.")
+            || pkg.startsWith("com.google.android.apps.chrome.webapps.")
+            || pkg.endsWith(".test")) {
+            return true;
+        }
+        for (String seg : pkg.split("\\.")) {
+            if (HEX_SEGMENT_PATTERN.matcher(seg).matches()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String renderIconBase64(Drawable d, int sizePx) {
+        if (d == null) return "";
+        Bitmap bmp = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888);
+        try {
+            Canvas canvas = new Canvas(bmp);
+            d.setBounds(0, 0, sizePx, sizePx);
+            d.draw(canvas);
+            ByteArrayOutputStream baos = new ByteArrayOutputStream(4096);
+            if (!bmp.compress(Bitmap.CompressFormat.PNG, 90, baos)) {
+                return "";
+            }
+            return Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP);
+        } finally {
+            bmp.recycle();
+        }
     }
 
     private static void runRecover() throws Exception {

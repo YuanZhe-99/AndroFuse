@@ -145,14 +145,10 @@ flowchart TB
 - 支持：USB / TLS Wi-Fi ADB、UHID 真键盘鼠标或触控模拟切换、设备音频透传、双向剪贴板同步、横竖屏自适应窗口大小、无边框全屏、PNG 截图与直存 MP4 录屏；
 - **亮屏 / 熄屏投屏开关**：通过 `SET_DISPLAY_POWER` 熄灭物理面板同时保持系统未锁屏（提示用户不要按物理电源键以免连带锁屏 DeX），断开时自动恢复亮屏。
 
-### 5.3 模式三：独立 APP 原生窗口（对标 AndroMeld 交互体验，下一阶段在 Android 模拟器深入打磨）
-- **当前原型差距记录（2026-11-24 真机桌面实测反馈）**：
-  1. 现有基于 `cmd package query-activities --brief` 的临时芯片栏仅能截取包名尾段（出现 `A4ccf86b27d69a6e1_v2` WebAPK 哈希、`Androidx`、`Ang`、`App` 等无意义缩写），缺少真实本地化应用名称与高清图标；
-  2. 独立窗口尚未剥离虚拟屏的系统装饰与桌面感，体验与 `AndroMeld` 差距明显。
-- **Android 模拟器（`Pixel_9a_API_36`）专项重构设计（洁净室实现，`INV-13`）**：
-  1. **真实应用图标与名称提取器（无需等待 APK 亦可工作）**：在设备端辅助 JAR（`app_process` 调用 `LauncherApps` / `PackageManager.loadLabel` + Adaptive Icon 渲染 PNG，或 M3 Companion APK）拉取真实本地化名称、高清 PNG 图标并自动过滤 WebAPK/测试桩 Activity，桌面端缓存至本地图标目录并以 **独立应用抽屉网格（App Launcher Grid）** 呈现，点击图标即刻单点启动；
-  2. **无系统边框纯应用融合窗口（`vd_system_decorations=false`）**：通过 `scrcpy-server v5.0.1` 显式启用无系统装饰独立虚拟显示（隐藏虚拟屏内的 Android 状态栏、导航栏与桌面壁纸），将对应应用的 PNG 图标与真实应用名直接绑定至 Windows 原生 `mygo.Window` 标题栏与任务栏图标，初始窗口宽高比跟随应用类型（移动端竖屏/自适应横屏），标题栏内聚极简返回/菜单操作；
-  3. **多窗口并发、Snap Layouts 与单实例迁移**：拖动或 Windows Snap Layouts 改变原生窗口宽高时防抖触发 `TYPE_RESIZE_DISPLAY`；通过 `+pkg` 或任务栈迁移避免与手机主屏锁死，关闭窗口时支持配置「保留后台」或「迁回主屏」（`vd_destroy_content=false`），并在启动器标注 `FLAG_SECURE`/强制不可缩放应用。
+### 5.3 模式三：独立 APP 原生窗口（已对标 AndroMeld 在 `Pixel_9a_API_36` 完成重构验证）
+1. **真实应用图标与名称提取器（无需等待 APK 亦可工作）**：`server/dexhelper` `apps` 子命令（`ActivityThread.systemMain()` + `PackageManager` + `96x96` PNG 渲染）提取真实本地化应用名称、`resizeMode` 与高清 PNG 图标并过滤 WebAPK/十六进制哈希噪声；`internal/dex.ListAppsWithIcons` 落盘缓存并在 `internal/gui` 以 **独立应用启动器网格（App Launcher Grid）** 呈现，单点即刻启动；
+2. **无系统边框纯应用融合窗口（`vd_system_decorations=false`）**：默认以 16 像素对齐的 `544x960/200` 竖屏比例启动 `scrcpy-server v5.0.1`（隐藏虚拟屏 Android 状态栏、导航栏与桌面壁纸），通过 `TitleBarHidden` 将应用图标、应用名、返回/旋转/截图/录屏/静音与 Windows Snap Layouts 最大化按钮融入原生标题栏；
+3. **多窗口并发、Snap Layouts 与单实例迁移**：拖动或 Windows Snap Layouts 改变原生窗口宽高时按 `16 px` 对齐并防抖触发 `TYPE_RESIZE_DISPLAY`；通过 `+pkg` 避免与手机主屏锁死，并在启动器提示不可自由缩放应用（后续 M3 Companion 补充「迁回主屏」接力）。
 
 ### 5.4 三模式并存真值表
 - **主屏镜像 + 独立 APP 窗口（≥2 个）**：允许并存，音频默认跟随当前激活或用户指定的窗口。
@@ -232,16 +228,15 @@ flowchart TB
      - **`Spike S3`（Miracast 接收端调研结论 — 已全平台隐藏搁置）**：第三方 Windows Miracast 接收必须依赖微软未公开的私有接口 `wlanapi.dll!WlanNotifyVsIeProviderInt`；2026-11-24 在 Windows 11 ARM64（`build 26300`）+ Fold 8 真机实测与重写复测中，外部手机发起 P2P Miracast 关联均直接触发高通无线网卡内核驱动 **`qcwlan8280.sys`（`1.0.4122.4000` WiFiCx）`BugCheck 0x0000007E`（`0xC0000005`，WER 事件 `1019`）蓝屏重启**。鉴于依赖未公开系统内部接口违反稳定性原则，Miracast 方案已在全平台 UI 中隐藏并在运行期禁用，无线 DeX 统一采用已真机验证稳定的 **加密 TLS Wi-Fi ADB Native DeX**；
      - **`Spike S4`（四路并发 + `flex_display` + `INV-03` 清理）**：真机同屏稳定并发 4 路流（Native DeX `1920x1080` + 计算器 `1080x720` + 时钟 `1080x720` + 主屏 `1080x814`），并实测 `flex_display` 动态 resize 至 `1280x800`（`resizedAck=true`）；退出后 `dumpsys display`（`activeDisplayState=0`）、`adb forward --list` 与 `leases.json` 均为零残留。
 
-### M1b：桌面可用闭环（`0.1.0` — 交互桌面窗口与无线接入已部分先行落地，其余可基于模拟器离线开发）
-- **已完成（基于 Fold 8 实时双通道收尾）**：
+### M1b：桌面可用闭环（`0.1.0` — ✅ 核心闭环、模拟器无边框独立窗口、本地守护与音视频采集均已实测通过）
+- **已完成**：
   1. **有线 + 无线双通道真实窗口闭环**：`internal/adb` 接入 TLS 无线 mDNS 发现/配对/直连、`MaskEndpoint`（`INV-08`）、`WakeScreen` 冷启动唤醒、`emulator-*` 识别与 `--user 0` 应用枚举；`internal/scrcpy` 接入 `PointerIDMouse`（分显示路由悬停/左键/右键/拖拽）、定点数滚轮、`InjectKeycode`/`InjectText` 与熄屏控制；
-  2. **Rust `androfuse-core` C ABI v3 与桌面原生窗口验证**：桌面端 `androfuse.exe` 在真机上实测验证了有线 USB 与加密 TLS Wi-Fi ADB 下的手机主屏镜像与 **Samsung Native DeX 桌面窗口**（真实画面与键鼠操作正常，崩溃重启前后 `leases.json` 正常回收无残留）；Miracast Sink 因触发 Win11 ARM64 高通网卡驱动 `BugCheck 0x0000007E` 已在代码层默认熔断并在界面移除入口；
-  3. **Fold 8 无线实机验收数据（`TestLiveFold8WirelessAndInteractiveDeX`）**：通过 `_adb-tls-connect._tcp`（`192.*.*.*:38605`）无线直连实现 Native DeX（`id=27`、`1920x1080`、DXVA 硬解 `decode_us=3198`、鼠标悬停/左键/右键/滚轮/Recents 注入通过、动态 `Resize` 至 `1600x900` 自动触发 `scrcpy` 会话重协商 `sessions=2`）与无线主屏镜像（`682x1080` + 熄屏切换）+ 独立计算器窗口（`1080x720`），全链路退出零残留。
-- **待基于 Android 模拟器（`Pixel_9a_API_36`）继续完成 M1b 剩余项**：
-  1. **对标 AndroMeld 重构「独立 APP 窗口」（最高优先级）**：真实应用名称与高清图标提取、独立应用抽屉网格、`vd_system_decorations=false` 纯净无状态栏窗口、Windows 任务栏独立图标与宽高比适配；
-  2. `androfuse-svc run` 守护进程 + `internal/localapi`（Windows AF_UNIX NDJSON + `SIO_AF_UNIX_GETPEERPID` 校验）；
-  3. WASAPI 音频转发、双向剪贴板同步、PNG 截图与直存 MP4 录屏；
-  4. **Done When**：在 Android 模拟器与离线回放套件上通过全套独立应用窗口、多窗口交互与异常恢复集成测试。
+  2. **Rust `androfuse-core` C ABI v4 与桌面原生窗口验证**：桌面端 `androfuse.exe` 在 Fold 8 真机上实测验证了有线 USB 与加密 TLS Wi-Fi ADB 下的手机主屏镜像与 **Samsung Native DeX 桌面窗口**（`TestLiveFold8WirelessAndInteractiveDeX`：`id=27`、`1920x1080`、DXVA 硬解 `decode_us=3198`、动态 `Resize` 至 `1600x900`）；Miracast Sink 因触发 Win11 ARM64 高通网卡驱动 `BugCheck 0x0000007E` 已在代码层默认熔断并在界面移除入口；
+  3. **AndroMeld 对标「独立 APP 原生窗口」重构（`Pixel_9a_API_36` 实测通过）**：
+     - `server/dexhelper` 新增 `apps` 子命令，通过 `ActivityThread.systemMain()` + `PackageManager` 提取真实本地化应用名称、`resizeMode` 与 `96x96` PNG 图标并过滤 WebAPK/十六进制哈希噪声（`18/18` 实测通过），由 `internal/dex.ListAppsWithIcons` 落盘缓存并在 `internal/gui` 渲染为 **应用启动器网格**；
+     - `SessionModeApp` 默认启用 `544x960/200`（16 像素对齐）、`vd_system_decorations=false`、`flex_display=true` 与 `TitleBarHidden` 自定义应用标题栏（绑定应用 PNG 图标、名称、返回/旋转/截图/录屏/静音与 Windows Snap Layouts 最大化按钮），动态 resize 网格按 `16 px` 对齐并实测 `544x960 -> 720x1280`（`resizedAck=true`、DXVA `hw=true`、退出零残留）；
+  4. **`androfuse-svc run` + `internal/localapi`**：Windows AF_UNIX NDJSON 守护服务，内置 `SIO_AF_UNIX_GETPEERPID` + Windows SID 同用户校验与启动期 `leases.json` 自动恢复；
+  5. **音视频与输入完善**：Rust `wasapi_audio.rs` 共享模式 WASAPI PCM 播放器（C ABI v4）+ `scrcpy` `audio_codec=raw` 音频透传（不支持音频时安全降级）、双向剪贴板同步（设备→PC 与 `Ctrl+V`/按钮 PC→设备）、`SaveNV12AsPNG` 截图与 `MP4Recorder` 零重编码分片 MP4 录屏。
 
 ### M2：Samsung DeX 完整体验完善与多设备稳态（`0.2.0`）
 - **交付范围**：

@@ -494,6 +494,56 @@ func (msgs Messages) AppFilterHint() string {
 	return Catalog.Format(msgs.locale, "AppFilterHint", nil)
 }
 
+// AppLauncherTitle says "Independent App Launcher"
+// in the language the app shows.
+func AppLauncherTitle() string { return In(i18n.Locale()).AppLauncherTitle() }
+
+// AppLauncherTitle says "Independent App Launcher"
+// in the language of msgs.
+func (msgs Messages) AppLauncherTitle() string {
+	return Catalog.Format(msgs.locale, "AppLauncherTitle", nil)
+}
+
+// AppShowSystem says "Show System"
+// in the language the app shows.
+func AppShowSystem() string { return In(i18n.Locale()).AppShowSystem() }
+
+// AppShowSystem says "Show System"
+// in the language of msgs.
+func (msgs Messages) AppShowSystem() string {
+	return Catalog.Format(msgs.locale, "AppShowSystem", nil)
+}
+
+// AppHideSystem says "User Apps"
+// in the language the app shows.
+func AppHideSystem() string { return In(i18n.Locale()).AppHideSystem() }
+
+// AppHideSystem says "User Apps"
+// in the language of msgs.
+func (msgs Messages) AppHideSystem() string {
+	return Catalog.Format(msgs.locale, "AppHideSystem", nil)
+}
+
+// AppUnresizeableNote says "Fixed orientation / non-resizeable"
+// in the language the app shows.
+func AppUnresizeableNote() string { return In(i18n.Locale()).AppUnresizeableNote() }
+
+// AppUnresizeableNote says "Fixed orientation / non-resizeable"
+// in the language of msgs.
+func (msgs Messages) AppUnresizeableNote() string {
+	return Catalog.Format(msgs.locale, "AppUnresizeableNote", nil)
+}
+
+// AppCountBadge says "{count} apps"
+// in the language the app shows.
+func AppCountBadge(count int) string { return In(i18n.Locale()).AppCountBadge(count) }
+
+// AppCountBadge says "{count} apps"
+// in the language of msgs.
+func (msgs Messages) AppCountBadge(count int) string {
+	return Catalog.Format(msgs.locale, "AppCountBadge", map[string]any{"count": count})
+}
+
 // InputModeMouse says "Mouse"
 // in the language the app shows.
 func InputModeMouse() string { return In(i18n.Locale()).InputModeMouse() }
@@ -572,6 +622,116 @@ func ActionFullscreen() string { return In(i18n.Locale()).ActionFullscreen() }
 // in the language of msgs.
 func (msgs Messages) ActionFullscreen() string {
 	return Catalog.Format(msgs.locale, "ActionFullscreen", nil)
+}
+
+// ActionScreenshot says "Save PNG Screenshot"
+// in the language the app shows.
+func ActionScreenshot() string { return In(i18n.Locale()).ActionScreenshot() }
+
+// ActionScreenshot says "Save PNG Screenshot"
+// in the language of msgs.
+func (msgs Messages) ActionScreenshot() string {
+	return Catalog.Format(msgs.locale, "ActionScreenshot", nil)
+}
+
+// ActionRecordStart says "Record MP4"
+// in the language the app shows.
+func ActionRecordStart() string { return In(i18n.Locale()).ActionRecordStart() }
+
+// ActionRecordStart says "Record MP4"
+// in the language of msgs.
+func (msgs Messages) ActionRecordStart() string {
+	return Catalog.Format(msgs.locale, "ActionRecordStart", nil)
+}
+
+// ActionRecordStop says "Stop Recording"
+// in the language the app shows.
+func ActionRecordStop() string { return In(i18n.Locale()).ActionRecordStop() }
+
+// ActionRecordStop says "Stop Recording"
+// in the language of msgs.
+func (msgs Messages) ActionRecordStop() string {
+	return Catalog.Format(msgs.locale, "ActionRecordStop", nil)
+}
+
+// ActionSyncClipboard says "Send PC Clipboard"
+// in the language the app shows.
+func ActionSyncClipboard() string { return In(i18n.Locale()).ActionSyncClipboard() }
+
+// ActionSyncClipboard says "Send PC Clipboard"
+// in the language of msgs.
+func (msgs Messages) ActionSyncClipboard() string {
+	return Catalog.Format(msgs.locale, "ActionSyncClipboard", nil)
+}
+
+// ActionMuteAudio says "Mute Audio"
+// in the language the app shows.
+func ActionMuteAudio() string { return In(i18n.Locale()).ActionMuteAudio() }
+
+// ActionMuteAudio says "Mute Audio"
+// in the language of msgs.
+func (msgs Messages) ActionMuteAudio() string {
+	return Catalog.Format(msgs.locale, "ActionMuteAudio", nil)
+}
+
+// ActionUnmuteAudio says "Unmute Audio"
+// in the language the app shows.
+func ActionUnmuteAudio() string { return In(i18n.Locale()).ActionUnmuteAudio() }
+
+// ActionUnmuteAudio says "Unmute Audio"
+// in the language of msgs.
+func (msgs Messages) ActionUnmuteAudio() string {
+	return Catalog.Format(msgs.locale, "ActionUnmuteAudio", nil)
+}
+
+// ScreenshotSaved says "Saved {file}"
+// in the language the app shows.
+func ScreenshotSaved(file string) string { return In(i18n.Locale()).ScreenshotSaved(file) }
+
+// ScreenshotSaved says "Saved {file}"
+// in the language of msgs.
+func (msgs Messages) ScreenshotSaved(file string) string {
+	return Catalog.Format(msgs.locale, "ScreenshotSaved", map[string]any{"file": file})
+}
+
+// RecordingStarted says "Recording MP4..."
+// in the language the app shows.
+func RecordingStarted() string { return In(i18n.Locale()).RecordingStarted() }
+
+// RecordingStarted says "Recording MP4..."
+// in the language of msgs.
+func (msgs Messages) RecordingStarted() string {
+	return Catalog.Format(msgs.locale, "RecordingStarted", nil)
+}
+
+// RecordingSaved says "Saved {file}"
+// in the language the app shows.
+func RecordingSaved(file string) string { return In(i18n.Locale()).RecordingSaved(file) }
+
+// RecordingSaved says "Saved {file}"
+// in the language of msgs.
+func (msgs Messages) RecordingSaved(file string) string {
+	return Catalog.Format(msgs.locale, "RecordingSaved", map[string]any{"file": file})
+}
+
+// ClipboardSyncedToDevice says "Clipboard sent to device"
+// in the language the app shows.
+func ClipboardSyncedToDevice() string { return In(i18n.Locale()).ClipboardSyncedToDevice() }
+
+// ClipboardSyncedToDevice says "Clipboard sent to device"
+// in the language of msgs.
+func (msgs Messages) ClipboardSyncedToDevice() string {
+	return Catalog.Format(msgs.locale, "ClipboardSyncedToDevice", nil)
+}
+
+// ClipboardSyncedFromDevice says "Clipboard updated from device"
+// in the language the app shows.
+func ClipboardSyncedFromDevice() string { return In(i18n.Locale()).ClipboardSyncedFromDevice() }
+
+// ClipboardSyncedFromDevice says "Clipboard updated from device"
+// in the language of msgs.
+func (msgs Messages) ClipboardSyncedFromDevice() string {
+	return Catalog.Format(msgs.locale, "ClipboardSyncedFromDevice", nil)
 }
 
 // HudHide says "Hide HUD"

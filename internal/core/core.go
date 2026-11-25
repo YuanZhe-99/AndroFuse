@@ -16,7 +16,7 @@ import (
 
 // ABIVersion is the C ABI this package speaks; the library must report the
 // same one.
-const ABIVersion = 3
+const ABIVersion = 4
 
 // Codec identifiers matching scrcpy-server v5.0.1 and androfuse-core.
 const (
@@ -72,6 +72,9 @@ type Lib struct {
 	miracastPoll  uintptr
 	miracastInput uintptr
 	miracastStop  uintptr
+	audioOpen     uintptr
+	audioPush     uintptr
+	audioClose    uintptr
 	mu            sync.RWMutex
 }
 
@@ -273,6 +276,15 @@ func Open(path string) (*Lib, error) {
 		return nil, err
 	}
 	if l.miracastStop, err = resolve("androfuse_miracast_stop"); err != nil {
+		return nil, err
+	}
+	if l.audioOpen, err = resolve("androfuse_audio_open"); err != nil {
+		return nil, err
+	}
+	if l.audioPush, err = resolve("androfuse_audio_push_pcm"); err != nil {
+		return nil, err
+	}
+	if l.audioClose, err = resolve("androfuse_audio_close"); err != nil {
 		return nil, err
 	}
 
@@ -546,6 +558,65 @@ func (m *MiracastHandle) Close() {
 	}
 	syscallN(m.lib.miracastStop, uintptr(m.handle))
 	m.handle = 0
+}
+
+// AudioPlayer wraps an active WASAPI shared-mode PCM render stream in androfuse_core.
+type AudioPlayer struct {
+	lib    *Lib
+	handle uint64
+	mu     sync.Mutex
+}
+
+// OpenAudioPlayer opens the default Windows audio output stream at sampleRate Hz and channels.
+func (l *Lib) OpenAudioPlayer(sampleRate uint32, channels uint16) (*AudioPlayer, error) {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+
+	var handle uint64
+	rc := int32(syscallN(
+		l.audioOpen,
+		uintptr(sampleRate),
+		uintptr(channels),
+		uintptr(unsafe.Pointer(&handle)),
+	))
+	if rc != 0 || handle == 0 {
+		return nil, fmt.Errorf("androfuse_audio_open(%d, %d) failed: rc=%d", sampleRate, channels, rc)
+	}
+	return &AudioPlayer{lib: l, handle: handle}, nil
+}
+
+// PushPCM enqueues signed 16-bit interleaved PCM frames for playback.
+func (p *AudioPlayer) PushPCM(pcm []byte) error {
+	if len(pcm) == 0 {
+		return nil
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.handle == 0 {
+		return errors.New("audio player closed")
+	}
+	rc := int32(syscallN(
+		p.lib.audioPush,
+		uintptr(p.handle),
+		uintptr(unsafe.Pointer(unsafe.SliceData(pcm))),
+		uintptr(len(pcm)),
+	))
+	runtime.KeepAlive(pcm)
+	if rc != 0 {
+		return fmt.Errorf("androfuse_audio_push_pcm failed: rc=%d", rc)
+	}
+	return nil
+}
+
+// Close stops and releases the WASAPI audio player handle.
+func (p *AudioPlayer) Close() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.handle == 0 {
+		return
+	}
+	syscallN(p.lib.audioClose, uintptr(p.handle))
+	p.handle = 0
 }
 
 // Stop stops the core and waits for in-flight calls to finish.

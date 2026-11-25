@@ -3,6 +3,7 @@ package scrcpy
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -23,21 +24,26 @@ import (
 // Notes: DisplayID and NewDisplay are mutually exclusive on scrcpy-server CLI;
 // StartAppPackage is sent over the control socket via TYPE_START_APP after attach.
 type LaunchConfig struct {
-	SessionID       string
-	Serial          string
-	DisplayID       int
-	NewDisplay      string // e.g. "1280x800/160" or ""
-	FlexDisplay     bool
-	StartAppPackage string
-	CodecID         uint32 // 0 defaults to CodecH264
-	MaxSize         int
-	MaxFPS          float64
-	VideoBitRate    int
-	EnableControl   bool
-	EnableUHID      bool
-	InitialWidth    uint32
-	InitialHeight   uint32
-	OnFrame         func(core.NV12Frame)
+	SessionID             string
+	Serial                string
+	DisplayID             int
+	NewDisplay            string // e.g. "1280x800/160" or ""
+	FlexDisplay           bool
+	HideSystemDecorations bool
+	KeepContentOnClose    bool
+	StartAppPackage       string
+	CodecID               uint32 // 0 defaults to CodecH264
+	MaxSize               int
+	MaxFPS                float64
+	VideoBitRate          int
+	EnableControl         bool
+	EnableUHID            bool
+	Audio                 bool
+	InitialWidth          uint32
+	InitialHeight         uint32
+	OnFrame               func(core.NV12Frame)
+	OnClipboard           func(string)
+	OnAudioPCM            func([]byte)
 }
 
 // SessionStats captures honest runtime telemetry for a session (INV-05).
@@ -66,12 +72,17 @@ type Session struct {
 	fwdPort    int
 	serverCmd  *exec.Cmd
 	videoConn  net.Conn
+	audioConn  net.Conn
 	ctrlConn   net.Conn
 	decoder    *core.Decoder
 	ring       core.NV12Ring
 	lastConfig []byte
 	accessUnit []byte
 	readBuf    []byte
+	audioBuf   []byte
+
+	recMu    sync.Mutex
+	recorder *MP4Recorder
 
 	ctrlMu  sync.Mutex
 	mu      sync.Mutex
@@ -105,13 +116,16 @@ func BuildServerArgs(scid uint32, cfg LaunchConfig) []string {
 		fmt.Sprintf("scid=%08x", scid),
 		"log_level=info",
 		"tunnel_forward=true",
-		"audio=false",
+		"audio=" + strconv.FormatBool(cfg.Audio),
 		"video=true",
 		"control=" + strconv.FormatBool(ctrl),
 		"video_codec=" + codecName,
 		fmt.Sprintf("video_bit_rate=%d", bitRate),
 		"cleanup=true",
 		"power_on=true",
+	}
+	if cfg.Audio {
+		args = append(args, "audio_codec=raw")
 	}
 	if cfg.MaxSize > 0 {
 		args = append(args, fmt.Sprintf("max_size=%d", cfg.MaxSize))
@@ -123,6 +137,12 @@ func BuildServerArgs(scid uint32, cfg LaunchConfig) []string {
 		args = append(args, "new_display="+cfg.NewDisplay)
 		if cfg.FlexDisplay {
 			args = append(args, "flex_display=true")
+		}
+		if cfg.HideSystemDecorations {
+			args = append(args, "vd_system_decorations=false")
+		}
+		if cfg.KeepContentOnClose {
+			args = append(args, "vd_destroy_content=false")
 		}
 	} else if cfg.DisplayID > 0 {
 		args = append(args, fmt.Sprintf("display_id=%d", cfg.DisplayID))
@@ -203,11 +223,29 @@ func StartADB(ctx context.Context, client *adb.Client, lib *core.Lib, store *lea
 		return nil, fmt.Errorf("connect video socket (%s): %w (%s)", addr, err, strings.TrimSpace(outBuf.String()))
 	}
 
+	var audioConn net.Conn
+	if cfg.Audio {
+		audioConn, err = net.DialTimeout("tcp", addr, 5*time.Second)
+		if err != nil {
+			_ = videoConn.Close()
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+			_ = client.RemoveForward(context.Background(), cfg.Serial, port)
+			if store != nil {
+				_ = store.Release(cfg.SessionID)
+			}
+			return nil, fmt.Errorf("connect audio socket: %w", err)
+		}
+	}
+
 	ctrlNeeded := cfg.EnableControl || cfg.EnableUHID || cfg.FlexDisplay || cfg.StartAppPackage != ""
 	var ctrlConn net.Conn
 	if ctrlNeeded {
 		ctrlConn, err = net.DialTimeout("tcp", addr, 5*time.Second)
 		if err != nil {
+			if audioConn != nil {
+				_ = audioConn.Close()
+			}
 			_ = videoConn.Close()
 			_ = cmd.Process.Kill()
 			_ = cmd.Wait()
@@ -221,7 +259,16 @@ func StartADB(ctx context.Context, client *adb.Client, lib *core.Lib, store *lea
 
 	s, err := StartFromConns(lib, store, client, scid, port, cmd, videoConn, ctrlConn, true, cfg)
 	if err != nil {
+		if audioConn != nil {
+			_ = audioConn.Close()
+		}
 		return nil, err
+	}
+	if audioConn != nil {
+		s.mu.Lock()
+		s.audioConn = audioConn
+		s.mu.Unlock()
+		go s.audioLoop()
 	}
 	return s, nil
 }
@@ -356,6 +403,58 @@ func (s *Session) InjectText(text string) error {
 	return s.SendControl(EncodeInjectText(text))
 }
 
+// SetClipboard pushes UTF-8 text to the Android device clipboard via TYPE_SET_CLIPBOARD (9).
+func (s *Session) SetClipboard(seq uint64, paste bool, text string) error {
+	return s.SendControl(EncodeSetClipboard(seq, paste, text))
+}
+
+// StartRecording starts direct H.264 fragmented-MP4 recording at path without re-encoding.
+func (s *Session) StartRecording(path string) error {
+	st := s.Stats()
+	if st.CodecID != 0 && st.CodecID != CodecH264 {
+		return fmt.Errorf("direct MP4 recording requires H.264 stream (got codec 0x%08x)", st.CodecID)
+	}
+	rec, err := NewMP4Recorder(path, st.NegotiatedWidth, st.NegotiatedHeight)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	cfg := append([]byte(nil), s.lastConfig...)
+	s.mu.Unlock()
+	if len(cfg) > 0 {
+		_ = rec.WriteAnnexB(cfg, 0, true, false)
+	}
+
+	s.recMu.Lock()
+	if s.recorder != nil {
+		_ = s.recorder.Close()
+	}
+	s.recorder = rec
+	s.recMu.Unlock()
+	_ = s.SendControl(EncodeResetVideo())
+	return nil
+}
+
+// StopRecording flushes and closes the active MP4 recording, if any.
+func (s *Session) StopRecording() error {
+	s.recMu.Lock()
+	rec := s.recorder
+	s.recorder = nil
+	s.recMu.Unlock()
+	if rec == nil {
+		return nil
+	}
+	return rec.Close()
+}
+
+// IsRecording reports whether direct MP4 recording is currently active.
+func (s *Session) IsRecording() bool {
+	s.recMu.Lock()
+	active := s.recorder != nil
+	s.recMu.Unlock()
+	return active
+}
+
 // SetDisplayPower toggles the device's physical panel power while keeping mirroring active.
 func (s *Session) SetDisplayPower(on bool) error {
 	return s.SendControl(EncodeSetDisplayPower(on))
@@ -428,13 +527,18 @@ func (s *Session) Close() {
 	}
 	s.closed = true
 	ctrl := s.ctrlConn
+	aud := s.audioConn
 	vid := s.videoConn
 	dec := s.decoder
 	cmd := s.serverCmd
 	s.mu.Unlock()
 
+	_ = s.StopRecording()
 	if ctrl != nil {
 		_ = ctrl.Close()
+	}
+	if aud != nil {
+		_ = aud.Close()
 	}
 	if vid != nil {
 		_ = vid.Close()
@@ -466,9 +570,44 @@ func (s *Session) Close() {
 
 func (s *Session) controlReadLoop() {
 	for {
-		_, err := ReadDeviceMessage(s.ctrlConn)
+		msg, err := ReadDeviceMessage(s.ctrlConn)
 		if err != nil {
 			return
+		}
+		if msg.Type == 0 && s.cfg.OnClipboard != nil {
+			s.cfg.OnClipboard(msg.Text)
+		}
+	}
+}
+
+func (s *Session) audioLoop() {
+	s.mu.Lock()
+	conn := s.audioConn
+	s.mu.Unlock()
+	if conn == nil {
+		return
+	}
+	defer conn.Close()
+
+	var codecBuf [4]byte
+	if _, err := io.ReadFull(conn, codecBuf[:]); err != nil {
+		return
+	}
+	codecID := binary.BigEndian.Uint32(codecBuf[:])
+	// scrcpy-server writes 0x00000000 (disabled) or 0x00000001 (errored) when audio is unavailable.
+	if codecID != CodecRaw {
+		return
+	}
+	for {
+		pkt, err := ReadVideoPacket(conn, &s.audioBuf)
+		if err != nil {
+			return
+		}
+		if pkt.IsConfig || len(pkt.Payload) == 0 {
+			continue
+		}
+		if s.cfg.OnAudioPCM != nil {
+			s.cfg.OnAudioPCM(pkt.Payload)
 		}
 	}
 }
@@ -547,8 +686,21 @@ func (s *Session) videoLoop() {
 
 		if pkt.IsConfig {
 			s.lastConfig = append(s.lastConfig[:0], pkt.Payload...)
+			s.recMu.Lock()
+			if s.recorder != nil {
+				st := s.Stats()
+				s.recorder.SetDimensions(st.NegotiatedWidth, st.NegotiatedHeight)
+				_ = s.recorder.WriteAnnexB(pkt.Payload, pkt.PtsUs, true, false)
+			}
+			s.recMu.Unlock()
 			continue
 		}
+
+		s.recMu.Lock()
+		if s.recorder != nil {
+			_ = s.recorder.WriteAnnexB(pkt.Payload, pkt.PtsUs, false, pkt.IsKeyframe)
+		}
+		s.recMu.Unlock()
 
 		s.accessUnit = s.accessUnit[:0]
 		if pkt.IsKeyframe && len(s.lastConfig) > 0 && !bytes.HasPrefix(pkt.Payload, s.lastConfig) {

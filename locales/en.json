@@ -56,6 +56,16 @@
   "ActionLaunchMirror": "Phone Mirror",
   "ActionLaunchApp": "Open App Window",
   "AppFilterHint": "Filter installed apps...",
+  "AppLauncherTitle": "Independent App Launcher",
+  "AppShowSystem": "Show System",
+  "AppHideSystem": "User Apps",
+  "AppUnresizeableNote": "Fixed orientation / non-resizeable",
+  "AppCountBadge": "{count} apps",
+  "@AppCountBadge": {
+    "placeholders": {
+      "count": { "type": "int" }
+    }
+  },
   "InputModeMouse": "Mouse",
   "InputModeTouch": "Touch",
   "ActionBack": "Back",
@@ -64,6 +74,27 @@
   "ActionRotate": "Rotate",
   "ActionScreenOff": "Screen Off / On",
   "ActionFullscreen": "Fullscreen (F11)",
+  "ActionScreenshot": "Save PNG Screenshot",
+  "ActionRecordStart": "Record MP4",
+  "ActionRecordStop": "Stop Recording",
+  "ActionSyncClipboard": "Send PC Clipboard",
+  "ActionMuteAudio": "Mute Audio",
+  "ActionUnmuteAudio": "Unmute Audio",
+  "ScreenshotSaved": "Saved {file}",
+  "@ScreenshotSaved": {
+    "placeholders": {
+      "file": { "type": "String" }
+    }
+  },
+  "RecordingStarted": "Recording MP4...",
+  "RecordingSaved": "Saved {file}",
+  "@RecordingSaved": {
+    "placeholders": {
+      "file": { "type": "String" }
+    }
+  },
+  "ClipboardSyncedToDevice": "Clipboard sent to device",
+  "ClipboardSyncedFromDevice": "Clipboard updated from device",
   "HudHide": "Hide HUD",
   "HudShow": "HUD",
   "SessionEnded": "Stream ended",

@@ -3,6 +3,7 @@ package dex
 import (
 	"context"
 	"image"
+	"image/png"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -63,6 +64,217 @@ func TestEvaluateTruthOneUI9AndFallbacks(t *testing.T) {
 	nonSam := EvaluateTruth(adb.DeviceProfile{Manufacturer: "Google"}, probe, "AndroFuseDeX", BackendADBLoopback)
 	if nonSam.IsGenuineDeX {
 		t.Fatalf("non-Samsung device must never report genuine DeX: %+v", nonSam)
+	}
+}
+
+func TestParseAppsOutputAndIconCache(t *testing.T) {
+	// Valid 1x1 transparent PNG base64.
+	const onePxPNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+	raw := strings.Join([]string{
+		`AFDEX1|APP|{"package":"org.chromium.webapk.A4ccf86b27d69a6e1_v2","activity":".WebApk","label":"Noise","system":false,"resizeable":true,"icon_b64":"` + onePxPNG + `"}`,
+		`AFDEX1|APP|{"package":"com.android.settings","activity":".Settings","label":"Settings","system":true,"resizeable":true,"icon_b64":"` + onePxPNG + `"}`,
+		`AFDEX1|APP|{"package":"com.example.chat","activity":".Main","label":"Chat App","system":false,"resizeable":false,"icon_b64":"` + onePxPNG + `"}`,
+		`AFDEX1|APPS_DONE|3`,
+	}, "\n")
+
+	cacheDir := filepath.Join(t.TempDir(), "icons")
+	apps, err := ParseAppsOutput(raw, cacheDir)
+	if err != nil {
+		t.Fatalf("ParseAppsOutput: %v", err)
+	}
+	if len(apps) != 2 {
+		t.Fatalf("expected 2 filtered apps, got %d (%+v)", len(apps), apps)
+	}
+	if apps[0].Package != "com.example.chat" || apps[0].Label != "Chat App" || apps[0].Resizeable || apps[0].System {
+		t.Fatalf("unexpected first app: %+v", apps[0])
+	}
+	if apps[1].Package != "com.android.settings" || !apps[1].System || !apps[1].Resizeable {
+		t.Fatalf("unexpected second app: %+v", apps[1])
+	}
+	for _, ap := range apps {
+		if ap.IconPath == "" {
+			t.Fatalf("expected cached icon path for %s", ap.Package)
+		}
+		data, err := os.ReadFile(ap.IconPath)
+		if err != nil || len(data) < 8 {
+			t.Fatalf("expected PNG on disk at %s: err=%v len=%d", ap.IconPath, err, len(data))
+		}
+	}
+}
+
+// TestLiveEmulatorAppWindowsAndIcons verifies real app label + 96x96 PNG icon
+// extraction and concurrent chromeless flex-display app windows on Pixel_9a_API_36
+// when ANDROFUSE_LIVE_EMULATOR=1 is set.
+func TestLiveEmulatorAppWindowsAndIcons(t *testing.T) {
+	if os.Getenv("ANDROFUSE_LIVE_EMULATOR") != "1" {
+		t.Skip("set ANDROFUSE_LIVE_EMULATOR=1 with a booted Android emulator to run live AVD app window tests")
+	}
+	libPath, err := filepath.Abs(filepath.Join("..", "..", "core", "target", "debug", core.LibraryName()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lib, err := core.Open(libPath)
+	if err != nil {
+		t.Fatalf("core.Open: %v", err)
+	}
+	defer lib.Stop()
+	if _, err := lib.Start(core.Config{Version: "0.1.0", StateDir: t.TempDir(), Profile: "live-emu"}); err != nil {
+		t.Fatalf("core.Start: %v", err)
+	}
+
+	client, err := adb.FindClient()
+	if err != nil {
+		t.Fatalf("FindClient: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+
+	devs, err := client.Devices(ctx)
+	if err != nil {
+		t.Fatalf("Devices: %v", err)
+	}
+	var serial string
+	for _, d := range devs {
+		if d.State == "device" && d.Transport == adb.TransportEmulator {
+			serial = d.Serial
+			break
+		}
+	}
+	if serial == "" {
+		t.Skipf("no online emulator-* device found (%+v)", devs)
+	}
+
+	iconDir := filepath.Join(t.TempDir(), "icon-cache")
+	apps, err := ListAppsWithIcons(ctx, client, serial, iconDir)
+	if err != nil {
+		t.Fatalf("ListAppsWithIcons: %v", err)
+	}
+	if len(apps) < 5 {
+		t.Fatalf("expected >= 5 launchable apps on emulator, got %d", len(apps))
+	}
+	iconOK := 0
+	for _, ap := range apps {
+		if adb.IsNoisyAppPackage(ap.Package) {
+			t.Fatalf("unexpected noisy package leaked past filter: %s", ap.Package)
+		}
+		if ap.IconPath != "" {
+			f, err := os.Open(ap.IconPath)
+			if err != nil {
+				t.Fatalf("open icon %s: %v", ap.IconPath, err)
+			}
+			cfg, err := png.DecodeConfig(f)
+			_ = f.Close()
+			if err != nil || cfg.Width != 96 || cfg.Height != 96 {
+				t.Fatalf("invalid PNG icon %s: cfg=%+v err=%v", ap.IconPath, cfg, err)
+			}
+			iconOK++
+		}
+	}
+	if iconOK < 3 {
+		t.Fatalf("expected >= 3 decoded 96x96 PNG icons, got %d", iconOK)
+	}
+	t.Logf("AVD ListAppsWithIcons: count=%d icons_96x96=%d sample=%q (%s)", len(apps), iconOK, apps[0].Label, apps[0].Package)
+
+	var pkg1, pkg2 string
+	preferred := []string{"com.android.settings", "com.google.android.deskclock", "com.android.deskclock", "com.android.contacts"}
+	for _, want := range preferred {
+		for _, ap := range apps {
+			if ap.Package == want {
+				if pkg1 == "" {
+					pkg1 = ap.Package
+				} else if pkg2 == "" && ap.Package != pkg1 {
+					pkg2 = ap.Package
+				}
+			}
+		}
+	}
+	for _, ap := range apps {
+		if pkg1 != "" && pkg2 != "" {
+			break
+		}
+		if pkg1 == "" {
+			pkg1 = ap.Package
+		} else if pkg2 == "" && ap.Package != pkg1 {
+			pkg2 = ap.Package
+		}
+	}
+
+	store, err := lease.Open(filepath.Join(t.TempDir(), "leases.json"))
+	if err != nil {
+		t.Fatalf("lease.Open: %v", err)
+	}
+
+	s1, err := scrcpy.StartADB(ctx, client, lib, store, scrcpy.LaunchConfig{
+		SessionID:             "emu-app1",
+		Serial:                serial,
+		NewDisplay:            "544x960/200",
+		FlexDisplay:           true,
+		HideSystemDecorations: true,
+		StartAppPackage:       "+" + pkg1,
+		MaxFPS:                60,
+		EnableControl:         true,
+		Audio:                 true,
+		InitialWidth:          544,
+		InitialHeight:         960,
+	})
+	if err != nil {
+		t.Fatalf("StartADB app1 (%s): %v", pkg1, err)
+	}
+	defer s1.Close()
+
+	s2, err := scrcpy.StartADB(ctx, client, lib, store, scrcpy.LaunchConfig{
+		SessionID:             "emu-app2",
+		Serial:                serial,
+		NewDisplay:            "544x960/200",
+		FlexDisplay:           true,
+		HideSystemDecorations: true,
+		StartAppPackage:       "+" + pkg2,
+		MaxFPS:                60,
+		EnableControl:         true,
+		InitialWidth:          544,
+		InitialHeight:         960,
+	})
+	if err != nil {
+		t.Fatalf("StartADB app2 (%s): %v", pkg2, err)
+	}
+	defer s2.Close()
+
+	st1, err := s1.WaitDecoded(2, 15*time.Second)
+	if err != nil {
+		t.Fatalf("app1 WaitDecoded: %v (stats=%+v)", err, st1)
+	}
+	st2, err := s2.WaitDecoded(2, 15*time.Second)
+	if err != nil {
+		t.Fatalf("app2 WaitDecoded: %v (stats=%+v)", err, st2)
+	}
+
+	if err := s1.Resize(720, 1280); err != nil {
+		t.Fatalf("app1 Resize(720x1280): %v", err)
+	}
+	deadline := time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) {
+		st1 = s1.Stats()
+		if st1.ClientResizedAck && st1.NegotiatedWidth == 720 && st1.NegotiatedHeight == 1280 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Logf("AVD CHROMELESS CONCURRENT APPS PASS: app1(%s)=%dx%d(resizedAck=%v,hw=%v) app2(%s)=%dx%d(hw=%v)",
+		pkg1, st1.NegotiatedWidth, st1.NegotiatedHeight, st1.ClientResizedAck, st1.HardwareAccelerated,
+		pkg2, st2.NegotiatedWidth, st2.NegotiatedHeight, st2.HardwareAccelerated)
+	if !st1.ClientResizedAck || st1.NegotiatedWidth != 720 || st1.NegotiatedHeight != 1280 {
+		t.Fatalf("expected flex resize ack to 720x1280, got %+v", st1)
+	}
+
+	s2.Close()
+	s1.Close()
+
+	if rem := store.List(); len(rem) != 0 {
+		t.Fatalf("residual leases after emulator teardown: %+v", rem)
+	}
+	dispOut, _ := client.Shell(ctx, serial, "dumpsys display | grep -E 'DisplayDeviceInfo'")
+	if strings.Contains(dispOut, "scrcpy") {
+		t.Fatalf("residual scrcpy virtual display on emulator:\n%s", dispOut)
 	}
 }
 

@@ -137,9 +137,12 @@ type MDNSService struct {
 
 // AppEntry describes a user-launchable activity installed on Android user 0.
 type AppEntry struct {
-	Package  string `json:"package"`
-	Activity string `json:"activity"`
-	Label    string `json:"label"`
+	Package    string `json:"package"`
+	Activity   string `json:"activity"`
+	Label      string `json:"label"`
+	IconPath   string `json:"icon_path,omitempty"`
+	System     bool   `json:"system,omitempty"`
+	Resizeable bool   `json:"resizeable"`
 }
 
 // DeviceHash returns a stable short SHA-256 identifier suitable for lease files and filenames.
@@ -377,14 +380,15 @@ func ParseLaunchableApps(raw string) []AppEntry {
 		} else {
 			continue
 		}
-		if pkg == "" || seen[pkg] {
+		if pkg == "" || IsNoisyAppPackage(pkg) || seen[pkg] {
 			continue
 		}
 		seen[pkg] = true
 		apps = append(apps, AppEntry{
-			Package:  pkg,
-			Activity: act,
-			Label:    friendlyAppLabel(pkg),
+			Package:    pkg,
+			Activity:   act,
+			Label:      friendlyAppLabel(pkg),
+			Resizeable: true,
 		})
 	}
 	sort.Slice(apps, func(i, j int) bool {
@@ -396,6 +400,48 @@ func ParseLaunchableApps(raw string) []AppEntry {
 		return apps[i].Package < apps[j].Package
 	})
 	return apps
+}
+
+// IsNoisyAppPackage reports whether pkg is a WebAPK hash wrapper, test stub,
+// or internal shell component that should be excluded from the App Launcher Grid.
+func IsNoisyAppPackage(pkg string) bool {
+	if pkg == "" || pkg == "com.android.shell" ||
+		strings.HasPrefix(pkg, "org.chromium.webapk.") ||
+		strings.HasPrefix(pkg, "com.google.android.apps.chrome.webapps.") ||
+		strings.HasSuffix(pkg, ".test") {
+		return true
+	}
+	for _, seg := range strings.Split(pkg, ".") {
+		base, ver, hasVer := strings.Cut(seg, "_v")
+		if hasVer && ver != "" {
+			allDigits := true
+			for i := 0; i < len(ver); i++ {
+				if ver[i] < '0' || ver[i] > '9' {
+					allDigits = false
+					break
+				}
+			}
+			if !allDigits {
+				base = seg
+			}
+		} else {
+			base = seg
+		}
+		if len(base) >= 12 && isHexASCII(base) {
+			return true
+		}
+	}
+	return false
+}
+
+func isHexASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return len(s) > 0
 }
 
 func friendlyAppLabel(pkg string) string {
