@@ -273,8 +273,9 @@ flowchart TB
 - **已落地（M5 Android 小组件与双向音视频桥接）**：
   1. 新增 `AndroFuseWidgetProvider`（`CompanionServices.kt`）与 `internal/androidbridge.SyncCompanionWidget` 状态联动；
   2. 扩展 `internal/scrcpy` 支持 `video_source=camera`（前后摄切换/分辨率/帧率）与 `audio_source=mic` 采集；
-  3. 新增 `internal/avbridge`（本机防越权 MJPEG 流、`MFCreateVirtualCamera` 系统能力诚实探测与经 Companion `MediaBridge` 加密隧道回传 PC 麦克风/摄像头帧的 `UplinkBridge`），并接入桌面设备卡片、工作模式页与 Companion 移动授权开关；
-  4. **诚实边界**：尚未打包需要管理员签名/安装的独立 Windows COM `MFCreateVirtualCamera` Media Source 驱动，当前通过原生预览窗口 + 本机防越权 MJPEG 流提供通用接入能力；PC→Android 在非 Root 手机上通过 Companion App 会话内接入，暂未做全系统 HAL 虚拟设备注入。
+  3. 新增 `internal/avbridge`（本机防越权 MJPEG 流、`MFCreateVirtualCamera` 系统能力诚实探测与 `StreamMic` 经 Companion `MediaBridge` 加密隧道回传 WASAPI 采集 PCM 帧）及 C ABI v5 真实 WASAPI `WasapiMicCapturer`（`androfuse_mic_*`）；
+  4. 新增 `packaging/android/AndroidManifest.services.xml` 与桌面 Settings 页 EasyTier（`--no-tun`）托管配置卡片、Companion 面板 PC 麦克风一键回传按钮；
+  5. **诚实边界**：尚未打包需要管理员签名/安装的独立 Windows COM `MFCreateVirtualCamera` Media Source 驱动，当前通过原生预览窗口 + 本机防越权 MJPEG 流提供通用接入能力；PC→Android 在非 Root 手机上通过 Companion App 会话内接入，暂未做全系统 HAL 虚拟设备注入；真实硬件验收需接真机。
 
 ---
 

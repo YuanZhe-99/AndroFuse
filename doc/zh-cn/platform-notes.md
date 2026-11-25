@@ -6,7 +6,7 @@
 
 | 模块 | 状态 | 实测证据 |
 |---|---|---|
-| Rust 核心库（`core/androfuse-core`）C ABI v4 | 已验证（M1b） | 在 `aarch64-pc-windows-msvc`（`rustc 1.99.1`）原生编译；`cargo test` 通过（含真实 64×48 Media Foundation H.264 NV12 解码、`MFT_MESSAGE_COMMAND_DRAIN`、`wasapi_audio::PcmRingBuffer` 与 `build_wfd_sink_replies` RTSP 应答器）、通过 `cargo clippy -- -D warnings` 与 `cargo deny check licenses bans sources` |
+| Rust 核心库（`core/androfuse-core`）C ABI v5 | 已验证（M1b–M5） | 在 `aarch64-pc-windows-msvc`（`rustc 1.99.1`）原生编译；`cargo test` 通过（含真实 64×48 Media Foundation H.264 NV12 解码、`MFT_MESSAGE_COMMAND_DRAIN`、`wasapi_audio::PcmRingBuffer`、WASAPI 麦克风采集 `androfuse_mic_*` 与 `build_wfd_sink_replies` RTSP 应答器）、通过 `cargo clippy -- -D warnings` 与 `cargo deny check licenses bans sources` |
 | DXVA/D3D11 视频解码与零分配 NV12 → MyGo `UpdateYUV` | 已验证（M1a–M1b） | `androfuse-svc probe` 实测 `h264_hw_decoder = true`、`hevc_hw_decoder = true`；Fold 8 有线 USB 与无线 TLS Wi-Fi 流均通过 DXVA 硬解（`hw=true`），并通过 `TestNV12RingZeroAllocSteadyState`（每帧 0 分配）与 MyGo `Bitmap.UpdateYUV` 渲染 |
 | Miracast / Wi-Fi Direct 接收端（`Spike S3` 与实时接收器） | 已隐藏禁用（依赖未公开 Windows 接口） | 依赖未公开接口 `wlanapi.dll!WlanNotifyVsIeProviderInt`；在 Windows 11 ARM64（`build 26300`）真机关联复测中固定触发高通 **`qcwlan8280.sys`**（`1.0.4122.4000` WiFiCx，WER 事件 `1019`）内核态 `BugCheck 0x0000007E`（`0xC0000005`）蓝屏。已在全平台隐藏禁用，无线 DeX 统一采用加密 TLS Wi-Fi ADB Native DeX |
 | MyGo 原生界面、`localapi` 与采集管线（`internal/gui`、`internal/localapi`、`internal/scrcpy`） | 已在真机桌面与模拟器实测通过（M1b） | 有线 USB 与 TLS 无线 ADB 手机镜像及交互式原生 Samsung DeX 已在 `androfuse.exe` 桌面窗口实测正常；`internal/localapi`（`SIO_AF_UNIX_GETPEERPID` SID 校验）、`SaveNV12AsPNG`、`MP4Recorder`、`CGO_ENABLED=0 go test ./...`、`go tool mygo vet .` 与 `go tool mygo i18n check` 全部通过 |

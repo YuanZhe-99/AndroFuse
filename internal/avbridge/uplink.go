@@ -19,6 +19,12 @@ type UplinkStats struct {
 	LastError   string `json:"lastError,omitempty"`
 }
 
+// PCMReader reads captured signed 16-bit PCM bytes (satisfied by core.MicCapturer).
+type PCMReader interface {
+	ReadPCM(dst []byte) (int, error)
+	Close()
+}
+
 // UplinkBridge forwards PC mic PCM and camera JPEG frames to Android Companion
 // when explicitly permitted (`Permissions.MediaBridge`).
 type UplinkBridge struct {
@@ -108,4 +114,49 @@ func (u *UplinkBridge) push(ctx context.Context, req companion.MediaFrameRequest
 	}
 	u.mu.Unlock()
 	return err
+}
+
+// StreamMic polls 20ms PCM chunks from reader and pushes them via Companion until stopped or cancelled.
+func (u *UplinkBridge) StreamMic(ctx context.Context, sampleRate, channels int, reader PCMReader) error {
+	if reader == nil {
+		return errors.New("avbridge: nil PCMReader")
+	}
+	if sampleRate <= 0 {
+		sampleRate = 48000
+	}
+	if channels <= 0 {
+		channels = 1
+	}
+	chunkBytes := (sampleRate / 50) * channels * 2 // 20ms s16le PCM
+	buf := make([]byte, chunkBytes)
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			u.mu.Lock()
+			active := u.active
+			u.mu.Unlock()
+			if !active {
+				return nil
+			}
+			n, err := reader.ReadPCM(buf)
+			if err != nil {
+				u.mu.Lock()
+				u.stats.LastError = err.Error()
+				u.mu.Unlock()
+				return err
+			}
+			if n > 0 {
+				if err := u.PushMicPCM(ctx, sampleRate, channels, buf[:n]); err != nil {
+					if ctx.Err() != nil {
+						return ctx.Err()
+					}
+				}
+			}
+		}
+	}
 }

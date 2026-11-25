@@ -16,7 +16,7 @@ import (
 
 // ABIVersion is the C ABI this package speaks; the library must report the
 // same one.
-const ABIVersion = 4
+const ABIVersion = 5
 
 // Codec identifiers matching scrcpy-server v5.0.1 and androfuse-core.
 const (
@@ -75,6 +75,9 @@ type Lib struct {
 	audioOpen     uintptr
 	audioPush     uintptr
 	audioClose    uintptr
+	micOpen       uintptr
+	micRead       uintptr
+	micClose      uintptr
 	mu            sync.RWMutex
 }
 
@@ -285,6 +288,15 @@ func Open(path string) (*Lib, error) {
 		return nil, err
 	}
 	if l.audioClose, err = resolve("androfuse_audio_close"); err != nil {
+		return nil, err
+	}
+	if l.micOpen, err = resolve("androfuse_mic_open"); err != nil {
+		return nil, err
+	}
+	if l.micRead, err = resolve("androfuse_mic_read_pcm"); err != nil {
+		return nil, err
+	}
+	if l.micClose, err = resolve("androfuse_mic_close"); err != nil {
 		return nil, err
 	}
 
@@ -617,6 +629,67 @@ func (p *AudioPlayer) Close() {
 	}
 	syscallN(p.lib.audioClose, uintptr(p.handle))
 	p.handle = 0
+}
+
+// MicCapturer streams captured PC microphone PCM frames from the Windows default input endpoint.
+type MicCapturer struct {
+	lib    *Lib
+	handle uint64
+	mu     sync.Mutex
+}
+
+// OpenMicCapture opens the default Windows audio input device at sampleRate Hz and channels.
+func (l *Lib) OpenMicCapture(sampleRate uint32, channels uint16) (*MicCapturer, error) {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+
+	var handle uint64
+	rc := int32(syscallN(
+		l.micOpen,
+		uintptr(sampleRate),
+		uintptr(channels),
+		uintptr(unsafe.Pointer(&handle)),
+	))
+	if rc != 0 || handle == 0 {
+		return nil, fmt.Errorf("androfuse_mic_open(%d, %d) failed: rc=%d", sampleRate, channels, rc)
+	}
+	return &MicCapturer{lib: l, handle: handle}, nil
+}
+
+// ReadPCM reads currently queued captured s16le PCM bytes into dst.
+func (m *MicCapturer) ReadPCM(dst []byte) (int, error) {
+	if len(dst) == 0 {
+		return 0, nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.handle == 0 {
+		return 0, errors.New("mic capturer closed")
+	}
+	var copied uintptr
+	rc := int32(syscallN(
+		m.lib.micRead,
+		uintptr(m.handle),
+		uintptr(unsafe.Pointer(unsafe.SliceData(dst))),
+		uintptr(len(dst)),
+		uintptr(unsafe.Pointer(&copied)),
+	))
+	runtime.KeepAlive(dst)
+	if rc != 0 {
+		return 0, fmt.Errorf("androfuse_mic_read_pcm failed: rc=%d", rc)
+	}
+	return int(copied), nil
+}
+
+// Close stops and releases the WASAPI microphone capture handle.
+func (m *MicCapturer) Close() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.handle == 0 {
+		return
+	}
+	syscallN(m.lib.micClose, uintptr(m.handle))
+	m.handle = 0
 }
 
 // Stop stops the core and waits for in-flight calls to finish.

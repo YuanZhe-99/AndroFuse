@@ -18,6 +18,7 @@ import (
 	"github.com/YuanZhe-99/AndroFuse/internal/core"
 	"github.com/YuanZhe-99/AndroFuse/internal/dex"
 	"github.com/YuanZhe-99/AndroFuse/internal/mcp"
+	"github.com/YuanZhe-99/AndroFuse/internal/mesh"
 	"github.com/YuanZhe-99/AndroFuse/internal/scrcpy"
 	"github.com/YuanZhe-99/AndroFuse/internal/vm"
 	_ "github.com/YuanZhe-99/AndroFuse/locales"
@@ -52,6 +53,7 @@ func testApp(t *testing.T) *App {
 		},
 	}
 	a.cameraBridgeURL = "http://127.0.0.1:27190/camera/test.mjpeg"
+	a.meshStatus = mesh.Status{BinaryFound: true, BinaryPath: "easytier-core"}
 	a.diagReady = true
 	a.diag = HostDiagnostics{
 		CoreLoaded: true,

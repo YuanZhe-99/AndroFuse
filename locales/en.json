@@ -330,5 +330,22 @@
   },
   "AVVirtualCamAPIReady": "Windows MFCreateVirtualCamera API detected (loopback MJPEG active; OS COM media source not registered)",
   "AVVirtualCamAPIMissing": "Windows MFCreateVirtualCamera API unavailable (loopback MJPEG active)",
-  "AVUplinkNote": "Non-root PC→Android mic PCM / camera JPEG frames use Companion permission MediaBridge (off by default)."
+  "AVUplinkNote": "Non-root PC→Android mic PCM / camera JPEG frames use Companion permission MediaBridge (off by default).",
+  "MeshCardTitle": "Cross-Network Userspace Mesh (EasyTier --no-tun)",
+  "MeshCardDesc": "Disabled by default (INV-07). Uses an optional user-provided easytier-core --no-tun binary without occupying TAP/TUN or Android VpnService.",
+  "MeshStatusRunning": "EasyTier --no-tun running ({dev})",
+  "@MeshStatusRunning": {
+    "placeholders": {
+      "dev": { "type": "String" }
+    }
+  },
+  "MeshStatusStopped": "Mesh stopped (default safe state)",
+  "MeshBinaryMissing": "easytier-core binary not detected in PATH or app directory (optional)",
+  "MeshNetNameHint": "Mesh network name",
+  "MeshSecretHint": "Network secret (never logged)",
+  "MeshPeerHint": "Peer URI (optional, e.g. tcp://...)",
+  "MeshStartBtn": "Start Mesh (--no-tun)",
+  "MeshStopBtn": "Stop Mesh",
+  "CompanionStartMicBtn": "Start PC Mic Uplink",
+  "CompanionStopMicBtn": "Stop PC Mic Uplink"
 }

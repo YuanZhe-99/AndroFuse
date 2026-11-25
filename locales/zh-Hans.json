@@ -191,5 +191,17 @@
   "AVBridgeLocalURL": "本机 MJPEG 流地址：{url}",
   "AVVirtualCamAPIReady": "检测到系统 MFCreateVirtualCamera 接口（当前启用本机 MJPEG 桥接；未安装独立 COM 虚拟摄像头驱动）",
   "AVVirtualCamAPIMissing": "当前系统未提供 MFCreateVirtualCamera 接口（使用本机 MJPEG 桥接与原生预览）",
-  "AVUplinkNote": "非 Root 下 PC→Android 麦克风 PCM / 摄像头 JPEG 回传需在手机 Companion 显式开启 MediaBridge 授权（默认关闭）。"
+  "AVUplinkNote": "非 Root 下 PC→Android 麦克风 PCM / 摄像头 JPEG 回传需在手机 Companion 显式开启 MediaBridge 授权（默认关闭）。",
+  "MeshCardTitle": "跨网用户态组网（EasyTier --no-tun，可选）",
+  "MeshCardDesc": "默认关闭（INV-07）；使用用户自备的 easytier-core --no-tun 进程，不占用系统 TAP/TUN 或 Android VpnService。",
+  "MeshStatusRunning": "EasyTier --no-tun 运行中（{dev}）",
+  "MeshStatusStopped": "未启用组网（默认安全状态）",
+  "MeshBinaryMissing": "未在 PATH 或程序目录检测到 easytier-core（可选组件）",
+  "MeshNetNameHint": "组网名称",
+  "MeshSecretHint": "组网密钥（不写入日志）",
+  "MeshPeerHint": "对等节点地址（可选，如 tcp://...）",
+  "MeshStartBtn": "启动 --no-tun 组网",
+  "MeshStopBtn": "停止组网",
+  "CompanionStartMicBtn": "传入 PC 麦克风",
+  "CompanionStopMicBtn": "停止 PC 麦克风"
 }

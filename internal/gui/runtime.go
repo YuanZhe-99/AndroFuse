@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -23,6 +24,7 @@ import (
 	"github.com/YuanZhe-99/AndroFuse/internal/dex"
 	"github.com/YuanZhe-99/AndroFuse/internal/lease"
 	"github.com/YuanZhe-99/AndroFuse/internal/mcp"
+	"github.com/YuanZhe-99/AndroFuse/internal/mesh"
 	"github.com/YuanZhe-99/AndroFuse/internal/scrcpy"
 	"github.com/YuanZhe-99/AndroFuse/internal/version"
 	"github.com/YuanZhe-99/AndroFuse/internal/vm"
@@ -72,15 +74,18 @@ type ActiveSessionSummary struct {
 }
 
 type guiRuntime struct {
-	coreMu      sync.Mutex
-	coreLib     *core.Lib
-	adbClient   *adb.Client
-	leaseStore  *lease.Store
-	vmMgr       *vm.Manager
-	androidHost *androidhost.Host
-	compClient  *companion.Client
-	mcpServer   *mcp.Server
-	recoverRan  bool
+	coreMu          sync.Mutex
+	coreLib         *core.Lib
+	adbClient       *adb.Client
+	leaseStore      *lease.Store
+	vmMgr           *vm.Manager
+	androidHost     *androidhost.Host
+	compClient      *companion.Client
+	mcpServer       *mcp.Server
+	meshMgr         *mesh.Manager
+	micUplink       *avbridge.UplinkBridge
+	micUplinkCancel context.CancelFunc
+	recoverRan      bool
 }
 
 func (a *App) ensureAndroidHost() *androidhost.Host {
@@ -1089,7 +1094,23 @@ func (a *App) CloseAllSessions() {
 	a.rt.compClient = nil
 	aHost := a.rt.androidHost
 	mcpSrv := a.rt.mcpServer
+	meshMgr := a.rt.meshMgr
+	micCancel := a.rt.micUplinkCancel
+	a.rt.micUplinkCancel = nil
+	if a.rt.micUplink != nil {
+		a.rt.micUplink.Stop()
+		a.rt.micUplink = nil
+	}
 	a.rt.coreMu.Unlock()
+	if micCancel != nil {
+		micCancel()
+	}
+	if meshMgr != nil {
+		_ = meshMgr.Stop()
+		a.mu.Lock()
+		a.meshStatus = meshMgr.Status()
+		a.mu.Unlock()
+	}
 	if mcpSrv != nil {
 		_ = mcpSrv.EmergencyStop()
 		a.mu.Lock()
@@ -1299,6 +1320,130 @@ func (a *App) LaunchPhoneCamera(d DiscoveredDevice, facing string) {
 		a.addSession(sw)
 		a.runOnMain(func() { sw.attachScrcpy(vSess, nil, sessionDefW, sessionDefH) })
 	}()
+}
+
+// StartMesh starts the optional default-disabled userspace EasyTier (`--no-tun`) supervisor (`INV-07`).
+func (a *App) StartMesh(netName, secret, peer string) {
+	a.rt.coreMu.Lock()
+	if a.rt.meshMgr == nil {
+		a.rt.meshMgr = mesh.NewManager()
+	}
+	mgr := a.rt.meshMgr
+	a.rt.coreMu.Unlock()
+
+	cfg := mesh.Config{
+		Enabled:       true,
+		NetworkName:   strings.TrimSpace(netName),
+		NetworkSecret: strings.TrimSpace(secret),
+		DeviceName:    "androfuse-desktop",
+	}
+	if p := strings.TrimSpace(peer); p != "" {
+		cfg.Peers = []string{p}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	err := mgr.Start(ctx, cfg)
+	cancel()
+
+	a.mu.Lock()
+	a.meshStatus = mgr.Status()
+	if err != nil {
+		a.meshNotice = err.Error()
+	} else {
+		a.meshNotice = ""
+	}
+	a.mu.Unlock()
+	a.runOnMain(func() {})
+}
+
+// StopMesh stops the userspace EasyTier (`--no-tun`) process cleanly.
+func (a *App) StopMesh() {
+	a.rt.coreMu.Lock()
+	mgr := a.rt.meshMgr
+	a.rt.coreMu.Unlock()
+	if mgr == nil {
+		return
+	}
+	err := mgr.Stop()
+	a.mu.Lock()
+	a.meshStatus = mgr.Status()
+	if err != nil {
+		a.meshNotice = err.Error()
+	} else {
+		a.meshNotice = ""
+	}
+	a.mu.Unlock()
+	a.runOnMain(func() {})
+}
+
+// StartCompanionMicUplink opens Windows WASAPI mic capture and streams 20ms s16le PCM to Android Companion (`INV-09`).
+func (a *App) StartCompanionMicUplink() {
+	a.StopCompanionMicUplink()
+	go func() {
+		a.rt.coreMu.Lock()
+		lib, lErr := a.ensureCoreLocked()
+		cl := a.rt.compClient
+		a.rt.coreMu.Unlock()
+		if lErr != nil {
+			a.update(func() { a.micUplinkNotice = lErr.Error() })
+			return
+		}
+		if cl == nil {
+			a.update(func() { a.micUplinkNotice = "companion not connected" })
+			return
+		}
+		cap, err := lib.OpenMicCapture(48000, 1)
+		if err != nil {
+			a.update(func() { a.micUplinkNotice = err.Error() })
+			return
+		}
+		bridge := avbridge.NewUplinkBridge(cl)
+		bridge.Start()
+		ctx, cancel := context.WithCancel(context.Background())
+
+		a.rt.coreMu.Lock()
+		a.rt.micUplink = bridge
+		a.rt.micUplinkCancel = cancel
+		a.rt.coreMu.Unlock()
+
+		a.update(func() {
+			a.micUplinkActive = true
+			a.micUplinkNotice = ""
+		})
+		streamErr := bridge.StreamMic(ctx, 48000, 1, cap)
+		cap.Close()
+		bridge.Stop()
+
+		a.rt.coreMu.Lock()
+		if a.rt.micUplink == bridge {
+			a.rt.micUplink = nil
+			a.rt.micUplinkCancel = nil
+		}
+		a.rt.coreMu.Unlock()
+
+		a.update(func() {
+			a.micUplinkActive = false
+			if streamErr != nil && !errors.Is(streamErr, context.Canceled) {
+				a.micUplinkNotice = streamErr.Error()
+			}
+		})
+	}()
+}
+
+// StopCompanionMicUplink stops the active PC microphone -> Android Companion uplink stream.
+func (a *App) StopCompanionMicUplink() {
+	a.rt.coreMu.Lock()
+	cancel := a.rt.micUplinkCancel
+	bridge := a.rt.micUplink
+	a.rt.micUplinkCancel = nil
+	a.rt.micUplink = nil
+	a.rt.coreMu.Unlock()
+	if bridge != nil {
+		bridge.Stop()
+	}
+	if cancel != nil {
+		cancel()
+	}
+	a.update(func() { a.micUplinkActive = false })
 }
 
 func transportLabel(t adb.Transport) string {

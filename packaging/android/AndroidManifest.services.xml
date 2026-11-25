@@ -1,0 +1,42 @@
+<!-- Android component declarations matching packaging/android/kotlin/com/yuanzhe/androfuse/CompanionServices.kt -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+
+    <application>
+        <service
+            android:name="com.yuanzhe.androfuse.AndroFuseNotificationService"
+            android:exported="true"
+            android:label="AndroFuse Notifications"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name="com.yuanzhe.androfuse.AndroFuseTileService"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher"
+            android:label="AndroFuse"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <receiver
+            android:name="com.yuanzhe.androfuse.AndroFuseWidgetProvider"
+            android:exported="false"
+            android:label="AndroFuse Widget">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.yuanzhe.androfuse.action.OPEN_COMPANION" />
+                <action android:name="com.yuanzhe.androfuse.action.RUN_DISPLAY_GUARD" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/androfuse_widget_info" />
+        </receiver>
+    </application>
+</manifest>

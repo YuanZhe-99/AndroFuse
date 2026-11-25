@@ -30,7 +30,7 @@ AndroFuse implements direct wire-protocol engines in Rust (`core/androfuse-core`
 - **Why Hidden Across All Platforms**: Third-party Windows Miracast Sink advertisement cannot be accomplished through public WinRT APIs alone — it requires invoking Microsoft's undocumented private `wlanapi.dll!WlanNotifyVsIeProviderInt` interface (`GUID b7d94b4d-5db1-4e70-b5c3-dd003eeebe66`). Live verification on Windows 11 ARM64 (`build 26300`, Qualcomm WCN685x WiFiCx `qcwlan8280.sys` `1.0.4122.4000`) proved that peer Miracast association against a `WlanNotifyVsIeProviderInt` GO Sink triggers a kernel-mode `BugCheck 0x0000007E` (`0xC0000005`) inside `qcwlan8280.sys`. Because AndroFuse refuses to ship features backed by unstable undocumented OS internals, the Miracast Sink entry is hidden in the UI and disabled at runtime across all architectures; wired USB ADB and **encrypted TLS Wi-Fi ADB (`_adb-tls-connect._tcp`)** serve as the supported DeX transports.
 - **Preserved Offline Protocol Stack**: The pure-Rust WFD RTSP (`OPTIONS` → `GET_PARAMETER` → `SET_PARAMETER` → `SETUP` → `PLAY`), RTP reorder, MPEG-TS H.264 demuxer, and UIBC packet codecs remain unit-tested in `miracast.rs` as reference code without touching WLAN drivers.
 
-## 4. C-ABI v4 NV12 / WASAPI Pipeline, Local IPC & Lease Ledger (`leases.json`)
+## 4. C-ABI v5 NV12 / WASAPI Pipeline, Local IPC & Lease Ledger (`leases.json`)
 
 | Component | Contract |
 |---|---|

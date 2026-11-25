@@ -24,6 +24,7 @@ import (
 	"github.com/YuanZhe-99/AndroFuse/internal/companion"
 	"github.com/YuanZhe-99/AndroFuse/internal/dex"
 	"github.com/YuanZhe-99/AndroFuse/internal/mcp"
+	"github.com/YuanZhe-99/AndroFuse/internal/mesh"
 	"github.com/YuanZhe-99/AndroFuse/internal/version"
 	"github.com/YuanZhe-99/AndroFuse/internal/vm"
 	L "github.com/YuanZhe-99/AndroFuse/locales"
@@ -86,6 +87,13 @@ type App struct {
 	cameraFacingIdx int
 	cameraBridgeURL string
 	vcamCap         avbridge.VirtualCameraCapability
+	meshNetName     string
+	meshSecret      string
+	meshPeer        string
+	meshStatus      mesh.Status
+	meshNotice      string
+	micUplinkActive bool
+	micUplinkNotice string
 	sessions        map[string]*SessionWindow
 }
 
@@ -117,14 +125,15 @@ func ApplyTheme(theme string) {
 // New constructs an App state container and loads saved preferences.
 func New(profile, stateDir string) *App {
 	a := &App{
-		profile:   profile,
-		stateDir:  stateDir,
-		prefs:     Prefs{Theme: "system"},
-		page:      string(pageDevices),
-		appIcons:  make(map[string]*ui.Bitmap),
-		dexRoutes: make(map[string]dex.RoutePreference),
-		vcamCap:   avbridge.ProbeVirtualCamera(),
-		sessions:  make(map[string]*SessionWindow),
+		profile:    profile,
+		stateDir:   stateDir,
+		prefs:      Prefs{Theme: "system"},
+		page:       string(pageDevices),
+		appIcons:   make(map[string]*ui.Bitmap),
+		dexRoutes:  make(map[string]dex.RoutePreference),
+		vcamCap:    avbridge.ProbeVirtualCamera(),
+		meshStatus: mesh.NewManager().Status(),
+		sessions:   make(map[string]*SessionWindow),
 	}
 	a.loadPrefs()
 	a.syncControlIndices()
@@ -938,6 +947,22 @@ func (a *App) companionCard(c *ui.Context, k tokens, connected bool, st companio
 				if ui.Button(c.Key("btn-comp-guard"), L.CompanionRunDisplayGuard()).Clicked() {
 					a.RunCompanionDisplayGuard()
 				}
+				a.mu.Lock()
+				micActive := a.micUplinkActive
+				micNotice := a.micUplinkNotice
+				a.mu.Unlock()
+				if !micActive {
+					if ui.Button(c.Key("btn-comp-mic"), L.CompanionStartMicBtn()).Clicked() {
+						a.StartCompanionMicUplink()
+					}
+				} else {
+					if ui.Button(c.Key("btn-comp-mic-stop"), L.CompanionStopMicBtn()).Clicked() {
+						a.StopCompanionMicUplink()
+					}
+				}
+				if micNotice != "" {
+					ui.Text(c, micNotice).FontSize(sizeSmall).TextColor(k.warn)
+				}
 			})
 		}
 	})
@@ -1268,6 +1293,7 @@ func (a *App) settingsPage(c *ui.Context, k tokens) {
 		})
 
 		a.mcpSettingsCard(c, k)
+		a.meshSettingsCard(c, k)
 
 		card(c.Key("settings-security")).Children(func() {
 			ui.Text(c, L.SettingsSecurityTitle()).Bold().FontSize(sizeBody)
@@ -1335,6 +1361,58 @@ func (a *App) mcpSettingsCard(c *ui.Context, k tokens) {
 				ui.Text(c.Key(fmt.Sprintf("mcp-audit-%d", i)), rowText).FontSize(sizeSmall).TextColor(k.muted)
 			}
 		}
+	})
+}
+
+func (a *App) meshSettingsCard(c *ui.Context, k tokens) {
+	a.mu.Lock()
+	st := a.meshStatus
+	notice := a.meshNotice
+	a.mu.Unlock()
+
+	card(c.Key("settings-mesh")).Children(func() {
+		ui.Text(c, L.MeshCardTitle()).Bold().FontSize(sizeBody)
+		ui.Text(c, L.MeshCardDesc()).FontSize(sizeSmall).TextColor(k.muted)
+
+		if st.Running {
+			dev := st.DeviceName
+			if dev == "" {
+				dev = "androfuse-desktop"
+			}
+			ui.Text(c, L.MeshStatusRunning(dev)).FontSize(sizeBody).TextColor(k.good)
+		} else {
+			ui.Text(c, L.MeshStatusStopped()).FontSize(sizeBody).TextColor(k.muted)
+		}
+		if !st.BinaryFound {
+			ui.Text(c, L.MeshBinaryMissing()).FontSize(sizeSmall).TextColor(k.muted)
+		}
+
+		ui.Row(c.Key("mesh-fields-row")).FillWidth().Gap(8).Children(func() {
+			ui.TextInput(c.Key("mesh-net"), &a.meshNetName).Placeholder(L.MeshNetNameHint()).Grow(1)
+			ui.TextInput(c.Key("mesh-sec"), &a.meshSecret).Placeholder(L.MeshSecretHint()).Grow(1)
+			ui.TextInput(c.Key("mesh-peer"), &a.meshPeer).Placeholder(L.MeshPeerHint()).Grow(1)
+		})
+
+		if notice != "" {
+			ui.Text(c, notice).FontSize(sizeSmall).TextColor(k.warn)
+		}
+
+		ui.Row(c.Key("mesh-actions-row")).Gap(8).Children(func() {
+			if !st.Running {
+				if ui.Button(c.Key("mesh-start-btn"), L.MeshStartBtn()).Clicked() {
+					a.mu.Lock()
+					netName := a.meshNetName
+					secret := a.meshSecret
+					peer := a.meshPeer
+					a.mu.Unlock()
+					go a.StartMesh(netName, secret, peer)
+				}
+			} else {
+				if ui.Button(c.Key("mesh-stop-btn"), L.MeshStopBtn()).Clicked() {
+					go a.StopMesh()
+				}
+			}
+		})
 	})
 }
 

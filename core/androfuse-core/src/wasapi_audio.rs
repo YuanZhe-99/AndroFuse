@@ -7,8 +7,8 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 use windows::Win32::Media::Audio::{
     AUDCLNT_BUFFERFLAGS_SILENT, AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM,
-    AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY, IAudioClient, IAudioRenderClient, IMMDeviceEnumerator,
-    MMDeviceEnumerator, WAVEFORMATEX, eConsole, eRender,
+    AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY, IAudioCaptureClient, IAudioClient, IAudioRenderClient,
+    IMMDeviceEnumerator, MMDeviceEnumerator, WAVEFORMATEX, eCapture, eConsole, eRender,
 };
 use windows::Win32::System::Com::{
     CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize,
@@ -252,6 +252,195 @@ fn run_wasapi_loop(
     }
 
     // SAFETY: Stops active WASAPI render stream prior to releasing COM interfaces.
+    let _ = unsafe { audio_client.Stop() };
+    Ok(())
+}
+
+/// Active WASAPI shared-mode PCM capture stream reading from the default Windows microphone.
+pub struct WasapiMicCapturer {
+    ring: Arc<Mutex<PcmRingBuffer>>,
+    stop: Arc<AtomicBool>,
+    thread: Mutex<Option<JoinHandle<()>>>,
+}
+
+impl WasapiMicCapturer {
+    /// Opens the default Windows audio capture endpoint at `sample_rate` Hz and `channels`.
+    pub fn open(sample_rate: u32, channels: u16) -> Result<Self, String> {
+        let rate = if sample_rate == 0 {
+            48_000
+        } else {
+            sample_rate
+        };
+        let ch = if channels == 0 { 1 } else { channels };
+        let ring = Arc::new(Mutex::new(PcmRingBuffer::new(MAX_RING_BYTES)));
+        let stop = Arc::new(AtomicBool::new(false));
+        let (tx, rx) = mpsc::sync_channel::<Result<(), String>>(1);
+
+        let ring_t = Arc::clone(&ring);
+        let stop_t = Arc::clone(&stop);
+        let handle = thread::Builder::new()
+            .name("androfuse-wasapi-mic".to_string())
+            .spawn(move || {
+                // SAFETY: Initializes COM on this dedicated WASAPI capture worker thread.
+                let co_hr = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
+                let com_ok = co_hr.is_ok();
+                let _ = run_wasapi_capture_loop(rate, ch, &ring_t, &stop_t, tx);
+                if com_ok {
+                    // SAFETY: Pairs with the successful `CoInitializeEx` on this same thread.
+                    unsafe { CoUninitialize() };
+                }
+            })
+            .map_err(|e| format!("spawn wasapi mic thread: {e}"))?;
+
+        match rx.recv_timeout(Duration::from_secs(4)) {
+            Ok(Ok(())) => Ok(Self {
+                ring,
+                stop,
+                thread: Mutex::new(Some(handle)),
+            }),
+            Ok(Err(e)) => {
+                stop.store(true, Ordering::Release);
+                let _ = handle.join();
+                Err(e)
+            }
+            Err(_) => {
+                stop.store(true, Ordering::Release);
+                let _ = handle.join();
+                Err("timed out initializing WASAPI capture client".to_string())
+            }
+        }
+    }
+
+    /// Reads captured signed 16-bit interleaved PCM frames into `dst`.
+    pub fn read_pcm(&self, dst: &mut [u8]) -> usize {
+        if dst.is_empty() {
+            return 0;
+        }
+        if let Ok(mut g) = self.ring.lock() {
+            g.pop_into(dst)
+        } else {
+            0
+        }
+    }
+}
+
+impl Drop for WasapiMicCapturer {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        if let Ok(mut guard) = self.thread.lock()
+            && let Some(h) = guard.take()
+        {
+            let _ = h.join();
+        }
+    }
+}
+
+fn run_wasapi_capture_loop(
+    sample_rate: u32,
+    channels: u16,
+    ring: &Arc<Mutex<PcmRingBuffer>>,
+    stop: &Arc<AtomicBool>,
+    ready_tx: mpsc::SyncSender<Result<(), String>>,
+) -> Result<(), String> {
+    let init = (|| -> Result<(IAudioClient, IAudioCaptureClient, usize), String> {
+        // SAFETY: COM is initialized on this thread; instantiates standard MMDeviceEnumerator.
+        let enumerator: IMMDeviceEnumerator =
+            unsafe { CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL) }
+                .map_err(|e| format!("MMDeviceEnumerator: {e}"))?;
+        // SAFETY: Queries default console capture (microphone) audio endpoint.
+        let device = unsafe { enumerator.GetDefaultAudioEndpoint(eCapture, eConsole) }
+            .map_err(|e| format!("GetDefaultAudioEndpoint(eCapture): {e}"))?;
+        // SAFETY: Activates IAudioClient interface on the default capture device.
+        let audio_client: IAudioClient = unsafe { device.Activate(CLSCTX_ALL, None) }
+            .map_err(|e| format!("Activate capture IAudioClient: {e}"))?;
+
+        let block_align = channels.saturating_mul(2);
+        let wfx = WAVEFORMATEX {
+            wFormatTag: WAVE_FORMAT_PCM,
+            nChannels: channels,
+            nSamplesPerSec: sample_rate,
+            nAvgBytesPerSec: sample_rate.saturating_mul(u32::from(block_align)),
+            nBlockAlign: block_align,
+            wBitsPerSample: 16,
+            cbSize: 0,
+        };
+        let stream_flags =
+            AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY;
+        // SAFETY: `wfx` lives for the duration of `Initialize`; 40ms capture buffer.
+        unsafe {
+            audio_client.Initialize(
+                AUDCLNT_SHAREMODE_SHARED,
+                stream_flags,
+                400_000,
+                0,
+                &wfx,
+                None,
+            )
+        }
+        .map_err(|e| format!("capture IAudioClient::Initialize: {e}"))?;
+
+        // SAFETY: Obtains IAudioCaptureClient service from initialized IAudioClient.
+        let capture_client: IAudioCaptureClient = unsafe { audio_client.GetService() }
+            .map_err(|e| format!("GetService IAudioCaptureClient: {e}"))?;
+        // SAFETY: Starts WASAPI capture stream.
+        unsafe { audio_client.Start() }.map_err(|e| format!("capture IAudioClient::Start: {e}"))?;
+        Ok((audio_client, capture_client, usize::from(block_align)))
+    })();
+
+    let (audio_client, capture_client, frame_bytes) = match init {
+        Ok(v) => {
+            let _ = ready_tx.send(Ok(()));
+            v
+        }
+        Err(e) => {
+            let _ = ready_tx.send(Err(e.clone()));
+            return Err(e);
+        }
+    };
+
+    let mut silence_scratch = Vec::new();
+    while !stop.load(Ordering::Acquire) {
+        // SAFETY: Queries next available captured packet size in frames.
+        while let Ok(pkt_frames) = unsafe { capture_client.GetNextPacketSize() } {
+            if pkt_frames == 0 || stop.load(Ordering::Acquire) {
+                break;
+            }
+            let mut data_ptr = std::ptr::null_mut();
+            let mut num_frames = 0u32;
+            let mut flags = 0u32;
+            // SAFETY: Pointers receive WASAPI buffer slice for the queued capture packet.
+            let hr = unsafe {
+                capture_client.GetBuffer(&mut data_ptr, &mut num_frames, &mut flags, None, None)
+            };
+            if hr.is_err() {
+                break;
+            }
+            let byte_len = num_frames as usize * frame_bytes;
+            if byte_len > 0 {
+                if (flags & (AUDCLNT_BUFFERFLAGS_SILENT.0 as u32)) != 0 || data_ptr.is_null() {
+                    if silence_scratch.len() < byte_len {
+                        silence_scratch.resize(byte_len, 0);
+                    } else {
+                        silence_scratch[..byte_len].fill(0);
+                    }
+                    if let Ok(mut g) = ring.lock() {
+                        g.push(&silence_scratch[..byte_len]);
+                    }
+                } else {
+                    // SAFETY: `data_ptr` points to `byte_len` valid bytes owned by WASAPI until ReleaseBuffer.
+                    let pcm = unsafe { std::slice::from_raw_parts(data_ptr, byte_len) };
+                    if let Ok(mut g) = ring.lock() {
+                        g.push(pcm);
+                    }
+                }
+            }
+            // SAFETY: Releases the capture packet acquired by GetBuffer.
+            let _ = unsafe { capture_client.ReleaseBuffer(num_frames) };
+        }
+        thread::sleep(Duration::from_millis(8));
+    }
+
+    // SAFETY: Stops active WASAPI capture stream prior to releasing COM interfaces.
     let _ = unsafe { audio_client.Stop() };
     Ok(())
 }

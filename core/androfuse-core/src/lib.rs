@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 /// C ABI version spoken between Go (`internal/core`) and `androfuse-core`.
-pub const ABI_VERSION: u32 = 4;
+pub const ABI_VERSION: u32 = 5;
 
 static STATE: OnceLock<Mutex<Option<CoreState>>> = OnceLock::new();
 static NEXT_DECODER_ID: AtomicU64 = AtomicU64::new(1);
@@ -56,6 +56,22 @@ fn audio_map() -> &'static Mutex<HashMap<u64, Arc<wasapi_audio::WasapiAudioPlaye
 #[cfg(not(windows))]
 fn audio_map() -> &'static Mutex<HashMap<u64, ()>> {
     AUDIO_PLAYERS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+#[cfg(windows)]
+static MIC_CAPTURERS: OnceLock<Mutex<HashMap<u64, Arc<wasapi_audio::WasapiMicCapturer>>>> =
+    OnceLock::new();
+#[cfg(not(windows))]
+static MIC_CAPTURERS: OnceLock<Mutex<HashMap<u64, ()>>> = OnceLock::new();
+
+#[cfg(windows)]
+fn mic_map() -> &'static Mutex<HashMap<u64, Arc<wasapi_audio::WasapiMicCapturer>>> {
+    MIC_CAPTURERS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+#[cfg(not(windows))]
+fn mic_map() -> &'static Mutex<HashMap<u64, ()>> {
+    MIC_CAPTURERS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 #[derive(Debug, Clone)]
@@ -322,6 +338,9 @@ pub extern "C" fn androfuse_stop() {
     }
     if let Ok(mut a) = audio_map().lock() {
         a.clear();
+    }
+    if let Ok(mut mic) = mic_map().lock() {
+        mic.clear();
     }
     let mut guard = match state_lock().lock() {
         Ok(g) => g,
@@ -737,6 +756,109 @@ pub unsafe extern "C" fn androfuse_audio_push_pcm(handle: u64, data: *const u8, 
 #[unsafe(no_mangle)]
 pub extern "C" fn androfuse_audio_close(handle: u64) {
     if let Ok(mut map) = audio_map().lock() {
+        map.remove(&handle);
+    }
+}
+
+/// Opens a shared-mode WASAPI microphone PCM capture stream (Windows only).
+///
+/// Ownership: Caller owns the returned opaque numeric handle in `*out_handle` and must release it
+/// with `androfuse_mic_close`.
+///
+/// # Safety
+/// `out_handle` must be a valid writable non-null pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn androfuse_mic_open(
+    sample_rate: u32,
+    channels: u16,
+    out_handle: *mut u64,
+) -> i32 {
+    if out_handle.is_null() {
+        return -1;
+    }
+    catch_unwind(AssertUnwindSafe(|| {
+        #[cfg(windows)]
+        {
+            match wasapi_audio::WasapiMicCapturer::open(sample_rate, channels) {
+                Ok(cap) => {
+                    let id = NEXT_DECODER_ID.fetch_add(1, Ordering::Relaxed);
+                    let mut map = match mic_map().lock() {
+                        Ok(g) => g,
+                        Err(p) => p.into_inner(),
+                    };
+                    map.insert(id, Arc::new(cap));
+                    // SAFETY: `out_handle` was checked non-null and is guaranteed writable by caller.
+                    unsafe {
+                        *out_handle = id;
+                    }
+                    0
+                }
+                Err(_) => -3,
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = (sample_rate, channels);
+            -2
+        }
+    }))
+    .unwrap_or(-99)
+}
+
+/// Reads captured signed 16-bit PCM frames into caller buffer `dst` (up to `dst_cap` bytes),
+/// writing the actual byte count copied into `*out_len`.
+///
+/// # Safety
+/// If `dst_cap > 0`, `dst` must be writable for `dst_cap` bytes; `out_len` must be a valid writable pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn androfuse_mic_read_pcm(
+    handle: u64,
+    dst: *mut u8,
+    dst_cap: usize,
+    out_len: *mut usize,
+) -> i32 {
+    if out_len.is_null() || (dst_cap > 0 && dst.is_null()) {
+        return -1;
+    }
+    catch_unwind(AssertUnwindSafe(|| {
+        #[cfg(windows)]
+        {
+            let cap = {
+                let map = match mic_map().lock() {
+                    Ok(g) => g,
+                    Err(p) => p.into_inner(),
+                };
+                map.get(&handle).cloned()
+            };
+            let Some(cap) = cap else {
+                return -2;
+            };
+            let n = if dst_cap == 0 {
+                0
+            } else {
+                // SAFETY: Caller guarantees `dst` is writable for `dst_cap` bytes.
+                let slice = unsafe { std::slice::from_raw_parts_mut(dst, dst_cap) };
+                cap.read_pcm(slice)
+            };
+            // SAFETY: Caller guarantees `out_len` is valid writable storage.
+            unsafe {
+                *out_len = n;
+            }
+            0
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = (handle, dst, dst_cap, out_len);
+            -2
+        }
+    }))
+    .unwrap_or(-99)
+}
+
+/// Closes a WASAPI microphone capture handle and joins its capture thread.
+#[unsafe(no_mangle)]
+pub extern "C" fn androfuse_mic_close(handle: u64) {
+    if let Ok(mut map) = mic_map().lock() {
         map.remove(&handle);
     }
 }

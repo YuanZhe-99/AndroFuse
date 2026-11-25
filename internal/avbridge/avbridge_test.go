@@ -101,3 +101,58 @@ func TestUplinkBridgePermissionGate(t *testing.T) {
 		t.Fatalf("unexpected uplink stats: %+v", st)
 	}
 }
+
+type mockPCMReader struct {
+	chunks int
+}
+
+func (m *mockPCMReader) ReadPCM(dst []byte) (int, error) {
+	if m.chunks <= 0 {
+		return 0, nil
+	}
+	m.chunks--
+	n := min(len(dst), 640)
+	for i := 0; i < n; i++ {
+		dst[i] = byte(i)
+	}
+	return n, nil
+}
+
+func (m *mockPCMReader) Close() {}
+
+func TestUplinkBridgeStreamMic(t *testing.T) {
+	srv, err := companion.NewServer("PAIR5678", "Pixel", "16", 36, companion.Handler{
+		GetPermissions: func() companion.Permissions {
+			p := companion.DefaultPermissions()
+			p.MediaBridge = true
+			return p
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewServer error = %v", err)
+	}
+	if err := srv.Listen("127.0.0.1:0"); err != nil {
+		t.Fatalf("Listen error = %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = srv.Serve(ctx) }()
+	defer func() { _ = srv.Close() }()
+
+	cl, err := companion.Dial(ctx, srv.Addr(), "PAIR5678", srv.Fingerprint())
+	if err != nil {
+		t.Fatalf("Dial error = %v", err)
+	}
+	defer func() { _ = cl.Close() }()
+
+	bridge := NewUplinkBridge(cl)
+	bridge.Start()
+	streamCtx, streamCancel := context.WithTimeout(ctx, 120*time.Millisecond)
+	defer streamCancel()
+	_ = bridge.StreamMic(streamCtx, 48000, 1, &mockPCMReader{chunks: 2})
+
+	st := bridge.Stats()
+	if st.AudioFrames != 2 || st.BytesSent != 1280 {
+		t.Fatalf("unexpected streamed mic stats: %+v", st)
+	}
+}

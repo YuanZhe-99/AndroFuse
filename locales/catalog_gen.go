@@ -1967,3 +1967,123 @@ func AVUplinkNote() string { return In(i18n.Locale()).AVUplinkNote() }
 func (msgs Messages) AVUplinkNote() string {
 	return Catalog.Format(msgs.locale, "AVUplinkNote", nil)
 }
+
+// MeshCardTitle says "Cross-Network Userspace Mesh (EasyTier --no-tun)"
+// in the language the app shows.
+func MeshCardTitle() string { return In(i18n.Locale()).MeshCardTitle() }
+
+// MeshCardTitle says "Cross-Network Userspace Mesh (EasyTier --no-tun)"
+// in the language of msgs.
+func (msgs Messages) MeshCardTitle() string {
+	return Catalog.Format(msgs.locale, "MeshCardTitle", nil)
+}
+
+// MeshCardDesc says "Disabled by default (INV-07). Uses an optional user-provided easytier-core --no-tun binary without occupying TAP/TUN …"
+// in the language the app shows.
+func MeshCardDesc() string { return In(i18n.Locale()).MeshCardDesc() }
+
+// MeshCardDesc says "Disabled by default (INV-07). Uses an optional user-provided easytier-core --no-tun binary without occupying TAP/TUN …"
+// in the language of msgs.
+func (msgs Messages) MeshCardDesc() string {
+	return Catalog.Format(msgs.locale, "MeshCardDesc", nil)
+}
+
+// MeshStatusRunning says "EasyTier --no-tun running ({dev})"
+// in the language the app shows.
+func MeshStatusRunning(dev string) string { return In(i18n.Locale()).MeshStatusRunning(dev) }
+
+// MeshStatusRunning says "EasyTier --no-tun running ({dev})"
+// in the language of msgs.
+func (msgs Messages) MeshStatusRunning(dev string) string {
+	return Catalog.Format(msgs.locale, "MeshStatusRunning", map[string]any{"dev": dev})
+}
+
+// MeshStatusStopped says "Mesh stopped (default safe state)"
+// in the language the app shows.
+func MeshStatusStopped() string { return In(i18n.Locale()).MeshStatusStopped() }
+
+// MeshStatusStopped says "Mesh stopped (default safe state)"
+// in the language of msgs.
+func (msgs Messages) MeshStatusStopped() string {
+	return Catalog.Format(msgs.locale, "MeshStatusStopped", nil)
+}
+
+// MeshBinaryMissing says "easytier-core binary not detected in PATH or app directory (optional)"
+// in the language the app shows.
+func MeshBinaryMissing() string { return In(i18n.Locale()).MeshBinaryMissing() }
+
+// MeshBinaryMissing says "easytier-core binary not detected in PATH or app directory (optional)"
+// in the language of msgs.
+func (msgs Messages) MeshBinaryMissing() string {
+	return Catalog.Format(msgs.locale, "MeshBinaryMissing", nil)
+}
+
+// MeshNetNameHint says "Mesh network name"
+// in the language the app shows.
+func MeshNetNameHint() string { return In(i18n.Locale()).MeshNetNameHint() }
+
+// MeshNetNameHint says "Mesh network name"
+// in the language of msgs.
+func (msgs Messages) MeshNetNameHint() string {
+	return Catalog.Format(msgs.locale, "MeshNetNameHint", nil)
+}
+
+// MeshSecretHint says "Network secret (never logged)"
+// in the language the app shows.
+func MeshSecretHint() string { return In(i18n.Locale()).MeshSecretHint() }
+
+// MeshSecretHint says "Network secret (never logged)"
+// in the language of msgs.
+func (msgs Messages) MeshSecretHint() string {
+	return Catalog.Format(msgs.locale, "MeshSecretHint", nil)
+}
+
+// MeshPeerHint says "Peer URI (optional, e.g. tcp://...)"
+// in the language the app shows.
+func MeshPeerHint() string { return In(i18n.Locale()).MeshPeerHint() }
+
+// MeshPeerHint says "Peer URI (optional, e.g. tcp://...)"
+// in the language of msgs.
+func (msgs Messages) MeshPeerHint() string {
+	return Catalog.Format(msgs.locale, "MeshPeerHint", nil)
+}
+
+// MeshStartBtn says "Start Mesh (--no-tun)"
+// in the language the app shows.
+func MeshStartBtn() string { return In(i18n.Locale()).MeshStartBtn() }
+
+// MeshStartBtn says "Start Mesh (--no-tun)"
+// in the language of msgs.
+func (msgs Messages) MeshStartBtn() string {
+	return Catalog.Format(msgs.locale, "MeshStartBtn", nil)
+}
+
+// MeshStopBtn says "Stop Mesh"
+// in the language the app shows.
+func MeshStopBtn() string { return In(i18n.Locale()).MeshStopBtn() }
+
+// MeshStopBtn says "Stop Mesh"
+// in the language of msgs.
+func (msgs Messages) MeshStopBtn() string {
+	return Catalog.Format(msgs.locale, "MeshStopBtn", nil)
+}
+
+// CompanionStartMicBtn says "Start PC Mic Uplink"
+// in the language the app shows.
+func CompanionStartMicBtn() string { return In(i18n.Locale()).CompanionStartMicBtn() }
+
+// CompanionStartMicBtn says "Start PC Mic Uplink"
+// in the language of msgs.
+func (msgs Messages) CompanionStartMicBtn() string {
+	return Catalog.Format(msgs.locale, "CompanionStartMicBtn", nil)
+}
+
+// CompanionStopMicBtn says "Stop PC Mic Uplink"
+// in the language the app shows.
+func CompanionStopMicBtn() string { return In(i18n.Locale()).CompanionStopMicBtn() }
+
+// CompanionStopMicBtn says "Stop PC Mic Uplink"
+// in the language of msgs.
+func (msgs Messages) CompanionStopMicBtn() string {
+	return Catalog.Format(msgs.locale, "CompanionStopMicBtn", nil)
+}

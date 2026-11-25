@@ -15,7 +15,7 @@
 | `cmd/androfuse` | Unified MyGo native UI entry point (`mygo_nowebview` on Windows) |
 | `cmd/androfuse-svc` | Headless engine CLI (`version`, `check [--json]`, `probe [--json]`, `run [--socket <path>]`) |
 | `internal/version` | Single product version (`Version`), verified against `mygo.json` |
-| `internal/core` | `LoadLibraryEx` / `purego` loader for `androfuse_core` C ABI v4, `NV12Ring` zero-alloc frames, and `AudioPlayer` |
+| `internal/core` | `LoadLibraryEx` / `purego` loader for `androfuse_core` C ABI v5, `NV12Ring` zero-alloc frames, `AudioPlayer` & `MicCapturer` |
 | `internal/localapi` | Per-user AF_UNIX NDJSON IPC server (`SIO_AF_UNIX_GETPEERPID` + Windows SID peer verification) exposing `devices` (including `unified_devices`) and `vm.*` control |
 | `internal/vm` | On-demand downloadable headless Android VM manager (`%LOCALAPPDATA%\AndroFuse\vm`, native `arm64-v8a` / `x86_64`, `INV-03`, `INV-10`) |
 | `internal/companion` | Encrypted TLS 1.3 NDJSON Companion protocol shared by desktop and Android APK (telemetry, clipboard, notifications, files, continuity, display guard, ADB beacon; `INV-07`, `INV-09`) |
@@ -39,7 +39,7 @@
 | `tools/checkpe` | Verifies every `.exe` and `.dll` matches target native PE machine (`0xAA64` / `0x8664`, `INV-10`) |
 | `tools/icon` | Renders `resources/icon.svg` into desktop, UI, tray, and Android adaptive icon PNGs |
 | `tools/checkdocs` | Verifies 1:1 structural parity between `doc/en-us/` and `doc/zh-cn/` |
-| `core/androfuse-core` | Rust 2024 `cdylib`/`rlib` core library: C ABI v4, host diagnostics, `scrcpy v5.0.1` wire framing, Media Foundation DXVA NV12 decode (`mf_video.rs`), WASAPI audio output (`wasapi_audio.rs`), and hidden Miracast protocol module (`miracast.rs`) |
+| `core/androfuse-core` | Rust 2024 `cdylib`/`rlib` core library: C ABI v5, host diagnostics, `scrcpy v5.0.1` wire framing, Media Foundation DXVA NV12 decode (`mf_video.rs`), WASAPI audio render & mic capture (`wasapi_audio.rs`), and hidden Miracast protocol module (`miracast.rs`) |
 
 ## Planned Runtime Modules (M2–M4)
 
@@ -49,15 +49,15 @@
 
 ## FFI
 
-`androfuse-core` exports a versioned C ABI (`androfuse_abi_version() -> u32`, currently `4`):
+`androfuse-core` exports a versioned C ABI (`androfuse_abi_version() -> u32`, currently `5`):
 
 | Export | Does |
 |---|---|
-| `androfuse_abi_version() -> u32` | Returns ABI version (`4`); Go refuses mismatches |
+| `androfuse_abi_version() -> u32` | Returns ABI version (`5`); Go refuses mismatches |
 | `androfuse_start(json, len, *out, *out_len) -> i32` | Initializes core with `{version, state_dir, profile?}` |
 | `androfuse_call(json, len, *out, *out_len) -> i32` | Dispatches `{method, params}` (`status`, `diagnostics.self_check`, `miracast.test_sink`) |
 | `androfuse_free(ptr, len)` | Frees response buffer allocated by `androfuse_start` / `androfuse_call` |
-| `androfuse_stop()` | Stops core, destroys active decoders, audio players, and Miracast sessions, and clears in-memory state |
+| `androfuse_stop()` | Stops core, destroys active decoders, audio players, mic capturers, and Miracast sessions, and clears in-memory state |
 | `androfuse_decoder_open(codec_id, w, h, *out_handle) -> i32` | Opens a Media Foundation H.264/HEVC decoder preferring `MF_SA_D3D11_AWARE` hardware acceleration |
 | `androfuse_decoder_push(handle, data, len, pts_us, flags) -> i32` | Submits an Annex-B access unit (`flags` bit 0: discontinuity, bit 1: drain) |
 | `androfuse_decoder_pull_nv12(handle, dst, dst_cap, *out_meta) -> i32` | Copies decoded planar NV12 frame into caller-owned ring buffer (`0` ok, `1` grow buffer, `2` need input) |
@@ -69,6 +69,9 @@
 | `androfuse_audio_open(sample_rate, channels, *out_handle) -> i32` | Opens a shared-mode WASAPI PCM render player (`48000 Hz`, stereo s16le) |
 | `androfuse_audio_push_pcm(handle, data, len) -> i32` | Enqueues interleaved s16le PCM audio frames into the bounded WASAPI ring buffer |
 | `androfuse_audio_close(handle)` | Closes the WASAPI audio player and joins its render thread |
+| `androfuse_mic_open(sample_rate, channels, *out_handle) -> i32` | Opens a shared-mode WASAPI microphone PCM capture stream (`48000 Hz`, mono/stereo s16le) |
+| `androfuse_mic_read_pcm(handle, dst, dst_cap, *out_len) -> i32` | Copies queued captured s16le PCM bytes into caller buffer `dst` and writes count into `*out_len` |
+| `androfuse_mic_close(handle)` | Closes the WASAPI microphone capture handle and joins its capture thread |
 
 On Windows, `internal/core` loads `androfuse_core.dll` by absolute path with `LoadLibraryEx(LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32)`. Response output slots live in a heap `sync.Pool` so Go stack growth never invalidates pointers across C calls.
 

@@ -15,7 +15,7 @@
 | `cmd/androfuse` | 统一 MyGo 原生 UI 入口（Windows 启用 `mygo_nowebview`） |
 | `cmd/androfuse-svc` | 无头引擎命令行（`version`、`check [--json]`、`probe [--json]`、`run [--socket <path>]`） |
 | `internal/version` | 全局唯一产品版本号（`Version`），测试强制与 `mygo.json` 一致 |
-| `internal/core` | `androfuse_core` C ABI v4 加载器、`NV12Ring` 零分配帧环与 `AudioPlayer` |
+| `internal/core` | `androfuse_core` C ABI v5 加载器、`NV12Ring` 零分配帧环、`AudioPlayer` 与 `MicCapturer` |
 | `internal/localapi` | 同用户 AF_UNIX NDJSON 服务（`SIO_AF_UNIX_GETPEERPID` + Windows SID 校验），提供含 `unified_devices` 的设备列表与 `vm.*` 虚拟机控制 |
 | `internal/vm` | 按需下载的轻量无头 Android 虚拟机管理器（`%LOCALAPPDATA%\AndroFuse\vm`，原生 `arm64-v8a` / `x86_64`，`INV-03`、`INV-10`） |
 | `internal/companion` | 桌面与 Android APK 共用的 TLS 1.3 加密 Companion NDJSON 协议（遥测、剪贴板、通知回复、文件传输、应用接力、显示守护与 ADB 信标；`INV-07`、`INV-09`） |
@@ -39,7 +39,7 @@
 | `tools/checkpe` | 校验所有 `.exe` 与 `.dll` 是否为目标原生 PE 机器码（`0xAA64` / `0x8664`，`INV-10`） |
 | `tools/icon` | 从 `resources/icon.svg` 渲染桌面、UI、托盘与 Android 自适应图标 PNG |
 | `tools/checkdocs` | 校验 `doc/en-us/` 与 `doc/zh-cn/` 的 1:1 结构镜像一致性 |
-| `core/androfuse-core` | Rust 2024 `cdylib`/`rlib` 核心库：C ABI v4、主机自检、`scrcpy v5.0.1` 协议、Media Foundation DXVA NV12 解码（`mf_video.rs`）、WASAPI 音频输出（`wasapi_audio.rs`）及已隐藏的 Miracast 协议模块（`miracast.rs`） |
+| `core/androfuse-core` | Rust 2024 `cdylib`/`rlib` 核心库：C ABI v5、主机自检、`scrcpy v5.0.1` 协议、Media Foundation DXVA NV12 解码（`mf_video.rs`）、WASAPI 音频播放与麦克风采集（`wasapi_audio.rs`）及已隐藏的 Miracast 协议模块（`miracast.rs`） |
 
 ## 规划中的运行时模块（M2–M4）
 
@@ -49,15 +49,15 @@
 
 ## FFI 边界
 
-`androfuse-core` 导出带版本校验的 C ABI（`androfuse_abi_version() -> u32`，当前为 `4`）：
+`androfuse-core` 导出带版本校验的 C ABI（`androfuse_abi_version() -> u32`，当前为 `5`）：
 
 | 导出函数 | 作用 |
 |---|---|
-| `androfuse_abi_version() -> u32` | 返回 ABI 版本号（`4`）；Go 侧不匹配则拒绝加载 |
+| `androfuse_abi_version() -> u32` | 返回 ABI 版本号（`5`）；Go 侧不匹配则拒绝加载 |
 | `androfuse_start(json, len, *out, *out_len) -> i32` | 以 `{version, state_dir, profile?}` 初始化核心库 |
 | `androfuse_call(json, len, *out, *out_len) -> i32` | 分发 `{method, params}` 请求（`status`、`diagnostics.self_check`、`miracast.test_sink`） |
 | `androfuse_free(ptr, len)` | 释放 `androfuse_start` / `androfuse_call` 分配的响应缓冲区 |
-| `androfuse_stop()` | 停止核心库、销毁活跃解码器、音频播放器与 Miracast 会话并清理内存状态 |
+| `androfuse_stop()` | 停止核心库、销毁活跃解码器、音频播放器、麦克风采集器与 Miracast 会话并清理内存状态 |
 | `androfuse_decoder_open(codec_id, w, h, *out_handle) -> i32` | 打开 Media Foundation H.264/HEVC 解码器（优先 `MF_SA_D3D11_AWARE` 硬解） |
 | `androfuse_decoder_push(handle, data, len, pts_us, flags) -> i32` | 送入 Annex-B 帧单元（`flags` 第 0 位为不连续标记，第 1 位触发立即 drain） |
 | `androfuse_decoder_pull_nv12(handle, dst, dst_cap, *out_meta) -> i32` | 将解码后 NV12 平面写入调用方环形缓冲区（`0` 成功、`1` 需扩容、`2` 需更多输入） |
@@ -69,6 +69,9 @@
 | `androfuse_audio_open(sample_rate, channels, *out_handle) -> i32` | 打开共享模式 WASAPI PCM 播放流（`48000 Hz` 双声道 s16le） |
 | `androfuse_audio_push_pcm(handle, data, len) -> i32` | 将交错 s16le PCM 音频帧写入有界 WASAPI 环形缓冲区 |
 | `androfuse_audio_close(handle)` | 关闭 WASAPI 音频播放器句柄并回收渲染线程 |
+| `androfuse_mic_open(sample_rate, channels, *out_handle) -> i32` | 打开共享模式 WASAPI 麦克风 PCM 采集流（`48000 Hz` 单/双声道 s16le） |
+| `androfuse_mic_read_pcm(handle, dst, dst_cap, *out_len) -> i32` | 从 WASAPI 采集缓冲区复制捕获的 s16le PCM 字节至 `dst` 并写入 `*out_len` |
+| `androfuse_mic_close(handle)` | 关闭 WASAPI 麦克风采集句柄并回收采集线程 |
 
 在 Windows 上，`internal/core` 使用 `LoadLibraryEx(LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32)` 按绝对路径加载 `androfuse_core.dll`。响应槽位通过堆上 `sync.Pool` 分配，防止 Go 协程栈迁移导致指针失效。
 
