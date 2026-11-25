@@ -16,7 +16,8 @@
 | `cmd/androfuse-svc` | Headless engine CLI (`version`, `check [--json]`, `probe [--json]`, `run [--socket <path>]`) |
 | `internal/version` | Single product version (`Version`), verified against `mygo.json` |
 | `internal/core` | `LoadLibraryEx` / `purego` loader for `androfuse_core` C ABI v4, `NV12Ring` zero-alloc frames, and `AudioPlayer` |
-| `internal/localapi` | Per-user AF_UNIX NDJSON IPC server (`SIO_AF_UNIX_GETPEERPID` + Windows SID peer verification) exposing `devices` (including `unified_devices`) |
+| `internal/localapi` | Per-user AF_UNIX NDJSON IPC server (`SIO_AF_UNIX_GETPEERPID` + Windows SID peer verification) exposing `devices` (including `unified_devices`) and `vm.*` control |
+| `internal/vm` | On-demand downloadable headless Android VM manager (`%LOCALAPPDATA%\AndroFuse\vm`, native `arm64-v8a` / `x86_64`, `INV-03`, `INV-10`) |
 | `internal/adb` | Argument-vector ADB client, `MergeDevices` USB+TLS Wi-Fi deduplication (`INV-02`), mDNS TLS wireless connect/pair, `MaskSerial`/`MaskEndpoint` scrubbing, `emulator-*` classification, `--user 0` probes & app list |
 | `internal/lease` | Atomic `leases.json` ledger guaranteeing cleanup of virtual displays, DeX loopbacks, and port forwards (`INV-03`) |
 | `internal/scrcpy` | `scrcpy-server v5.0.1` wire framing, interactive touch/mouse/scroll/keyboard/flex-display sessions, raw PCM audio, `MP4Recorder`, and offline replay fixtures |
@@ -67,3 +68,4 @@ On Windows, `internal/core` loads `androfuse_core.dll` by absolute path with `Lo
 |---|---|
 | `%APPDATA%\AndroFuse\` (`AndroFuse-<profile>`) | Per-user GUI preferences (`gui.json`) and logs (`logs/`) |
 | `%LOCALAPPDATA%\AndroFuse\` | Device profiles, paired credentials (DPAPI-protected), and virtual-display lease ledger (`leases.json`) |
+| `%LOCALAPPDATA%\AndroFuse\vm\` | Optional on-demand built-in Android VM (`sdk/` and `avd/`), deleted cleanly via VM manager |

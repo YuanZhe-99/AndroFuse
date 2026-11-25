@@ -250,13 +250,14 @@ flowchart TB
   3. **路由策略选择器与编码器并发余量保护（`INV-01`、`INV-06`）**：新增 `FormatOneUIVersion` + `SelectRoute` 与卡片路由分段选择器（自动选路 / 原生 DeX / 虚拟兼容模式），并在“设备”与“工作模式”页实时展示硬件编码流并发计数与上限拦截，防止静默黑屏。
 - **待真机实测收口**：接上物理三星 Fold 8 后执行有线 USB 拔线热切换至加密 TLS Wi-Fi DeX 的真机端到端验收；非 DeX 机型在 `Pixel_9a_API_36` 与离线回归测试中均已校验诚实回退标注。
 
-### M3：Android Companion APK 与跨端协同（`0.3.0`）
-- **交付范围**：
+### M3：Android Companion APK 与跨端协同（`0.3.0` — 🚧 M3a 内建 VM 已落地，待推进 M3b Companion APK 与异网）
+- **M3a 已落地（内建可下载 Android 虚拟机，§6.6）**：
+  - 新增 `internal/vm`（`NativeABIForArch`、`Provision` 官方仓库清单解析与校验下载、`Start` `-no-window` 无头启动、`Stop` `adb emu kill` 干净清理、`DeleteManaged` 镜像回收）、`localapi` `vm.*` 控制接口、`androfuse-svc run` 托管以及 GUI「内建 Android 虚拟机」一键下载/无头启停卡片；
+- **M3b 待推进范围**：
   1. 同仓构建并签名发布可选 **Android Companion APK**（`arm64-v8a`、16 KB 对齐）；
   2. 实现 P1 全部增强能力：应用清单与图标、通知同步与回复、双向剪贴板协助、SAF 文件浏览/双向传输/拖放、设备状态与温控、APP 接力、断线虚拟显示恢复守护（分级权限开关）；
   3. USB 拔线 30 秒宽限期自动热切换至 TLS Wi-Fi ADB 重连，以及跨 Wi-Fi/5G 结合 VPN 或用户态 EasyTier（`--no-tun`）异网直连；
-  4. **内建可下载 Android 虚拟机（基础期，§6.6）**：`androfuse-svc` 托管按需下载/校验/无头启停原生架构（`arm64-v8a` / `x86_64`）Android VM 并无缝接入独立 APP 窗口体验。
-- **Done When**：卸载 Companion APK 时基础有线/无线 ADB 模式 100% 正常；安装并显式授权后 P1 全部跨端协同功能通过真机端到端验收。
+- **Done When**：内建 VM 支持原生架构下载/无头启停并无缝运行独立 APP 窗口；卸载 Companion APK 时基础有线/无线 ADB 模式 100% 正常；安装并显式授权后 P1 全部跨端协同功能通过真机端到端验收。
 
 ### M4：双架构正式发布、Windows 10 评估与长稳打磨（`0.4.0`）
 - **交付范围**：

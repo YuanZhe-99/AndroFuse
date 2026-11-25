@@ -8,6 +8,7 @@ import (
 
 	"github.com/YuanZhe-99/AndroFuse/internal/lease"
 	"github.com/YuanZhe-99/AndroFuse/internal/version"
+	"github.com/YuanZhe-99/AndroFuse/internal/vm"
 )
 
 func TestServerPingStatusAndLeases(t *testing.T) {
@@ -25,11 +26,13 @@ func TestServerPingStatusAndLeases(t *testing.T) {
 		t.Fatalf("Acquire: %v", err)
 	}
 
+	vmMgr := vm.NewManager(filepath.Join(dir, "vm"), nil, nil)
 	srv, err := Listen(Options{
 		SocketPath: sock,
 		StateDir:   dir,
 		Profile:    "test",
 		Leases:     store,
+		VM:         vmMgr,
 	})
 	if err != nil {
 		t.Fatalf("Listen: %v", err)
@@ -62,6 +65,15 @@ func TestServerPingStatusAndLeases(t *testing.T) {
 	}
 	if rem := store.List(); len(rem) != 0 {
 		t.Fatalf("expected 0 leases after recover, got %+v", rem)
+	}
+
+	vmResp, err := Call(callCtx, sock, Request{ID: "4", Method: "vm.status"})
+	if err != nil || !vmResp.OK {
+		t.Fatalf("vm.status failed: resp=%+v err=%v", vmResp, err)
+	}
+	vmResMap, ok := vmResp.Result.(map[string]any)
+	if !ok || vmResMap["native_abi"] == "" {
+		t.Fatalf("unexpected vm.status payload: %+v", vmResp.Result)
 	}
 
 	cancel()

@@ -20,6 +20,7 @@ import (
 	"github.com/YuanZhe-99/AndroFuse/internal/lease"
 	"github.com/YuanZhe-99/AndroFuse/internal/localapi"
 	"github.com/YuanZhe-99/AndroFuse/internal/version"
+	"github.com/YuanZhe-99/AndroFuse/internal/vm"
 )
 
 type probeReport struct {
@@ -113,12 +114,16 @@ func runDaemon(args []string) error {
 
 	localapi.RecoverLeases(ctx, adbClient, store)
 
+	vmMgr := vm.NewManager(vm.DefaultVMRoot(), adbClient, nil)
+	defer vmMgr.Stop(context.Background())
+
 	srv, err := localapi.Listen(localapi.Options{
 		SocketPath: sockPath,
 		StateDir:   stateDir,
 		Profile:    profile,
 		Leases:     store,
 		ADB:        adbClient,
+		VM:         vmMgr,
 	})
 	if err != nil {
 		return err

@@ -19,6 +19,7 @@ import (
 	"github.com/YuanZhe-99/AndroFuse/internal/dex"
 	"github.com/YuanZhe-99/AndroFuse/internal/lease"
 	"github.com/YuanZhe-99/AndroFuse/internal/version"
+	"github.com/YuanZhe-99/AndroFuse/internal/vm"
 )
 
 // Request is one NDJSON RPC line accepted by the localapi server.
@@ -43,6 +44,7 @@ type Options struct {
 	Profile    string
 	Leases     *lease.Store
 	ADB        *adb.Client
+	VM         *vm.Manager
 }
 
 // Server serves NDJSON commands over a per-user AF_UNIX socket.
@@ -231,6 +233,69 @@ func (s *Server) dispatch(ctx context.Context, req Request) Response {
 			OK:     true,
 			Result: map[string]any{"recovered": n},
 		}
+	case "vm.status":
+		if s.opts.VM == nil {
+			return Response{ID: req.ID, OK: false, Error: "vm manager unavailable"}
+		}
+		qCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+		defer cancel()
+		return Response{ID: req.ID, OK: true, Result: s.opts.VM.Status(qCtx)}
+	case "vm.provision":
+		if s.opts.VM == nil {
+			return Response{ID: req.ID, OK: false, Error: "vm manager unavailable"}
+		}
+		var p struct {
+			AVDName string `json:"avd_name"`
+		}
+		if len(req.Params) > 0 {
+			_ = json.Unmarshal(req.Params, &p)
+		}
+		go func() {
+			pCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
+			defer cancel()
+			_ = s.opts.VM.Provision(pCtx, p.AVDName)
+		}()
+		qCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
+		defer cancel()
+		return Response{ID: req.ID, OK: true, Result: s.opts.VM.Status(qCtx)}
+	case "vm.start":
+		if s.opts.VM == nil {
+			return Response{ID: req.ID, OK: false, Error: "vm manager unavailable"}
+		}
+		var p struct {
+			AVDName string `json:"avd_name"`
+		}
+		if len(req.Params) > 0 {
+			_ = json.Unmarshal(req.Params, &p)
+		}
+		go func() {
+			sCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+			defer cancel()
+			_, _ = s.opts.VM.Start(sCtx, p.AVDName)
+		}()
+		qCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
+		defer cancel()
+		return Response{ID: req.ID, OK: true, Result: s.opts.VM.Status(qCtx)}
+	case "vm.stop":
+		if s.opts.VM == nil {
+			return Response{ID: req.ID, OK: false, Error: "vm manager unavailable"}
+		}
+		sCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		if err := s.opts.VM.Stop(sCtx); err != nil {
+			return Response{ID: req.ID, OK: false, Error: err.Error()}
+		}
+		return Response{ID: req.ID, OK: true, Result: s.opts.VM.Status(sCtx)}
+	case "vm.delete":
+		if s.opts.VM == nil {
+			return Response{ID: req.ID, OK: false, Error: "vm manager unavailable"}
+		}
+		dCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		defer cancel()
+		if err := s.opts.VM.DeleteManaged(dCtx); err != nil {
+			return Response{ID: req.ID, OK: false, Error: err.Error()}
+		}
+		return Response{ID: req.ID, OK: true, Result: s.opts.VM.Status(dCtx)}
 	default:
 		return Response{
 			ID:    req.ID,

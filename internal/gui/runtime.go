@@ -19,6 +19,7 @@ import (
 	"github.com/YuanZhe-99/AndroFuse/internal/lease"
 	"github.com/YuanZhe-99/AndroFuse/internal/scrcpy"
 	"github.com/YuanZhe-99/AndroFuse/internal/version"
+	"github.com/YuanZhe-99/AndroFuse/internal/vm"
 	L "github.com/YuanZhe-99/AndroFuse/locales"
 )
 
@@ -69,7 +70,102 @@ type guiRuntime struct {
 	coreLib    *core.Lib
 	adbClient  *adb.Client
 	leaseStore *lease.Store
+	vmMgr      *vm.Manager
 	recoverRan bool
+}
+
+func (a *App) ensureVMManager() *vm.Manager {
+	a.rt.coreMu.Lock()
+	if a.rt.vmMgr != nil {
+		m := a.rt.vmMgr
+		a.rt.coreMu.Unlock()
+		return m
+	}
+	client := a.rt.adbClient
+	if client == nil {
+		if c, err := adb.FindClient(); err == nil {
+			a.rt.adbClient = c
+			client = c
+		}
+	}
+	m := vm.NewManager(vm.DefaultVMRoot(), client, func(st vm.Status) {
+		a.update(func() {
+			a.vmStatus = st
+		})
+	})
+	a.rt.vmMgr = m
+	a.rt.coreMu.Unlock()
+	return m
+}
+
+// RefreshVMStatus inspects installed and running built-in Android VMs off the UI thread.
+func (a *App) RefreshVMStatus() {
+	go func() {
+		mgr := a.ensureVMManager()
+		ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+		st := mgr.Status(ctx)
+		cancel()
+		a.update(func() {
+			a.vmStatus = st
+		})
+	}()
+}
+
+// ProvisionVM downloads and provisions a native-ABI Android VM into `%LOCALAPPDATA%\AndroFuse\vm`.
+func (a *App) ProvisionVM() {
+	go func() {
+		mgr := a.ensureVMManager()
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		defer cancel()
+		if err := mgr.Provision(ctx, vm.DefaultAVDName); err != nil {
+			a.update(func() { a.deviceNotice = err.Error() })
+			return
+		}
+		a.RefreshVMStatus()
+	}()
+}
+
+// StartVM boots the built-in Android VM headlessly (`-no-window`) and refreshes Devices when online.
+func (a *App) StartVM(avdName string) {
+	a.update(func() { a.deviceNotice = "" })
+	go func() {
+		mgr := a.ensureVMManager()
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		if _, err := mgr.Start(ctx, avdName); err != nil {
+			a.update(func() { a.deviceNotice = err.Error() })
+			return
+		}
+		a.RefreshDevices()
+	}()
+}
+
+// StopVM gracefully shuts down the running built-in Android VM (`adb emu kill`).
+func (a *App) StopVM() {
+	go func() {
+		mgr := a.ensureVMManager()
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := mgr.Stop(ctx); err != nil {
+			a.update(func() { a.deviceNotice = err.Error() })
+			return
+		}
+		a.RefreshDevices()
+	}()
+}
+
+// DeleteManagedVM removes the managed built-in VM directory after stopping any active instance.
+func (a *App) DeleteManagedVM() {
+	go func() {
+		mgr := a.ensureVMManager()
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := mgr.DeleteManaged(ctx); err != nil {
+			a.update(func() { a.deviceNotice = err.Error() })
+			return
+		}
+		a.RefreshDevices()
+	}()
 }
 
 func (a *App) ensureCoreLocked() (*core.Lib, error) {
@@ -263,6 +359,7 @@ func (a *App) findLiveTransportFor(ctx context.Context, client *adb.Client, hard
 // RefreshDevices scans wired USB, TLS Wi-Fi ADB, Emulator, and mDNS Wireless Debugging services,
 // deduplicating multi-transport entries for the same physical device (`INV-02`).
 func (a *App) RefreshDevices() {
+	a.RefreshVMStatus()
 	a.mu.Lock()
 	if a.scanningDevices {
 		a.mu.Unlock()
@@ -846,7 +943,13 @@ func (a *App) CloseAllSessions() {
 		a.rt.coreLib.Stop()
 		a.rt.coreLib = nil
 	}
+	vmMgr := a.rt.vmMgr
 	a.rt.coreMu.Unlock()
+	if vmMgr != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+		_ = vmMgr.Stop(ctx)
+		cancel()
+	}
 }
 
 func transportLabel(t adb.Transport) string {

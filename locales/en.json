@@ -53,6 +53,40 @@
   "WirelessPairCodeHint": "6-digit code",
   "WirelessPairBtn": "Pair TLS",
   "PairSuccessHint": "TLS Wireless ADB paired; refreshing targets...",
+  "VMCardTitle": "Built-in Android VM (On-Demand)",
+  "VMCardDesc": "Optional native-ABI headless Android VM under %LOCALAPPDATA%\\AndroFuse\\vm so you can launch Independent App Windows without a physical phone.",
+  "VMStateNotInstalled": "Not Downloaded",
+  "VMStateDownloading": "Downloading {pct}%",
+  "@VMStateDownloading": {
+    "placeholders": {
+      "pct": { "type": "int" }
+    }
+  },
+  "VMStateStopped": "Ready",
+  "VMStateStarting": "Starting...",
+  "VMStateRunning": "Running ({serial})",
+  "@VMStateRunning": {
+    "placeholders": {
+      "serial": { "type": "String" }
+    }
+  },
+  "VMStateError": "Error",
+  "VMActionDownload": "Download Built-in VM",
+  "VMActionStart": "Start Headless VM",
+  "VMActionStop": "Stop VM",
+  "VMActionDelete": "Remove Managed VM",
+  "VMNativeArchBadge": "Native {abi}",
+  "@VMNativeArchBadge": {
+    "placeholders": {
+      "abi": { "type": "String" }
+    }
+  },
+  "VMStorageBadge": "{mb} MB",
+  "@VMStorageBadge": {
+    "placeholders": {
+      "mb": { "type": "int" }
+    }
+  },
   "ActionLaunchDeX": "Launch Samsung DeX",
   "ActionLaunchFallback": "Virtual Desktop Fallback",
   "ActionLaunchMirror": "Phone Mirror",

@@ -17,12 +17,22 @@ import (
 	"github.com/YuanZhe-99/AndroFuse/internal/core"
 	"github.com/YuanZhe-99/AndroFuse/internal/dex"
 	"github.com/YuanZhe-99/AndroFuse/internal/scrcpy"
+	"github.com/YuanZhe-99/AndroFuse/internal/vm"
 	_ "github.com/YuanZhe-99/AndroFuse/locales"
 )
 
 func testApp(t *testing.T) *App {
 	t.Helper()
 	a := New("test", t.TempDir())
+	a.vmStatus = vm.Status{
+		State:          vm.StateStopped,
+		NativeABI:      "arm64-v8a",
+		SystemImagePkg: "system-images;android-36;google_apis;arm64-v8a",
+		VMRoot:         filepath.Join(t.TempDir(), "vm"),
+		AVDName:        "Pixel_9a_API_36",
+		AvailableAVDs:  []string{"Pixel_9a_API_36"},
+		UsingHostSDK:   true,
+	}
 	a.diagReady = true
 	a.diag = HostDiagnostics{
 		CoreLoaded: true,

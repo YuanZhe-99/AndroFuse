@@ -464,6 +464,146 @@ func (msgs Messages) PairSuccessHint() string {
 	return Catalog.Format(msgs.locale, "PairSuccessHint", nil)
 }
 
+// VMCardTitle says "Built-in Android VM (On-Demand)"
+// in the language the app shows.
+func VMCardTitle() string { return In(i18n.Locale()).VMCardTitle() }
+
+// VMCardTitle says "Built-in Android VM (On-Demand)"
+// in the language of msgs.
+func (msgs Messages) VMCardTitle() string {
+	return Catalog.Format(msgs.locale, "VMCardTitle", nil)
+}
+
+// VMCardDesc says "Optional native-ABI headless Android VM under %LOCALAPPDATA%\\AndroFuse\\vm so you can launch Independent App Windows w…"
+// in the language the app shows.
+func VMCardDesc() string { return In(i18n.Locale()).VMCardDesc() }
+
+// VMCardDesc says "Optional native-ABI headless Android VM under %LOCALAPPDATA%\\AndroFuse\\vm so you can launch Independent App Windows w…"
+// in the language of msgs.
+func (msgs Messages) VMCardDesc() string {
+	return Catalog.Format(msgs.locale, "VMCardDesc", nil)
+}
+
+// VMStateNotInstalled says "Not Downloaded"
+// in the language the app shows.
+func VMStateNotInstalled() string { return In(i18n.Locale()).VMStateNotInstalled() }
+
+// VMStateNotInstalled says "Not Downloaded"
+// in the language of msgs.
+func (msgs Messages) VMStateNotInstalled() string {
+	return Catalog.Format(msgs.locale, "VMStateNotInstalled", nil)
+}
+
+// VMStateDownloading says "Downloading {pct}%"
+// in the language the app shows.
+func VMStateDownloading(pct int) string { return In(i18n.Locale()).VMStateDownloading(pct) }
+
+// VMStateDownloading says "Downloading {pct}%"
+// in the language of msgs.
+func (msgs Messages) VMStateDownloading(pct int) string {
+	return Catalog.Format(msgs.locale, "VMStateDownloading", map[string]any{"pct": pct})
+}
+
+// VMStateStopped says "Ready"
+// in the language the app shows.
+func VMStateStopped() string { return In(i18n.Locale()).VMStateStopped() }
+
+// VMStateStopped says "Ready"
+// in the language of msgs.
+func (msgs Messages) VMStateStopped() string {
+	return Catalog.Format(msgs.locale, "VMStateStopped", nil)
+}
+
+// VMStateStarting says "Starting..."
+// in the language the app shows.
+func VMStateStarting() string { return In(i18n.Locale()).VMStateStarting() }
+
+// VMStateStarting says "Starting..."
+// in the language of msgs.
+func (msgs Messages) VMStateStarting() string {
+	return Catalog.Format(msgs.locale, "VMStateStarting", nil)
+}
+
+// VMStateRunning says "Running ({serial})"
+// in the language the app shows.
+func VMStateRunning(serial string) string { return In(i18n.Locale()).VMStateRunning(serial) }
+
+// VMStateRunning says "Running ({serial})"
+// in the language of msgs.
+func (msgs Messages) VMStateRunning(serial string) string {
+	return Catalog.Format(msgs.locale, "VMStateRunning", map[string]any{"serial": serial})
+}
+
+// VMStateError says "Error"
+// in the language the app shows.
+func VMStateError() string { return In(i18n.Locale()).VMStateError() }
+
+// VMStateError says "Error"
+// in the language of msgs.
+func (msgs Messages) VMStateError() string {
+	return Catalog.Format(msgs.locale, "VMStateError", nil)
+}
+
+// VMActionDownload says "Download Built-in VM"
+// in the language the app shows.
+func VMActionDownload() string { return In(i18n.Locale()).VMActionDownload() }
+
+// VMActionDownload says "Download Built-in VM"
+// in the language of msgs.
+func (msgs Messages) VMActionDownload() string {
+	return Catalog.Format(msgs.locale, "VMActionDownload", nil)
+}
+
+// VMActionStart says "Start Headless VM"
+// in the language the app shows.
+func VMActionStart() string { return In(i18n.Locale()).VMActionStart() }
+
+// VMActionStart says "Start Headless VM"
+// in the language of msgs.
+func (msgs Messages) VMActionStart() string {
+	return Catalog.Format(msgs.locale, "VMActionStart", nil)
+}
+
+// VMActionStop says "Stop VM"
+// in the language the app shows.
+func VMActionStop() string { return In(i18n.Locale()).VMActionStop() }
+
+// VMActionStop says "Stop VM"
+// in the language of msgs.
+func (msgs Messages) VMActionStop() string {
+	return Catalog.Format(msgs.locale, "VMActionStop", nil)
+}
+
+// VMActionDelete says "Remove Managed VM"
+// in the language the app shows.
+func VMActionDelete() string { return In(i18n.Locale()).VMActionDelete() }
+
+// VMActionDelete says "Remove Managed VM"
+// in the language of msgs.
+func (msgs Messages) VMActionDelete() string {
+	return Catalog.Format(msgs.locale, "VMActionDelete", nil)
+}
+
+// VMNativeArchBadge says "Native {abi}"
+// in the language the app shows.
+func VMNativeArchBadge(abi string) string { return In(i18n.Locale()).VMNativeArchBadge(abi) }
+
+// VMNativeArchBadge says "Native {abi}"
+// in the language of msgs.
+func (msgs Messages) VMNativeArchBadge(abi string) string {
+	return Catalog.Format(msgs.locale, "VMNativeArchBadge", map[string]any{"abi": abi})
+}
+
+// VMStorageBadge says "{mb} MB"
+// in the language the app shows.
+func VMStorageBadge(mb int) string { return In(i18n.Locale()).VMStorageBadge(mb) }
+
+// VMStorageBadge says "{mb} MB"
+// in the language of msgs.
+func (msgs Messages) VMStorageBadge(mb int) string {
+	return Catalog.Format(msgs.locale, "VMStorageBadge", map[string]any{"mb": mb})
+}
+
 // ActionLaunchDeX says "Launch Samsung DeX"
 // in the language the app shows.
 func ActionLaunchDeX() string { return In(i18n.Locale()).ActionLaunchDeX() }

@@ -21,6 +21,7 @@ import (
 	"github.com/YuanZhe-99/AndroFuse/internal/adb"
 	"github.com/YuanZhe-99/AndroFuse/internal/dex"
 	"github.com/YuanZhe-99/AndroFuse/internal/version"
+	"github.com/YuanZhe-99/AndroFuse/internal/vm"
 	L "github.com/YuanZhe-99/AndroFuse/locales"
 )
 
@@ -69,6 +70,7 @@ type App struct {
 	showSystemApps  bool
 	appIcons        map[string]*ui.Bitmap
 	dexRoutes       map[string]dex.RoutePreference
+	vmStatus        vm.Status
 	sessions        map[string]*SessionWindow
 }
 
@@ -138,6 +140,7 @@ func (a *App) SetTray(t *Tray) {
 func (a *App) Start() {
 	a.RefreshDiagnostics()
 	a.RefreshDevices()
+	a.RefreshVMStatus()
 }
 
 // Focus creates (when closed to tray) or raises the main application window.
@@ -506,6 +509,7 @@ func (a *App) devicesPage(c *ui.Context, k tokens) {
 	devs := append([]DiscoveredDevice(nil), a.devices...)
 	mdns := append([]adb.MDNSService(nil), a.mdnsServices...)
 	notice := a.deviceNotice
+	vmSt := a.vmStatus
 	sessList := make([]*SessionWindow, 0, len(a.sessions))
 	for _, s := range a.sessions {
 		sessList = append(sessList, s)
@@ -602,6 +606,8 @@ func (a *App) devicesPage(c *ui.Context, k tokens) {
 				}
 			})
 		})
+
+		a.vmCard(c, k, vmSt)
 
 		if len(devs) == 0 {
 			card(c.Key("devices-empty")).Children(func() {
@@ -739,6 +745,109 @@ func (a *App) devicesPage(c *ui.Context, k tokens) {
 				}
 			})
 		}
+	})
+}
+
+func (a *App) vmCard(c *ui.Context, k tokens, st vm.Status) {
+	if st.NativeABI == "" {
+		st.NativeABI, st.SystemImagePkg, _ = vm.NativeABIForArch(runtime.GOARCH)
+	}
+	if st.State == "" {
+		st.State = vm.StateNotInstalled
+	}
+
+	stateLabel := L.VMStateNotInstalled()
+	stateColor := k.muted
+	switch st.State {
+	case vm.StateDownloading:
+		stateLabel = L.VMStateDownloading(st.ProgressPct)
+		stateColor = k.brand
+	case vm.StateStarting:
+		stateLabel = L.VMStateStarting()
+		stateColor = k.brand
+	case vm.StateRunning:
+		stateLabel = L.VMStateRunning(st.RunningSerial)
+		stateColor = k.good
+	case vm.StateStopped:
+		stateLabel = L.VMStateStopped()
+		stateColor = k.good
+	case vm.StateError:
+		stateLabel = L.VMStateError()
+		stateColor = k.bad
+	}
+
+	hasManagedDefault := false
+	for _, avd := range st.AvailableAVDs {
+		if avd == vm.DefaultAVDName {
+			hasManagedDefault = true
+			break
+		}
+	}
+
+	card(c.Key("vm-card")).Children(func() {
+		ui.Row(c.Key("vm-card-head")).FillWidth().AlignItems(ui.Center).Gap(8).Wrap().Children(func() {
+			ui.Icon(c, iconDevices).Size(18, 18).TextColor(k.brand)
+			ui.Text(c, L.VMCardTitle()).Bold().FontSize(sizeHeading).Grow(1)
+			if st.NativeABI != "" {
+				ui.Row(c.Key("vm-abi-pill")).Padding(badgePadV, badgePadH).Radius(pillRadius).Background(k.brandSoft).Children(func() {
+					ui.Text(c, L.VMNativeArchBadge(st.NativeABI)).FontSize(sizeSmall).TextColor(k.brand).Bold().SingleLine()
+				})
+			}
+			if st.StorageBytes > 0 {
+				mb := max(int(st.StorageBytes>>20), 1)
+				ui.Row(c.Key("vm-size-pill")).Padding(badgePadV, badgePadH).Radius(pillRadius).Background(k.brandSoft).Children(func() {
+					ui.Text(c, L.VMStorageBadge(mb)).FontSize(sizeSmall).TextColor(k.muted).Bold().SingleLine()
+				})
+			}
+			ui.Row(c.Key("vm-state-pill")).Padding(badgePadV, badgePadH).Radius(pillRadius).Background(k.brandSoft).Children(func() {
+				ui.Text(c, stateLabel).FontSize(sizeSmall).TextColor(stateColor).Bold().SingleLine()
+			})
+		})
+
+		ui.Text(c, L.VMCardDesc()).FontSize(sizeSmall).TextColor(k.muted)
+
+		if len(st.AvailableAVDs) > 0 {
+			ui.Text(c, strings.Join(st.AvailableAVDs, " · ")).FontSize(sizeSmall).TextColor(k.muted)
+		}
+		if st.ProgressMsg != "" {
+			ui.Text(c, st.ProgressMsg).FontSize(sizeSmall).TextColor(k.brand)
+		}
+		if st.LastError != "" {
+			ui.Text(c, st.LastError).FontSize(sizeSmall).TextColor(k.warn)
+		}
+
+		busy := st.State == vm.StateDownloading || st.State == vm.StateStarting
+		ui.Row(c.Key("vm-actions")).Gap(8).Wrap().AlignItems(ui.Center).Children(func() {
+			if st.State == vm.StateRunning {
+				if ui.Button(c.Key("btn-vm-stop"), L.VMActionStop()).Clicked() {
+					a.StopVM()
+				}
+				return
+			}
+			if len(st.AvailableAVDs) > 0 {
+				startBtn := ui.Button(c.Key("btn-vm-start"), L.VMActionStart())
+				if busy {
+					startBtn.Disabled(true)
+				}
+				if startBtn.Clicked() {
+					a.StartVM(st.AVDName)
+				}
+			}
+			if !hasManagedDefault {
+				dlBtn := ui.Button(c.Key("btn-vm-download"), L.VMActionDownload())
+				if busy {
+					dlBtn.Disabled(true)
+				}
+				if dlBtn.Clicked() {
+					a.ProvisionVM()
+				}
+			}
+			if st.StorageBytes > 0 && !busy {
+				if ui.Button(c.Key("btn-vm-delete"), L.VMActionDelete()).Clicked() {
+					a.DeleteManagedVM()
+				}
+			}
+		})
 	})
 }
 
