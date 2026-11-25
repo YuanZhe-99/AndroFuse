@@ -47,3 +47,8 @@ AndroFuse implements direct wire-protocol engines in Rust (`core/androfuse-core`
 
 - **Authenticated Transport (`INV-07`)**: `internal/androidhost` hosts an optional ECDSA P-256 TLS 1.3 server on port `27189` whose SHA-256 certificate fingerprint is pinned by callers; every connection must authenticate its first `auth` frame via constant-time pairing token check (`subtle.ConstantTimeCompare`).
 - **Graded Opt-In Permissions & Cross-Network ADB Beacon (`INV-09`, `INV-11`)**: `status.get`, `clipboard.set`, `notification.reply`, `app.continuity`, `file.push` (traversal-rejected + SHA-256 verified), `display.guard`, and dynamic `_adb-tls-connect._tcp` port advertisement are gated individually on user switches inside Android Companion, while base USB/Wi-Fi mirroring and DeX remain 100% functional without any APK installed.
+
+## 7. Opt-In Local MCP Control Interface (`internal/mcp`)
+
+- **Default-Disabled Loopback Binding (`INV-07`, `INV-08`)**: Starts disabled (`Enabled=false`). Explicit activation from Settings binds strictly to `127.0.0.1:0` over HTTP (`POST`) with a fresh 32-char random bearer token checked via `subtle.ConstantTimeCompare` and a bounded 30-minute TTL.
+- **Allowlist, Emergency Stop & Scrubbed Audit**: `tools/list` and `tools/call` enforce per-tool `Allowlist` flags (`list_devices` and `run_diagnostics` allowed by default when enabled; `launch_app` requires an explicit Settings toggle). `EmergencyStop()` (also invoked automatically on app shutdown) clears tokens/listeners immediately, and audit entries never log bearer tokens or raw device serials.

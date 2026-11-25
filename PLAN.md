@@ -255,8 +255,9 @@ flowchart TB
   - 新增 `internal/vm`（`NativeABIForArch`、`Provision` 官方仓库清单解析与校验下载、`Start` `-no-window` 无头启动、`Stop` `adb emu kill` 干净清理、`DeleteManaged` 镜像回收）、`localapi` `vm.*` 控制接口、`androfuse-svc run` 托管以及 GUI「内建 Android 虚拟机」一键下载/无头启停卡片；
 - **M3b 已落地（同仓 Companion 协议/宿主/UI、EasyTier `--no-tun` 与 APK 构建工具）**：
   1. 新增 `internal/companion`（TLS 1.3 + 自签证书 SHA-256 指纹固定 + 常量时间配对码校验 + 遥测/剪贴板/通知回复/文件防穿越传输/应用接力/显示守护/无线 ADB 信标协议，全链路回环单测通过）与 `internal/androidhost`（Android sysfs 电量温控探针、`companion.json` 持久化、脱敏审计日志及 MyGo 移动端分级授权界面）；
-  2. 新增 `internal/mesh`（默认关闭、用户态 EasyTier `--no-tun` 端口转发与密钥/IP 脱敏，全单测通过）及 `tools/buildapk`（支持 Linux/Windows 构建 `arm64-v8a` APK 并校验 `zipalign -c -P 16 4`）；
-  3. 桌面 GUI 接入可选「Android Companion 协同与异网直连」卡片（不强制安装 APK，`INV-11`）；后续待接入物理真机的系统级 Kotlin 权限桥接（`NotificationListenerService` / `SAF` / `MediaProjection`）。
+  2. 新增 `internal/androidbridge`（安全权限状态探测接口）与 `packaging/android/kotlin/com/yuanzhe/androfuse/CompanionServices.kt`（`NotificationListenerService`、`TileService`、`MediaProjection` 与 `ACTION_OPEN_DOCUMENT_TREE` Kotlin 桥接骨架）；
+  3. 新增 `internal/mesh`（默认关闭、用户态 EasyTier `--no-tun` 端口转发与密钥/IP 脱敏，全单测通过）及 `tools/buildapk`（支持 Linux/Windows 构建 `arm64-v8a` APK 并校验 `zipalign -c -P 16 4`）；
+  4. 桌面 GUI 接入可选「Android Companion 协同与异网直连」卡片（不强制安装 APK，`INV-11`）；后续仅余物理真机上的系统权限端到端联调。
 - **Done When**：内建 VM 支持原生架构下载/无头启停并无缝运行独立 APP 窗口；卸载 Companion APK 时基础有线/无线 ADB 模式 100% 正常；安装并显式授权后 P1 全部跨端协同功能通过真机端到端验收。
 
 ### M4：双架构正式发布、Windows 10 评估与长稳打磨（`0.4.0` — 🚧 签名/PE 校验/打包脚本与 GitHub CI/Release 工作流已落地，待真机 x64/Win10 与 30 分钟压测）
@@ -267,8 +268,9 @@ flowchart TB
 - **待真机硬件验收**：Windows 11 `x64` 真机与 Windows 10（`19045+`）安装/运行实测、多显示器跨屏高 DPI、休眠唤醒与 30 分钟连续烤机压测。
 - **Done When**：双 Windows 架构均在真实硬件完成安装、升级、卸载与全套验收清单。
 
-### M5：后续增强（`0.5.0+`）
-- Android Widget / 快捷磁贴、手机摄像头作为 Windows 摄像头、PC 摄像头/麦克风传入 Android、默认关闭的可授权本地 MCP 控制接口。
+### M5：后续增强（`0.5.0+` — 🚧 本地 MCP 已实现，待音视频虚拟化扩展）
+- **已落地（M5 本地 MCP 控制面，`INV-07`、`INV-08`）**：新增 `internal/mcp`（默认关闭、仅绑定 `127.0.0.1`、30 分钟临时密钥常量时间校验、按工具白名单与一键紧急停止、脱敏审计日志）并接入 Settings 面板，退出主窗口时自动执行 `EmergencyStop()`。
+- **待扩展**：Android Widget / 快捷磁贴深度联动、手机摄像头作为 Windows 摄像头、PC 摄像头/麦克风传入 Android。
 
 ---
 

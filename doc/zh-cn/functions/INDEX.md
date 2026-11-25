@@ -10,6 +10,8 @@
 | `internal/vm` | 按需下载的轻量无头 Android 虚拟机管理器（`INV-03`、`INV-10`） | `NewManager`、`NativeABIForArch`、`DefaultVMRoot`、`ParseCmdlineToolsManifest`、`Manager.Status`、`Manager.Provision`、`Manager.Start`、`Manager.Stop`、`Manager.DeleteManaged` |
 | `internal/companion` | TLS 1.3 加密 Companion NDJSON 协议栈（`INV-07`、`INV-09`） | `NewServer`、`Dial`、`GenerateSelfSignedCert`、`GeneratePairingToken`、`SanitizeFileName`、`Client.GetStatus`、`Client.PushFile`、`Client.RequestContinuity`、`Client.RunDisplayGuard` |
 | `internal/androidhost` | 可选 Android Companion APK 宿主状态、授权管理与 MyGo 移动界面（`INV-09`） | `New`、`Host.StartServer`、`Host.StopServer`、`Host.SetPermission`、`Host.RotateToken`、`Host.SetWirelessADBPort`、`RenderCompanionView` |
+| `internal/androidbridge` | 平台安全的 Android 系统服务能力探测包，配合 `CompanionServices.kt` 使用 | `Capabilities`、`Probe`、`UpdateGranted` |
+| `internal/mcp` | 默认关闭的本机回环 MCP 服务（TTL 令牌、白名单、紧急停止与脱敏审计，`INV-07`、`INV-08`） | `NewServer`、`Server.Enable`、`Server.EmergencyStop`、`Server.Status`、`Server.ServeHTTP`、`Allowlist`、`AuditEntry` |
 | `internal/mesh` | 默认关闭的可选用户态 EasyTier `--no-tun` 监督器（`INV-07`） | `BuildArgs`、`ScrubArgs`、`FindBinary`、`NewManager`、`Manager.Start`、`Manager.Stop`、`Manager.Status` |
 | `internal/bundlesig` | Ed25519 辅助包签名与校验器（`bundle.json` / `bundle.sig`） | `Sign`、`Verify`、`Manifest` |
 | `internal/adb` | 无 Shell `adb` 客户端、多传输去重聚合、mDNS TLS 无线连接配对与 `--user 0` 设备探测 | `FindClient`、`MaskSerial`、`MaskEndpoint`、`MergeDevices`、`UnifiedDevice`、`Client.Devices`、`Client.MDNSServices`、`Client.ConnectTLS`、`Client.PairTLS`、`Client.WakeScreen`、`Client.ListLaunchableApps`、`IsNoisyAppPackage` |

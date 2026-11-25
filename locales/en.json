@@ -295,5 +295,24 @@
       "temp": { "type": "String" },
       "pkg": { "type": "String" }
     }
-  }
+  },
+  "MCPCardTitle": "Local MCP Control Server (Opt-In)",
+  "MCPCardDesc": "Disabled by default. When enabled, binds strictly to 127.0.0.1 with an ephemeral 30-minute bearer token, explicit tool allowlist, and instant emergency stop.",
+  "MCPStatusDisabled": "Disabled (default safe state)",
+  "MCPStatusRunning": "Listening on {addr}",
+  "@MCPStatusRunning": {
+    "placeholders": {
+      "addr": { "type": "String" }
+    }
+  },
+  "MCPEnableBtn": "Enable Local MCP",
+  "MCPEmergencyStopBtn": "Emergency Stop MCP",
+  "MCPAllowLaunchLabel": "Allow launch_app tool (default: read/diagnostics only)",
+  "MCPTokenLabel": "Session token: {token}",
+  "@MCPTokenLabel": {
+    "placeholders": {
+      "token": { "type": "String" }
+    }
+  },
+  "MCPAuditTitle": "Recent Local MCP Audit"
 }

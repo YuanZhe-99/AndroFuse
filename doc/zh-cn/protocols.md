@@ -47,3 +47,8 @@ AndroFuse 在 Rust（`core/androfuse-core`）与 Go（`internal/adb`、`internal
 
 - **认证加密通道（`INV-07`）**：`internal/androidhost` 默认在 `27189` 端口托管可选 ECDSA P-256 TLS 1.3 服务并支持 SHA-256 证书指纹固定；首帧 `auth` 必须通过常量时间配对码校验（`subtle.ConstantTimeCompare`）。
 - **分级授权开关与异网 ADB 端口信标（`INV-09`、`INV-11`）**：`status.get`、`clipboard.set`、`notification.reply`、`app.continuity`、`file.push`（路径穿越拦截 + SHA-256 校验）、`display.guard` 与动态 `_adb-tls-connect._tcp` 端口信标均由手机伴侣端独立开关门控；卸载 Companion APK 时基础有线/无线投屏与 DeX 仍完全可用。
+
+## 7. 默认关闭的可授权本地 MCP 控制接口（`internal/mcp`）
+
+- **默认关闭与本机回环绑定（`INV-07`、`INV-08`）**：进程启动时默认关闭（`Enabled=false`）；用户仅在设置页主动开启后才监听 `127.0.0.1:0` HTTP（`POST`），生成 30 分钟有效期随机 Bearer 令牌并通过常量时间校验（`subtle.ConstantTimeCompare`）。
+- **白名单门控、紧急停止与脱敏审计**：`tools/list` 与 `tools/call` 严格遵循按工具 `Allowlist` 开关（启用时默认开放只读的 `list_devices` 与 `run_diagnostics`，`launch_app` 需单独授权）。`EmergencyStop()`（应用退出时自动调用）立即吊销密钥并关闭端口；审计日志永不记录令牌或原始设备序列号。

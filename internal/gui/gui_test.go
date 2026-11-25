@@ -17,6 +17,7 @@ import (
 	"github.com/YuanZhe-99/AndroFuse/internal/companion"
 	"github.com/YuanZhe-99/AndroFuse/internal/core"
 	"github.com/YuanZhe-99/AndroFuse/internal/dex"
+	"github.com/YuanZhe-99/AndroFuse/internal/mcp"
 	"github.com/YuanZhe-99/AndroFuse/internal/scrcpy"
 	"github.com/YuanZhe-99/AndroFuse/internal/vm"
 	_ "github.com/YuanZhe-99/AndroFuse/locales"
@@ -43,6 +44,12 @@ func testApp(t *testing.T) *App {
 		AVDName:        "Pixel_9a_API_36",
 		AvailableAVDs:  []string{"Pixel_9a_API_36"},
 		UsingHostSDK:   true,
+	}
+	a.mcpStatus = mcp.Status{
+		Enabled: false,
+		Audit: []mcp.AuditEntry{
+			{Method: "server.emergency_stop", Allowed: true, Outcome: "revoked"},
+		},
 	}
 	a.diagReady = true
 	a.diag = HostDiagnostics{

@@ -20,6 +20,8 @@
 | `internal/vm` | On-demand downloadable headless Android VM manager (`%LOCALAPPDATA%\AndroFuse\vm`, native `arm64-v8a` / `x86_64`, `INV-03`, `INV-10`) |
 | `internal/companion` | Encrypted TLS 1.3 NDJSON Companion protocol shared by desktop and Android APK (telemetry, clipboard, notifications, files, continuity, display guard, ADB beacon; `INV-07`, `INV-09`) |
 | `internal/androidhost` | Optional Android Companion host service, persistent config, sysfs battery/thermal probe, audit log, and MyGo graded-permission UI (`INV-09`, `INV-11`) |
+| `internal/androidbridge` | Platform-safe Android OS service capability probe paired with `CompanionServices.kt` (`NotificationListenerService`, `TileService`, `MediaProjection`, `SAF`) |
+| `internal/mcp` | Opt-in, default-disabled loopback (`127.0.0.1`) HTTP JSON-RPC 2.0 MCP server with ephemeral 30-min bearer token, per-tool allowlist, emergency stop, and scrubbed audit log (`INV-07`, `INV-08`) |
 | `internal/mesh` | Optional default-disabled userspace EasyTier (`--no-tun`) cross-network supervisor (`INV-07`, `INV-08`) |
 | `internal/bundlesig` | Ed25519 manifest (`bundle.json` + `bundle.sig`) helper signer/verifier matching Kyokai's release bundle layout |
 | `internal/adb` | Argument-vector ADB client, `MergeDevices` USB+TLS Wi-Fi deduplication (`INV-02`), mDNS TLS wireless connect/pair, `MaskSerial`/`MaskEndpoint` scrubbing, `emulator-*` classification, `--user 0` probes & app list |

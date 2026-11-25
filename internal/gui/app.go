@@ -22,6 +22,7 @@ import (
 	"github.com/YuanZhe-99/AndroFuse/internal/androidhost"
 	"github.com/YuanZhe-99/AndroFuse/internal/companion"
 	"github.com/YuanZhe-99/AndroFuse/internal/dex"
+	"github.com/YuanZhe-99/AndroFuse/internal/mcp"
 	"github.com/YuanZhe-99/AndroFuse/internal/version"
 	"github.com/YuanZhe-99/AndroFuse/internal/vm"
 	L "github.com/YuanZhe-99/AndroFuse/locales"
@@ -78,6 +79,9 @@ type App struct {
 	compConnected   bool
 	compStatus      companion.DeviceStatus
 	compNotice      string
+	mcpStatus       mcp.Status
+	mcpAllowLaunch  bool
+	mcpNotice       string
 	sessions        map[string]*SessionWindow
 }
 
@@ -1212,10 +1216,74 @@ func (a *App) settingsPage(c *ui.Context, k tokens) {
 			}
 		})
 
+		a.mcpSettingsCard(c, k)
+
 		card(c.Key("settings-security")).Children(func() {
 			ui.Text(c, L.SettingsSecurityTitle()).Bold().FontSize(sizeBody)
 			ui.Text(c, L.SettingsSecurityBody()).FontSize(sizeBody).TextColor(k.muted)
 		})
+	})
+}
+
+func (a *App) mcpSettingsCard(c *ui.Context, k tokens) {
+	a.mu.Lock()
+	st := a.mcpStatus
+	allowLaunch := a.mcpAllowLaunch
+	notice := a.mcpNotice
+	a.mu.Unlock()
+
+	card(c.Key("settings-mcp")).Children(func() {
+		ui.Text(c, L.MCPCardTitle()).Bold().FontSize(sizeBody)
+		ui.Text(c, L.MCPCardDesc()).FontSize(sizeSmall).TextColor(k.muted)
+
+		if st.Enabled {
+			ui.Text(c, L.MCPStatusRunning(st.Addr)).FontSize(sizeBody).TextColor(k.good)
+			if st.Token != "" {
+				ui.Text(c, L.MCPTokenLabel(st.Token)).FontSize(sizeSmall).TextColor(k.muted)
+			}
+		} else {
+			ui.Text(c, L.MCPStatusDisabled()).FontSize(sizeBody).TextColor(k.muted)
+		}
+
+		ui.Row(c.Key("mcp-allow-row")).AlignItems(ui.Center).Gap(8).Children(func() {
+			sw := ui.Switch(c.Key("mcp-allow-launch"), &allowLaunch)
+			if sw.Changed() {
+				a.mu.Lock()
+				a.mcpAllowLaunch = allowLaunch
+				enabled := a.mcpStatus.Enabled
+				a.mu.Unlock()
+				if enabled {
+					go a.EnableMCP(allowLaunch)
+				}
+			}
+			ui.Text(c, L.MCPAllowLaunchLabel()).FontSize(sizeBody)
+		})
+
+		if notice != "" {
+			ui.Text(c, notice).FontSize(sizeSmall).TextColor(k.warn)
+		}
+
+		ui.Row(c.Key("mcp-actions-row")).Gap(8).Children(func() {
+			if !st.Enabled {
+				if ui.Button(c.Key("mcp-enable-btn"), L.MCPEnableBtn()).Clicked() {
+					go a.EnableMCP(allowLaunch)
+				}
+			} else {
+				if ui.Button(c.Key("mcp-stop-btn"), L.MCPEmergencyStopBtn()).Clicked() {
+					go a.EmergencyStopMCP()
+				}
+			}
+		})
+
+		if len(st.Audit) > 0 {
+			ui.Text(c, L.MCPAuditTitle()).Bold().FontSize(sizeSmall).TextColor(k.muted)
+			start := max(0, len(st.Audit)-4)
+			for i, entry := range st.Audit[start:] {
+				rowText := fmt.Sprintf("%s · %s %s -> %s",
+					entry.Timestamp.Format("15:04:05"), entry.Method, entry.Tool, entry.Outcome)
+				ui.Text(c.Key(fmt.Sprintf("mcp-audit-%d", i)), rowText).FontSize(sizeSmall).TextColor(k.muted)
+			}
+		}
 	})
 }
 

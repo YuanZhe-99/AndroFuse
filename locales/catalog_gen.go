@@ -1767,3 +1767,93 @@ func CompanionConnectedSummary(batt int, temp string, pkg string) string {
 func (msgs Messages) CompanionConnectedSummary(batt int, temp string, pkg string) string {
 	return Catalog.Format(msgs.locale, "CompanionConnectedSummary", map[string]any{"batt": batt, "temp": temp, "pkg": pkg})
 }
+
+// MCPCardTitle says "Local MCP Control Server (Opt-In)"
+// in the language the app shows.
+func MCPCardTitle() string { return In(i18n.Locale()).MCPCardTitle() }
+
+// MCPCardTitle says "Local MCP Control Server (Opt-In)"
+// in the language of msgs.
+func (msgs Messages) MCPCardTitle() string {
+	return Catalog.Format(msgs.locale, "MCPCardTitle", nil)
+}
+
+// MCPCardDesc says "Disabled by default. When enabled, binds strictly to 127.0.0.1 with an ephemeral 30-minute bearer token, explicit too…"
+// in the language the app shows.
+func MCPCardDesc() string { return In(i18n.Locale()).MCPCardDesc() }
+
+// MCPCardDesc says "Disabled by default. When enabled, binds strictly to 127.0.0.1 with an ephemeral 30-minute bearer token, explicit too…"
+// in the language of msgs.
+func (msgs Messages) MCPCardDesc() string {
+	return Catalog.Format(msgs.locale, "MCPCardDesc", nil)
+}
+
+// MCPStatusDisabled says "Disabled (default safe state)"
+// in the language the app shows.
+func MCPStatusDisabled() string { return In(i18n.Locale()).MCPStatusDisabled() }
+
+// MCPStatusDisabled says "Disabled (default safe state)"
+// in the language of msgs.
+func (msgs Messages) MCPStatusDisabled() string {
+	return Catalog.Format(msgs.locale, "MCPStatusDisabled", nil)
+}
+
+// MCPStatusRunning says "Listening on {addr}"
+// in the language the app shows.
+func MCPStatusRunning(addr string) string { return In(i18n.Locale()).MCPStatusRunning(addr) }
+
+// MCPStatusRunning says "Listening on {addr}"
+// in the language of msgs.
+func (msgs Messages) MCPStatusRunning(addr string) string {
+	return Catalog.Format(msgs.locale, "MCPStatusRunning", map[string]any{"addr": addr})
+}
+
+// MCPEnableBtn says "Enable Local MCP"
+// in the language the app shows.
+func MCPEnableBtn() string { return In(i18n.Locale()).MCPEnableBtn() }
+
+// MCPEnableBtn says "Enable Local MCP"
+// in the language of msgs.
+func (msgs Messages) MCPEnableBtn() string {
+	return Catalog.Format(msgs.locale, "MCPEnableBtn", nil)
+}
+
+// MCPEmergencyStopBtn says "Emergency Stop MCP"
+// in the language the app shows.
+func MCPEmergencyStopBtn() string { return In(i18n.Locale()).MCPEmergencyStopBtn() }
+
+// MCPEmergencyStopBtn says "Emergency Stop MCP"
+// in the language of msgs.
+func (msgs Messages) MCPEmergencyStopBtn() string {
+	return Catalog.Format(msgs.locale, "MCPEmergencyStopBtn", nil)
+}
+
+// MCPAllowLaunchLabel says "Allow launch_app tool (default: read/diagnostics only)"
+// in the language the app shows.
+func MCPAllowLaunchLabel() string { return In(i18n.Locale()).MCPAllowLaunchLabel() }
+
+// MCPAllowLaunchLabel says "Allow launch_app tool (default: read/diagnostics only)"
+// in the language of msgs.
+func (msgs Messages) MCPAllowLaunchLabel() string {
+	return Catalog.Format(msgs.locale, "MCPAllowLaunchLabel", nil)
+}
+
+// MCPTokenLabel says "Session token: {token}"
+// in the language the app shows.
+func MCPTokenLabel(token string) string { return In(i18n.Locale()).MCPTokenLabel(token) }
+
+// MCPTokenLabel says "Session token: {token}"
+// in the language of msgs.
+func (msgs Messages) MCPTokenLabel(token string) string {
+	return Catalog.Format(msgs.locale, "MCPTokenLabel", map[string]any{"token": token})
+}
+
+// MCPAuditTitle says "Recent Local MCP Audit"
+// in the language the app shows.
+func MCPAuditTitle() string { return In(i18n.Locale()).MCPAuditTitle() }
+
+// MCPAuditTitle says "Recent Local MCP Audit"
+// in the language of msgs.
+func (msgs Messages) MCPAuditTitle() string {
+	return Catalog.Format(msgs.locale, "MCPAuditTitle", nil)
+}

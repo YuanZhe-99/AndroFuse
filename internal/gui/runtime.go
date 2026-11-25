@@ -21,6 +21,7 @@ import (
 	"github.com/YuanZhe-99/AndroFuse/internal/core"
 	"github.com/YuanZhe-99/AndroFuse/internal/dex"
 	"github.com/YuanZhe-99/AndroFuse/internal/lease"
+	"github.com/YuanZhe-99/AndroFuse/internal/mcp"
 	"github.com/YuanZhe-99/AndroFuse/internal/scrcpy"
 	"github.com/YuanZhe-99/AndroFuse/internal/version"
 	"github.com/YuanZhe-99/AndroFuse/internal/vm"
@@ -77,6 +78,7 @@ type guiRuntime struct {
 	vmMgr       *vm.Manager
 	androidHost *androidhost.Host
 	compClient  *companion.Client
+	mcpServer   *mcp.Server
 	recoverRan  bool
 }
 
@@ -1085,7 +1087,14 @@ func (a *App) CloseAllSessions() {
 	compClient := a.rt.compClient
 	a.rt.compClient = nil
 	aHost := a.rt.androidHost
+	mcpSrv := a.rt.mcpServer
 	a.rt.coreMu.Unlock()
+	if mcpSrv != nil {
+		_ = mcpSrv.EmergencyStop()
+		a.mu.Lock()
+		a.mcpStatus = mcpSrv.Status()
+		a.mu.Unlock()
+	}
 	if compClient != nil {
 		_ = compClient.Close()
 	}
@@ -1097,6 +1106,98 @@ func (a *App) CloseAllSessions() {
 		_ = vmMgr.Stop(ctx)
 		cancel()
 	}
+}
+
+func (a *App) ensureMCPServerLocked() *mcp.Server {
+	if a.rt.mcpServer != nil {
+		return a.rt.mcpServer
+	}
+	a.rt.mcpServer = mcp.NewServer(mcp.Handlers{
+		ListDevices: func(context.Context) (any, error) {
+			a.mu.Lock()
+			devs := make([]map[string]any, 0, len(a.devices))
+			for _, d := range a.devices {
+				devs = append(devs, map[string]any{
+					"hardwareHash": d.HardwareHash,
+					"maskedId":     d.Target.MaskedID,
+					"model":        d.Target.Model,
+					"transport":    d.Target.Transport,
+					"genuineDeX":   d.TruthDeX.IsGenuineDeX,
+				})
+			}
+			a.mu.Unlock()
+			return devs, nil
+		},
+		RunDiagnostics: func(context.Context) (any, error) {
+			return RunDiagnostics(a.stateDir, ""), nil
+		},
+		LaunchApp: func(_ context.Context, deviceID, packageName string) (any, error) {
+			target, ok := a.findDeviceForMCP(deviceID)
+			if !ok {
+				return nil, fmt.Errorf("device not found")
+			}
+			a.LaunchAppWindow(target, adb.AppEntry{Package: packageName, Label: packageName})
+			return map[string]any{"requested": packageName}, nil
+		},
+	}, 30*time.Minute)
+	return a.rt.mcpServer
+}
+
+func (a *App) findDeviceForMCP(id string) (DiscoveredDevice, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, d := range a.devices {
+		if d.HardwareHash == id || d.Target.MaskedID == id || d.Target.Serial == id {
+			return d, true
+		}
+	}
+	return DiscoveredDevice{}, false
+}
+
+// EnableMCP starts or updates the opt-in loopback MCP server with explicit allowlist settings.
+// Side effects: Opens 127.0.0.1 HTTP listener with bounded 30-minute token and updates UI state.
+func (a *App) EnableMCP(allowLaunch bool) {
+	a.rt.coreMu.Lock()
+	srv := a.ensureMCPServerLocked()
+	a.rt.coreMu.Unlock()
+
+	st, err := srv.Enable(mcp.Allowlist{
+		ListDevices:    true,
+		RunDiagnostics: true,
+		LaunchApp:      allowLaunch,
+	})
+	a.mu.Lock()
+	a.mcpAllowLaunch = allowLaunch
+	if err != nil {
+		a.mcpNotice = err.Error()
+		a.mcpStatus = srv.Status()
+	} else {
+		a.mcpNotice = ""
+		a.mcpStatus = st
+	}
+	a.mu.Unlock()
+	a.runOnMain(func() {})
+}
+
+// EmergencyStopMCP revokes the active local MCP token and closes the loopback port immediately.
+// Side effects: Stops local MCP serving and refreshes the Settings UI.
+func (a *App) EmergencyStopMCP() {
+	a.rt.coreMu.Lock()
+	srv := a.rt.mcpServer
+	a.rt.coreMu.Unlock()
+	if srv == nil {
+		return
+	}
+	err := srv.EmergencyStop()
+	a.mu.Lock()
+	if err != nil {
+		a.mcpNotice = err.Error()
+	} else {
+		a.mcpNotice = ""
+	}
+	a.mcpStatus = srv.Status()
+	a.mu.Unlock()
+	a.runOnMain(func() {})
 }
 
 func transportLabel(t adb.Transport) string {

@@ -171,5 +171,14 @@
   "CompanionContinueApp": "接力打开前台应用",
   "CompanionConnectBeaconADB": "直连信标无线 ADB",
   "CompanionRunDisplayGuard": "清理残留虚拟屏",
-  "CompanionConnectedSummary": "电量 {batt}% · {temp}°C · 前台应用：{pkg}"
+  "CompanionConnectedSummary": "电量 {batt}% · {temp}°C · 前台应用：{pkg}",
+  "MCPCardTitle": "本地 MCP 控制接口（默认关闭）",
+  "MCPCardDesc": "默认关闭以保障安全；开启后仅监听 127.0.0.1 并生成 30 分钟有效期临时密钥，配合按工具白名单与一键紧急停止。",
+  "MCPStatusDisabled": "已关闭（默认安全状态）",
+  "MCPStatusRunning": "正在监听 {addr}",
+  "MCPEnableBtn": "启用本地 MCP",
+  "MCPEmergencyStopBtn": "紧急停止 MCP",
+  "MCPAllowLaunchLabel": "允许执行 launch_app（默认仅开放只读诊断）",
+  "MCPTokenLabel": "当前会话令牌：{token}",
+  "MCPAuditTitle": "本地 MCP 最近审计记录"
 }
