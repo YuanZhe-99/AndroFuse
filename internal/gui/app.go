@@ -132,7 +132,7 @@ func New(profile, stateDir string) *App {
 		appIcons:   make(map[string]*ui.Bitmap),
 		dexRoutes:  make(map[string]dex.RoutePreference),
 		vcamCap:    avbridge.ProbeVirtualCamera(),
-		meshStatus: mesh.NewManager().Status(),
+		meshStatus: mesh.Status{},
 		sessions:   make(map[string]*SessionWindow),
 	}
 	a.loadPrefs()
@@ -1375,16 +1375,9 @@ func (a *App) meshSettingsCard(c *ui.Context, k tokens) {
 		ui.Text(c, L.MeshCardDesc()).FontSize(sizeSmall).TextColor(k.muted)
 
 		if st.Running {
-			dev := st.DeviceName
-			if dev == "" {
-				dev = "androfuse-desktop"
-			}
-			ui.Text(c, L.MeshStatusRunning(dev)).FontSize(sizeBody).TextColor(k.good)
+			ui.Text(c, L.MeshStatusRunning(meshDeviceName)).FontSize(sizeBody).TextColor(k.good)
 		} else {
 			ui.Text(c, L.MeshStatusStopped()).FontSize(sizeBody).TextColor(k.muted)
-		}
-		if !st.BinaryFound {
-			ui.Text(c, L.MeshBinaryMissing()).FontSize(sizeSmall).TextColor(k.muted)
 		}
 
 		ui.Row(c.Key("mesh-fields-row")).FillWidth().Gap(8).Children(func() {

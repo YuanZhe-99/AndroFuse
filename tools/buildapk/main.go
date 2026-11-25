@@ -1,9 +1,13 @@
-// Command buildapk builds the optional Android Companion APK (arm64-v8a) via MyGo
-// and works around missing Windows gradlew.bat in upstream mygo v0.10.0, verifying
-// 16 KB page alignment (`zipalign -c -P 16 4`).
+// Command buildapk builds the optional Android Companion APK (arm64-v8a) with MyGo, verifies
+// that it carries the Go native library, and checks 16 KB page alignment
+// (`zipalign -c -P 16 4`).
+//
+// On Windows it supplies the `gradlew.bat` that upstream mygo v0.10.0 does not ship, so MyGo's own
+// Gradle call runs with every project property it sets (manifest, native libraries, assets).
 package main
 
 import (
+	"archive/zip"
 	"fmt"
 	"io"
 	"io/fs"
@@ -16,6 +20,24 @@ import (
 
 	"github.com/YuanZhe-99/AndroFuse/internal/version"
 )
+
+// gradlewBat is a minimal Windows Gradle wrapper launcher equivalent to the Unix `gradlew`
+// that MyGo writes into .mygo/android.
+// Notes: MyGo passes its project properties (manifest, jniLibs, assets, application id) as
+// ORG_GRADLE_PROJECT_* environment variables, which Gradle on Windows was verified to ignore
+// (2026-11-25), so the launcher forwards each one as a `-P` argument. Keystore passwords are
+// only set for release signing, which local builds do not use.
+const gradlewBat = "@echo off\r\n" +
+	"setlocal EnableDelayedExpansion\r\n" +
+	"set DIRNAME=%~dp0\r\n" +
+	"if defined JAVA_HOME (set \"JAVA_EXE=%JAVA_HOME%\\bin\\java.exe\") else (set JAVA_EXE=java.exe)\r\n" +
+	"set PROPS=\r\n" +
+	"for /f \"tokens=1* delims==\" %%A in ('set ORG_GRADLE_PROJECT_ 2^>nul') do (\r\n" +
+	"  set \"NAME=%%A\"\r\n" +
+	"  set PROPS=!PROPS! \"-P!NAME:~19!=%%B\"\r\n" +
+	")\r\n" +
+	"\"%JAVA_EXE%\" -Xmx2048m \"-Dorg.gradle.appname=gradlew\" -classpath \"%DIRNAME%gradle\\wrapper\\gradle-wrapper.jar\" org.gradle.wrapper.GradleWrapperMain !PROPS! %*\r\n" +
+	"exit /b %ERRORLEVEL%\r\n"
 
 func main() {
 	if err := run(); err != nil {
@@ -34,25 +56,34 @@ func run() error {
 	if ndkDir != "" && os.Getenv("ANDROID_NDK_HOME") == "" {
 		env = append(env, "ANDROID_NDK_HOME="+ndkDir)
 	}
-
-	cmd := exec.Command("go", "tool", "mygo", "build", "-platform", "android/arm64", ".")
-	cmd.Env = env
-	outBytes, buildErr := cmd.CombinedOutput()
-	outStr := string(outBytes)
-	fmt.Print(outStr)
-
-	if buildErr != nil {
-		if runtime.GOOS == "windows" && strings.Contains(outStr, "gradlew.bat") {
-			if err := runGradleWrapperFallback(env); err != nil {
-				return fmt.Errorf("gradle wrapper fallback: %w", err)
-			}
-		} else {
-			return fmt.Errorf("mygo build android/arm64: %w", buildErr)
+	if !isJDK17(os.Getenv("JAVA_HOME")) {
+		// Android Gradle asks for a JDK 17 toolchain; the JVM Gradle runs on satisfies it.
+		if jdk := findJDK17(); jdk != "" {
+			env = append(env, "JAVA_HOME="+jdk)
 		}
+	}
+
+	if err := ensureGradlewBat(); err != nil {
+		return err
+	}
+	out, err := mygoBuild(env)
+	if err != nil && runtime.GOOS == "windows" && strings.Contains(out, "gradlew.bat") {
+		// First build on a clean tree: MyGo only now wrote .mygo/android, so add the
+		// launcher and build again.
+		if err := ensureGradlewBat(); err != nil {
+			return err
+		}
+		_, err = mygoBuild(env)
+	}
+	if err != nil {
+		return fmt.Errorf("mygo build android/arm64: %w", err)
 	}
 
 	srcAPK, err := locateBuiltAPK()
 	if err != nil {
+		return err
+	}
+	if err := requireNativeLibs(srcAPK); err != nil {
 		return err
 	}
 	outAPK := filepath.Join("build", fmt.Sprintf("AndroFuse-%s-android-arm64.apk", version.Version))
@@ -80,24 +111,70 @@ func run() error {
 	return nil
 }
 
-func runGradleWrapperFallback(env []string) error {
-	androidDir := filepath.Join(".mygo", "android")
-	wrapperJar := filepath.Join(androidDir, "gradle", "wrapper", "gradle-wrapper.jar")
-	if _, err := os.Stat(wrapperJar); err != nil {
-		return fmt.Errorf("missing %s", wrapperJar)
+// mygoBuild runs `go tool mygo build -platform android/arm64 .`, echoing and returning its output.
+func mygoBuild(env []string) (string, error) {
+	cmd := exec.Command("go", "tool", "mygo", "build", "-platform", "android/arm64", ".")
+	cmd.Env = env
+	b, err := cmd.CombinedOutput()
+	fmt.Print(string(b))
+	return string(b), err
+}
+
+// ensureGradlewBat writes .mygo/android/gradlew.bat on Windows once MyGo has generated the
+// Android project; elsewhere, or before the project exists, it does nothing.
+func ensureGradlewBat() error {
+	if runtime.GOOS != "windows" {
+		return nil
 	}
-	task := "assembleDebug"
-	if os.Getenv("MYGO_ANDROID_KEYSTORE_PASSWORD") != "" {
-		task = "assembleRelease"
+	dir := filepath.Join(".mygo", "android")
+	if _, err := os.Stat(filepath.Join(dir, "gradle", "wrapper", "gradle-wrapper.jar")); err != nil {
+		return nil
 	}
-	relJar := filepath.Join("gradle", "wrapper", "gradle-wrapper.jar")
-	gCmd := exec.Command("java", "-Xmx2048m", "-Dorg.gradle.appname=gradlew",
-		"-classpath", relJar, "org.gradle.wrapper.GradleWrapperMain", task)
-	gCmd.Dir = androidDir
-	gCmd.Env = env
-	gCmd.Stdout = os.Stdout
-	gCmd.Stderr = os.Stderr
-	return gCmd.Run()
+	return os.WriteFile(filepath.Join(dir, "gradlew.bat"), []byte(gradlewBat), 0o755)
+}
+
+// isJDK17 reports whether home is a JDK 17, from its `release` file.
+func isJDK17(home string) bool {
+	b, err := os.ReadFile(filepath.Join(strings.TrimSpace(home), "release"))
+	return err == nil && strings.Contains(string(b), `JAVA_VERSION="17`)
+}
+
+// findJDK17 returns an installed JDK 17 home (Android Gradle's toolchain), or "".
+func findJDK17() string {
+	if runtime.GOOS != "windows" {
+		return ""
+	}
+	for _, root := range []string{
+		filepath.Join(os.Getenv("ProgramFiles"), "Microsoft"),
+		filepath.Join(os.Getenv("ProgramFiles"), "Eclipse Adoptium"),
+		filepath.Join(os.Getenv("ProgramFiles"), "Java"),
+		filepath.Join(os.Getenv("ProgramFiles"), "Zulu"),
+	} {
+		matches, _ := filepath.Glob(filepath.Join(root, "jdk-17*"))
+		sort.Strings(matches)
+		for i := len(matches) - 1; i >= 0; i-- {
+			if _, err := os.Stat(filepath.Join(matches[i], "bin", "java.exe")); err == nil {
+				return matches[i]
+			}
+		}
+	}
+	return ""
+}
+
+// requireNativeLibs fails unless apk contains arm64-v8a native libraries: a Gradle run without
+// MyGo's project properties produces an APK without the Go app inside.
+func requireNativeLibs(apk string) error {
+	r, err := zip.OpenReader(apk)
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+	for _, f := range r.File {
+		if strings.HasPrefix(f.Name, "lib/arm64-v8a/") && strings.HasSuffix(f.Name, ".so") {
+			return nil
+		}
+	}
+	return fmt.Errorf("%s has no lib/arm64-v8a/*.so: the Go app was not packaged", apk)
 }
 
 func locateBuiltAPK() (string, error) {

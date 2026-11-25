@@ -502,6 +502,30 @@ func (a *App) findLiveTransportFor(ctx context.Context, client *adb.Client, hard
 	return adb.Device{}, false
 }
 
+// connectWirelessFor connects the TLS Wireless Debugging endpoint that mDNS advertises for
+// hardwareHash, so a session started over USB can hand off even when Wi-Fi ADB was never
+// connected (`INV-02`).
+// Returns: true when an endpoint for this phone accepted the connection.
+// Notes: only the `adb-<ro.serialno>-…` instance of this phone is used, never other devices on
+// the LAN, and only TLS endpoints (`INV-07`).
+func (a *App) connectWirelessFor(ctx context.Context, client *adb.Client, hardwareHash string) bool {
+	if client == nil || hardwareHash == "" {
+		return false
+	}
+	svcs, err := client.MDNSServices(ctx)
+	if err != nil {
+		return false
+	}
+	for _, s := range svcs {
+		if s.CanConnect && s.HardwareHash == hardwareHash {
+			if _, err := client.ConnectTLS(ctx, s.Addr, false); err == nil {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // RefreshDevices scans wired USB, TLS Wi-Fi ADB, Emulator, and mDNS Wireless Debugging services,
 // deduplicating multi-transport entries for the same physical device (`INV-02`).
 func (a *App) RefreshDevices() {
@@ -1322,27 +1346,33 @@ func (a *App) LaunchPhoneCamera(d DiscoveredDevice, facing string) {
 	}()
 }
 
-// StartMesh starts the optional default-disabled userspace EasyTier (`--no-tun`) supervisor (`INV-07`).
+// meshDeviceName is the EasyTier hostname the desktop announces on the mesh.
+const meshDeviceName = "androfuse-desktop"
+
+// StartMesh starts the default-disabled EasyTier mesh embedded in the core (`INV-07`).
 func (a *App) StartMesh(netName, secret, peer string) {
 	a.rt.coreMu.Lock()
-	if a.rt.meshMgr == nil {
-		a.rt.meshMgr = mesh.NewManager()
+	lib, lErr := a.ensureCoreLocked()
+	if lErr == nil && a.rt.meshMgr == nil {
+		a.rt.meshMgr = mesh.NewManager(lib)
 	}
 	mgr := a.rt.meshMgr
 	a.rt.coreMu.Unlock()
+	if lErr != nil {
+		a.update(func() { a.meshNotice = lErr.Error() })
+		return
+	}
 
 	cfg := mesh.Config{
 		Enabled:       true,
 		NetworkName:   strings.TrimSpace(netName),
 		NetworkSecret: strings.TrimSpace(secret),
-		DeviceName:    "androfuse-desktop",
+		DeviceName:    meshDeviceName,
 	}
 	if p := strings.TrimSpace(peer); p != "" {
 		cfg.Peers = []string{p}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	err := mgr.Start(ctx, cfg)
-	cancel()
+	err := mgr.Start(cfg)
 
 	a.mu.Lock()
 	a.meshStatus = mgr.Status()
@@ -1355,7 +1385,7 @@ func (a *App) StartMesh(netName, secret, peer string) {
 	a.runOnMain(func() {})
 }
 
-// StopMesh stops the userspace EasyTier (`--no-tun`) process cleanly.
+// StopMesh stops the embedded EasyTier mesh.
 func (a *App) StopMesh() {
 	a.rt.coreMu.Lock()
 	mgr := a.rt.meshMgr

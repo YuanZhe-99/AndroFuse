@@ -30,7 +30,34 @@ allow = [
   "LGPL-3.0-or-later",
   "GPL-3.0-only",
   "GPL-3.0-or-later",
+  # Permissive licences pulled in by the embedded EasyTier mesh (PLAN §9.1-1); all GPL-3.0-compatible.
+  "0BSD",
+  "CC0-1.0",
+  "CDLA-Permissive-2.0",
+  "WTFPL",
+  "bzip2-1.0.6",
 ]
+
+# EasyTier's crates ship the LGPL-3.0 LICENSE text without an SPDX `license` field.
+[[licenses.clarify]]
+crate = "easytier"
+expression = "LGPL-3.0-only"
+license-files = []
+
+[[licenses.clarify]]
+crate = "easytier-core"
+expression = "LGPL-3.0-only"
+license-files = []
+
+[[licenses.clarify]]
+crate = "easytier-proto"
+expression = "LGPL-3.0-only"
+license-files = []
+
+[[licenses.clarify]]
+crate = "easytier-ffi"
+expression = "LGPL-3.0-only"
+license-files = []
 
 [licenses.private]
 ignore = true
@@ -43,3 +70,8 @@ allow-wildcard-paths = true
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
+
+# The embedded EasyTier mesh (PLAN §9.1-1, approved 2026-11-25) is pinned by rev and pulls its own
+# forks; only repositories of the EasyTier GitHub organisation are allowed as git sources.
+[sources.allow-org]
+github = ["EasyTier"]

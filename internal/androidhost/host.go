@@ -16,6 +16,7 @@ import (
 
 	"github.com/YuanZhe-99/AndroFuse/internal/androidbridge"
 	"github.com/YuanZhe-99/AndroFuse/internal/companion"
+	L "github.com/YuanZhe-99/AndroFuse/locales"
 )
 
 // Config persists per-user Android Companion settings under `<stateDir>/companion.json`.
@@ -24,6 +25,9 @@ type Config struct {
 	Token           string                `json:"token"`
 	Permissions     companion.Permissions `json:"permissions"`
 	WirelessADBPort int                   `json:"wireless_adb_port,omitempty"`
+	// Standby keeps the Companion reachable in the background through a minimum-importance
+	// foreground service; off by default (PLAN §9.1-3).
+	Standby bool `json:"standby,omitempty"`
 }
 
 // Host owns the Android-side TLS 1.3 Companion server, persisted permissions, and audit log.
@@ -40,6 +44,8 @@ type Host struct {
 	audit        []string
 	beaconInput  string
 	receiveBytes int64
+	network      string // default network kind from the Android NetworkCallback
+	stopNetWatch func()
 }
 
 // New constructs an Android Companion Host rooted at stateDir and loads saved config.
@@ -135,6 +141,7 @@ func (h *Host) StartServer() error {
 			return h.Status()
 		},
 		OnClipboard: func(msg companion.ClipboardMessage) error {
+			androidbridge.TouchActive()
 			h.mu.Lock()
 			h.appendAuditLocked(fmt.Sprintf("clipboard synced (%d chars)", len(msg.Text)))
 			h.mu.Unlock()
@@ -161,6 +168,7 @@ func (h *Host) StartServer() error {
 			return companion.AppContinuityResponse{OK: true, Package: pkg, Message: "ok"}, nil
 		},
 		OnFilePush: func(name string, data []byte, shaHex string) (companion.FilePushResponse, error) {
+			androidbridge.TouchActive()
 			inbox := filepath.Join(h.stateDir, "inbox")
 			if err := os.MkdirAll(inbox, 0o755); err != nil {
 				return companion.FilePushResponse{}, err
@@ -188,6 +196,7 @@ func (h *Host) StartServer() error {
 			return companion.DisplayGuardResponse{CleanedCount: 0, Message: "virtual display check complete"}, nil
 		},
 		OnMediaFrame: func(req companion.MediaFrameRequest) (companion.MediaFrameResponse, error) {
+			androidbridge.TouchActive()
 			rawLen := len(req.DataBase64) * 3 / 4
 			h.mu.Lock()
 			h.receiveBytes += int64(rawLen)
@@ -224,7 +233,18 @@ func (h *Host) StartServer() error {
 	h.running = true
 	h.lastErr = ""
 	wPort := h.cfg.WirelessADBPort
+	standby := h.cfg.Standby
 	h.appendAuditLocked("TLS 1.3 companion listening on " + srv.Addr())
+	h.mu.Unlock()
+	h.applyStandby(standby)
+	stopNet := androidbridge.WatchNetwork(func(kind string) {
+		h.mu.Lock()
+		h.network = kind
+		h.mu.Unlock()
+		h.notify()
+	})
+	h.mu.Lock()
+	h.stopNetWatch = stopNet
 	h.mu.Unlock()
 	androidbridge.SyncCompanionWidget(true, wPort, readDeviceTelemetry().BatteryPct)
 	h.notify()
@@ -255,7 +275,14 @@ func (h *Host) StopServer() error {
 	if srv != nil {
 		h.appendAuditLocked("companion server stopped")
 	}
+	stopNet := h.stopNetWatch
+	h.stopNetWatch = nil
 	h.mu.Unlock()
+	if stopNet != nil {
+		stopNet()
+	}
+	androidbridge.ReleaseActive()
+	h.applyStandby(false)
 	if cancel != nil {
 		cancel()
 	}
@@ -345,6 +372,9 @@ func (h *Host) Status() companion.DeviceStatus {
 	if h.cfg.Permissions.ADBBeacon && h.cfg.WirelessADBPort > 0 {
 		st.WirelessADBPort = h.cfg.WirelessADBPort
 	}
+	if h.network != "" {
+		st.NetworkType = h.network
+	}
 	h.mu.Unlock()
 	return st
 }
@@ -374,6 +404,30 @@ func (h *Host) SetPermission(name string, enabled bool) {
 	h.saveConfigLocked()
 	h.mu.Unlock()
 	h.notify()
+}
+
+// SetStandby turns background standby on or off and persists it; it takes effect at once when
+// the Companion server is running (PLAN §9.1-3).
+func (h *Host) SetStandby(on bool) {
+	h.mu.Lock()
+	h.cfg.Standby = on
+	running := h.running
+	h.appendAuditLocked(fmt.Sprintf("background standby=%v", on))
+	h.saveConfigLocked()
+	h.mu.Unlock()
+	if running {
+		h.applyStandby(on)
+	}
+	h.notify()
+}
+
+// applyStandby starts or stops the foreground standby service, recording failures.
+func (h *Host) applyStandby(on bool) {
+	if err := androidbridge.SetStandby(on, L.StandbyNotifTitle(), L.StandbyNotifText()); err != nil {
+		h.mu.Lock()
+		h.lastErr = err.Error()
+		h.mu.Unlock()
+	}
 }
 
 // RotateToken generates a new cryptographic pairing token and updates the running server (`INV-07`).

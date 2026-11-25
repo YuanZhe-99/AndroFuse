@@ -285,8 +285,11 @@ func (sw *SessionWindow) attemptDeXGraceHandoff(failedSess *scrcpy.Session) {
 		rem := max(int(time.Until(deadline).Seconds())+1, 1)
 		sw.setStatusNote(L.DeXReconnecting(rem))
 
-		qCtx, qCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		qCtx, qCancel := context.WithTimeout(context.Background(), 8*time.Second)
 		cand, ok := app.findLiveTransportFor(qCtx, client, devKey, prevSerial)
+		if !ok && app.connectWirelessFor(qCtx, client, devKey) {
+			cand, ok = app.findLiveTransportFor(qCtx, client, devKey, prevSerial)
+		}
 		qCancel()
 		if ok {
 			rCtx, rCancel := context.WithTimeout(context.Background(), 12*time.Second)

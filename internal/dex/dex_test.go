@@ -766,3 +766,114 @@ func TestLiveFold8WirelessAndInteractiveDeX(t *testing.T) {
 		t.Fatalf("residual virtual/DeX display detected after wireless teardown:\n%s", dispOut)
 	}
 }
+
+// TestLiveDeXSurvivesTransportDrop reproduces the 2026-11-25 hot-handoff failure without a cable:
+// it starts Native DeX over TLS Wi-Fi ADB, drops that transport (`adb disconnect`, which makes adbd
+// tear down the shell session exactly like a USB unplug), reconnects, and requires the helper to
+// still hold the display so Reattach + Ping succeed within the grace window (`INV-02`, `INV-03`).
+func TestLiveDeXSurvivesTransportDrop(t *testing.T) {
+	if os.Getenv("ANDROFUSE_LIVE_DEVICE") != "1" {
+		t.Skip("set ANDROFUSE_LIVE_DEVICE=1 with a Samsung DeX phone on TLS Wi-Fi ADB to run the transport-drop handoff test")
+	}
+	client, err := adb.FindClient()
+	if err != nil {
+		t.Fatalf("FindClient: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	devs, err := client.Devices(ctx)
+	if err != nil {
+		t.Fatalf("Devices: %v", err)
+	}
+	var serial string
+	for _, d := range devs {
+		if d.State == "device" && d.Transport == adb.TransportTLSWiFi {
+			serial = d.Serial
+			break
+		}
+	}
+	if serial == "" {
+		t.Skip("no online TLS Wi-Fi ADB device")
+	}
+	prof, err := client.ProbeDevice(ctx, serial)
+	if err != nil || prof.HardwareHash == "" {
+		t.Fatalf("ProbeDevice: %v (%+v)", err, prof)
+	}
+
+	store, err := lease.Open(filepath.Join(t.TempDir(), "leases.json"))
+	if err != nil {
+		t.Fatalf("lease.Open: %v", err)
+	}
+	sess, err := StartNativeLoopback(ctx, client, store, serial, 1280, 800, 160, 30)
+	if err != nil {
+		t.Fatalf("StartNativeLoopback: %v", err)
+	}
+	defer sess.Stop()
+	before := sess.Ready()
+	t.Logf("DeX READY display=%d %dx%d ctrlPort=%d", before.DisplayID, before.Width, before.Height, before.CtrlPort)
+
+	// Drop the transport the helper was started on.
+	if err := client.Disconnect(ctx, serial); err != nil {
+		t.Fatalf("Disconnect: %v", err)
+	}
+	select {
+	case <-sess.Done():
+	case <-time.After(10 * time.Second):
+		t.Fatal("helper control pipe did not end after the transport dropped")
+	}
+
+	// Reconnect the same phone through its mDNS endpoint, as the GUI handoff loop does.
+	var newSerial string
+	for deadline := time.Now().Add(20 * time.Second); newSerial == "" && time.Now().Before(deadline); {
+		if svcs, err := client.MDNSServices(ctx); err == nil {
+			for _, s := range svcs {
+				if s.CanConnect && s.HardwareHash == prof.HardwareHash {
+					_, _ = client.ConnectTLS(ctx, s.Addr, false)
+				}
+			}
+		}
+		if list, err := client.Devices(ctx); err == nil {
+			for _, d := range list {
+				if d.State != "device" {
+					continue
+				}
+				if p, err := client.ProbeDevice(ctx, d.Serial); err == nil && p.HardwareHash == prof.HardwareHash {
+					newSerial = d.Serial
+					break
+				}
+			}
+		}
+		if newSerial == "" {
+			time.Sleep(time.Second)
+		}
+	}
+	if newSerial == "" {
+		t.Fatal("phone did not come back on TLS Wi-Fi ADB within 20s")
+	}
+
+	after, err := sess.Reattach(ctx, newSerial)
+	if err != nil {
+		t.Fatalf("Reattach after transport drop: %v", err)
+	}
+	if after.DisplayID != before.DisplayID {
+		t.Fatalf("DeX display changed across handoff: before=%d after=%d", before.DisplayID, after.DisplayID)
+	}
+	if err := sess.Ping(5 * time.Second); err != nil {
+		t.Fatalf("Ping after reattach: %v", err)
+	}
+	t.Logf("HANDOFF PASS: display=%d survived transport drop and reattached on new transport", after.DisplayID)
+
+	sess.Stop()
+	time.Sleep(2 * time.Second)
+	if rem := store.List(); len(rem) != 0 {
+		t.Fatalf("residual leases after teardown: %+v", rem)
+	}
+	dispOut, _ := client.Shell(ctx, newSerial, "dumpsys display | grep -E 'DisplayDeviceInfo|mCurrentStatus=WifiDisplayStatus'")
+	if strings.Contains(dispOut, "AndroFuseDeX") {
+		t.Fatalf("residual DeX display after teardown:\n%s", dispOut)
+	}
+	if ps, _ := client.Shell(ctx, newSerial, "ps -A -o NAME,ARGS | grep dexhelper | grep -v grep"); strings.TrimSpace(ps) != "" {
+		t.Fatalf("detached helper still running after STOP:\n%s", ps)
+	}
+}

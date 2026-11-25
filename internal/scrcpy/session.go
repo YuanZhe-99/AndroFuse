@@ -17,6 +17,8 @@ import (
 	"github.com/YuanZhe-99/AndroFuse/internal/adb"
 	"github.com/YuanZhe-99/AndroFuse/internal/core"
 	"github.com/YuanZhe-99/AndroFuse/internal/lease"
+
+	"github.com/YuanZhe-99/AndroFuse/internal/sysproc"
 )
 
 // LaunchConfig configures a single scrcpy-server v5.0.1 session (Mode 1/2/3).
@@ -227,6 +229,7 @@ func StartADB(ctx context.Context, client *adb.Client, lib *core.Lib, store *lea
 	shellCmd := fmt.Sprintf("CLASSPATH=%s app_process / com.genymobile.scrcpy.Server %s",
 		RemoteServerPath, strings.Join(serverArgs, " "))
 	cmd := exec.Command(client.Path, "-s", cfg.Serial, "shell", shellCmd)
+	sysproc.HideConsole(cmd)
 	var outBuf bytes.Buffer
 	cmd.Stdout = &outBuf
 	cmd.Stderr = &outBuf

@@ -243,12 +243,11 @@ flowchart TB
   4. **`androfuse-svc run` + `internal/localapi`**：Windows AF_UNIX NDJSON 守护服务，内置 `SIO_AF_UNIX_GETPEERPID` + Windows SID 同用户校验与启动期 `leases.json` 自动恢复；
   5. **音视频与输入完善**：Rust `wasapi_audio.rs` 共享模式 WASAPI PCM 播放器（C ABI v4）+ `scrcpy` `audio_codec=raw` 音频透传（不支持音频时安全降级）、双向剪贴板同步（设备→PC 与 `Ctrl+V`/按钮 PC→设备）、`SaveNV12AsPNG` 截图与 `MP4Recorder` 零重编码分片 MP4 录屏。
 
-### M2：Samsung DeX 完整体验完善与多设备稳态（`0.2.0` — 🚧 代码已就绪，待接 Fold 8 真机复验 USB→Wi-Fi 热切换）
-- **已落地（核心实现与离线/界面回归已通过）**：
-  1. **单设备多传输去重聚合（`INV-02`）**：`internal/adb` 通过 `getprop ro.serialno` 硬件哈希将同一台手机的有线 USB 与加密 TLS 无线 ADB 合并为一张统一设备卡片（`MergeDevices`/`UnifiedDevice`，`localapi` 同步返回 `unified_devices`），保留全部传输徽标并提示热切换就绪；
-  2. **30 秒断线宽限保活与热切换续接**：`server/dexhelper` 新增本地控制回环监听端口与 `attach <token> <ctrl_port>` 子命令；`LoopbackSession.Reattach` 与 `SessionWindow.attemptDeXGraceHandoff` 在 USB 意外拔线时保持 `AndroFuseDeX` 桌面状态，30 秒内自动切换至同设备在线 TLS 无线 ADB 无缝重连视频与控制；
-  3. **路由策略选择器与编码器并发余量保护（`INV-01`、`INV-06`）**：新增 `FormatOneUIVersion` + `SelectRoute` 与卡片路由分段选择器（自动选路 / 原生 DeX / 虚拟兼容模式），并在“设备”与“工作模式”页实时展示硬件编码流并发计数与上限拦截，防止静默黑屏。
-- **待真机实测收口**：接上物理三星 Fold 8 后执行有线 USB 拔线热切换至加密 TLS Wi-Fi DeX 的真机端到端验收；非 DeX 机型在 `Pixel_9a_API_36` 与离线回归测试中均已校验诚实回退标注。
+### M2：Samsung DeX 完整体验完善与多设备稳态（`0.2.0` — 🚧 2026-11-25 热切换根因已修复，Wi-Fi 断连实测通过，待物理 USB 拔线复测）
+- **已落地（基础能力）**：
+  1. **单设备多传输去重聚合（`INV-02`）**：`internal/adb` 通过 `getprop ro.serialno` 硬件哈希将同一台手机的有线 USB 与加密 TLS 无线 ADB 合并为一张统一设备卡片（`MergeDevices`/`UnifiedDevice`，`localapi` 同步返回 `unified_devices`）；
+  2. **路由策略选择器与编码器并发余量保护（`INV-01`、`INV-06`）**：`FormatOneUIVersion` + `SelectRoute` 与编码通道计数保护已在 Fold 8 自动化测试通过。
+- **热切换**：根因与修复见 **§9.1 第 4 项**；剩余物理 USB 拔线复测。
 
 ### M3：Android Companion APK 与跨端协同（`0.3.0` — 🚧 协议/宿主/UI/EasyTier `--no-tun` 托管与 APK 构建工具已就绪，待真机系统权限联调）
 - **M3a 已落地（内建可下载 Android 虚拟机，§6.6）**：
@@ -276,6 +275,52 @@ flowchart TB
   3. 新增 `internal/avbridge`（本机防越权 MJPEG 流、`MFCreateVirtualCamera` 系统能力诚实探测与 `StreamMic` 经 Companion `MediaBridge` 加密隧道回传 WASAPI 采集 PCM 帧）及 C ABI v5 真实 WASAPI `WasapiMicCapturer`（`androfuse_mic_*`）；
   4. 新增 `packaging/android/AndroidManifest.services.xml` 与桌面 Settings 页 EasyTier（`--no-tun`）托管配置卡片、Companion 面板 PC 麦克风一键回传按钮；
   5. **诚实边界**：尚未打包需要管理员签名/安装的独立 Windows COM `MFCreateVirtualCamera` Media Source 驱动，当前通过原生预览窗口 + 本机防越权 MJPEG 流提供通用接入能力；PC→Android 在非 Root 手机上通过 Companion App 会话内接入，暂未做全系统 HAL 虚拟设备注入；真实硬件验收需接真机。
+
+---
+
+### §9.1 下一阶段重点规划（2026-11-25 实测反馈后修订）
+
+基于 2026-11-25 真机核查与用户反馈，以下五项工作作为下一阶段核心实施计划：
+
+#### 1. 内置集成式 EasyTier 组网（替代外部 CLI 进程托管）
+- **已落地（2026-11-25，Windows 桌面端）**：EasyTier v2.7.1（LGPL-3.0，与 `GPL-3.0-only` 兼容）经上游 `easytier-ffi` 静态链接进 `core/androfuse-core`（`mesh.rs`，固定修订 `0d9c52b`，未启用 `c-abi` 以免导出通用符号）；C ABI v6 新增 `androfuse_call` 方法 `mesh.start` / `mesh.stop` / `mesh.status`，强制 `no_tun`、无监听端口、端口转发仅绑定 `127.0.0.1`（`INV-07`）；`internal/mesh` 改为核心库客户端，桌面端 GUI 已切换，外部 `easytier-core.exe` 依赖移除；`packet.dll` 改为延迟加载；`core/deny.toml` 按用户批准仅放行 EasyTier 组织 git 源并显式允许其传递依赖的宽松许可证；`tools/fetchdeps` 固定 `protoc` 36.2，`-check-upstream` 与发布流程警告用于随 App 更新及时升级 EasyTier。
+- **剩余**：
+  1. **Android Companion 接入**：为 `aarch64-linux-android` 构建 `libandrofuse_core.so` 并在 Companion 中加载（当前 Companion 尚未加载核心库）；
+  2. **跨网联调**：桌面端与手机端在同一组网下经公网中继实测 ADB TLS 与 Companion TLS 端口转发；
+  3. **CI 验证**：推送后确认 `windows-11-arm` / `windows-latest` 运行器的 clang 与 `protoc` 前置步骤生效。
+
+#### 2. 手机端自连本地 Wi-Fi ADB 调研与设计（`INV-09`、`INV-13` 合规）
+- **已知结论（基于公开 AOSP 行为与开源先例，未参考商业代码）**：
+  1. 无线调试（`adbd` TLS）在所有接口监听，普通 App 具备 `INTERNET` 权限即可发起到 `127.0.0.1:<port>` 的 TCP 连接；开源项目（如 Shizuku 的无线调试启动、LADB）已在非 Root 设备上自连 `adbd`，说明 SELinux 不阻断 `untrusted_app` 的回环 TCP 连接；
+  2. 无线调试仅在连接 Wi-Fi 时运行，切换网络或断开 Wi-Fi 会自动关闭并更换端口；纯蜂窝网络下无法自连，**跨 5G 场景应由内置 EasyTier 直接转发到手机的 `adbd`，而非依赖手机自连**；
+  3. 首次配对必须由用户在系统「无线调试 › 使用配对码配对」中看到 6 位码（可在分屏中完成），配对协议为 SPAKE2 + TLS（AOSP `adb pairing`，Apache-2.0）；端口可通过 `NsdManager` 发现本机 `_adb-tls-connect._tcp`。
+- **设计**：自连仅用于手机端自愈（断线后清理残留虚拟显示、保持无线调试端口信标准确），远程运维走 EasyTier 端口转发；ADB RSA 密钥存于 Android Keystore 包装的私有存储（`INV-08`），每次配对需用户确认（`INV-09`）。
+- **待实测（需在 Fold 8 安装伴侣调试版）**：用 `run-as com.yuanzhe.androfuse` 在 App SELinux 域验证 `127.0.0.1:<tls_port>` 可达性与 One UI 9 是否对回环连接另有限制。
+
+#### 3. 手机端常驻运行的省电与功耗治理（Companion Power Efficiency）
+- **现状结论**：伴侣端遥测本就是按需读取 sysfs（无轮询循环），桌面端仅在连接时拉取一次状态，原先也未持有唤醒锁。
+- **已落地（2026-11-25）**：MyGo 移动插件 `androfusePower`（`internal/androidbridge/android/Power.kt` + `mygo-plugin.json`）：用户开启「后台待机」时才启动 `connectedDevice` 类型前台服务（最低重要性通知，`START_NOT_STICKY`）；`PARTIAL_WAKE_LOCK` + Wi-Fi 低延迟锁作为「活动租约」仅在文件传输、媒体帧、剪贴板时持有，空闲 30 秒或停止服务即释放，原生锁另带 2 分钟硬超时；网络切换改由 `ConnectivityManager.NetworkCallback` 事件上报；手机端新增「后台待机」开关（默认关闭）。
+- **编译验证（2026-11-25）**：安装 JDK 17 后 APK 已编译打包（含 `libmygoapp.so`、`AndroFuseStandbyService` 与相关权限）；同时修复 `tools/buildapk` 在 Windows 上生成的 APK 缺少 Go 原生库与清单权限的问题。
+- **AVD 实测（2026-11-25，`Pixel_9a_API_36`）**：前台待机服务、后台存活、空闲无唤醒锁、传输时获取并在 30.03 秒后释放唤醒锁/Wi-Fi 锁均已通过；并修复了 Android 14+ 缺少 `CHANGE_NETWORK_STATE` 导致伴侣崩溃的问题。
+- **剩余**：在真机上验证 Wi-Fi ↔ 蜂窝切换时的 `NetworkCallback` 事件（模拟器虚拟网络无法断开）；内置 EasyTier 上手机后再补空闲降频选项。
+
+#### 4. USB ↔ Wi-Fi 热切换根因排查与修复
+- **根因（2026-11-25 实测确认）**：`serve` 助手是 `adb shell` 会话的子进程，传输断开（USB 拔线或 Wi-Fi 中断）时 adbd 结束整个进程组，助手在进入 30 秒宽限期前即被终止，DeX 显示器随之消失，桌面端无可续接对象。
+- **已修复**：`serve` 改为 `setsid -w nohup` 脱离会话启动（toybox 不支持时退回原方式）；桌面端宽限循环在无在线无线传输时，仅按 mDNS 实例 `adb-<ro.serialno>-…` 匹配同一台手机并自动 `adb connect`；新增 `TestLiveDeXSurvivesTransportDrop`，Fold 8 经 TLS Wi-Fi 断开重连实测通过（显示器保持、`REATTACHED` + `PONG`、干净 `STOP`）。
+- **剩余**：
+  1. **物理 USB 拔线复测**：在 `androfuse.exe` 中 USB 启动 DeX 后拔线，确认自动切到 Wi-Fi；
+  2. **设备记忆**：`devices.json` 持久化硬件哈希与已配对无线端点（与 §9.1-5 第 4 项合并实施）。
+
+#### 5. 桌面端与手机端前端全面重做
+- **目标**：彻底重构桌面端（`internal/gui`）与手机端（`internal/androidhost`）原生 MyGo 界面，落地已完成评审方向确认的 **V2.1 HTML 设计草稿（[design/index.html](design/index.html)）**。
+- **实施要点**：
+  1. **桌面端主窗口内嵌分屏架构**：DeX、手机镜像、独立应用窗口与手机摄像头默认在主窗口内以窗格（Pane）打开，支持左右分屏（`DeX + 手机镜像`）、一键弹出为独立窗口（`↗`）及无断流停靠回主窗口（`◧`）；
+  2. **图标化与用户语言**：全界面采用统一矢量图标体系，精简 ~65% 文案，主界面全面去除工程术语（技术指标统一收口至「本机诊断」）；
+  3. **稳健响应式布局**：严格约束最小窗口尺寸（`820×560`），`< 960px` 侧栏自动折叠为 `64px` 图标栏，分屏窄窗格 `< 560px` 工具栏自动折叠至 `⋯` 菜单，杜绝控件挤压与重叠；
+  4. **配对记忆与可选安装**：落地 `devices.json` 自动重连、一键忘记设备，以及首次无线配对时默认不勾选的可选 Companion APK 安装开关；
+  5. **手机端重做**：重构为「主页 / 权限 / 安全」三标签底栏、无固定像素宽度的 `320dp` 安全行布局及 Fold 8 展开态（`>= 680dp`）双栏自适应。
+  6. **设计词汇规范（V2.1）**：按 [design/README.md](design/README.md)「Design Vocabulary Audit」把圆角刻度、细线、分层阴影、三级文字色、等宽数字、动效曲线与按钮层级落为 `internal/gui/style.go` 命名 token；命令面板（`Ctrl K`）、快捷键提示与外部助手操作确认卡（Approval Gate）为待评审提案，实现并实测前不得标为已支持。
+- **进度（2026-11-25）**：V2.1 圆角刻度、文字层级、禁用色、动效时长与按压缩放等 token 已写入 `internal/gui/style.go`，现有视图已切换到 V2.1 配色；其余视图（第 1–5 项）尚未重做。
 
 ---
 

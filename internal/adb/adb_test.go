@@ -1,6 +1,9 @@
 package adb
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestMaskAndHash(t *testing.T) {
 	if got := MaskSerial("ABC123456XYZ"); got != "ABC****XYZ" {
@@ -156,5 +159,31 @@ emulator-5554          device product:sdk_gphone64_arm64 model:Pixel_9a device:e
 	alt, ok := fold.AlternateTransport(fold.Primary.Serial)
 	if !ok || alt.Serial != "192.168.1.50:41235" {
 		t.Fatalf("expected AlternateTransport to return TLS Wi-Fi endpoint, got ok=%v alt=%+v", ok, alt)
+	}
+}
+
+// TestParseMDNSServicesHardwareHash checks that the `adb-<ro.serialno>-<suffix>` instance name
+// maps to the same HardwareHash that ProbeDevice derives from ro.serialno (USB↔Wi-Fi handoff).
+func TestParseMDNSServicesHardwareHash(t *testing.T) {
+	raw := "List of discovered mdns services\n" +
+		"adb-R3CW1234567-BIOYhW\t_adb-tls-connect._tcp\t192.168.1.50:41235\n" +
+		"adb-R3CW1234567-xyz123\t_adb-tls-pairing._tcp\t192.168.1.50:37001\n" +
+		"oddname\t_adb-tls-connect._tcp\t192.168.1.51:40000\n"
+	svcs := ParseMDNSServices(raw)
+	if len(svcs) != 3 {
+		t.Fatalf("expected 3 services, got %d", len(svcs))
+	}
+	want := DeviceHash("R3CW1234567")
+	if !svcs[0].CanConnect || svcs[0].HardwareHash != want {
+		t.Fatalf("connect entry: %+v, want hash %s", svcs[0], want)
+	}
+	if !svcs[1].CanPair || svcs[1].HardwareHash != want {
+		t.Fatalf("pairing entry: %+v", svcs[1])
+	}
+	if svcs[2].HardwareHash != "" {
+		t.Fatalf("unexpected hash for non-standard instance: %+v", svcs[2])
+	}
+	if strings.Contains(svcs[0].Instance, "R3CW1234567") {
+		t.Fatalf("instance must stay masked (INV-08): %q", svcs[0].Instance)
 	}
 }

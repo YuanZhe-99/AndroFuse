@@ -12,6 +12,9 @@ AndroFuse is licensed under **GNU General Public License v3.0 only** (`GPL-3.0-o
 | Rust `serde`, `serde_json`, `windows-sys`, `windows` | MIT OR Apache-2.0 | Active (M1a) | Verified via `cargo deny check licenses bans sources` |
 | `Genymobile/scrcpy` (`scrcpy-server` v5.0.1) | Apache-2.0 | Active (M1a) | Fetched with pinned SHA-256 by `tools/fetchdeps`; wire protocol integrated |
 | Android Platform Tools (`adb`) | Apache-2.0 | Active (M1a) | Host discovery & transport via `internal/adb`; ship notice when bundled |
+| `EasyTier/EasyTier` v2.7.1 (`easytier-ffi`, `easytier`, `easytier-core`, `easytier-proto` and EasyTier-org forks) | LGPL-3.0 | Active (§9.1-1) | Statically linked into `androfuse_core` (compatible with `GPL-3.0-only`); pinned rev `0d9c52b`; `packet.dll` delay-loaded and never shipped |
+| Transitive Rust crates of EasyTier (`smoltcp`, `webpki-roots`, `libbz2-rs-sys`, `encoding-index-*`, `tun`, …) | 0BSD, CDLA-Permissive-2.0, bzip2-1.0.6, CC0-1.0, WTFPL | Active (§9.1-1) | All GPL-3.0-compatible; allowed explicitly in `core/deny.toml` |
+| `protocolbuffers/protobuf` (`protoc` 36.2) | BSD-3-Clause | Build-time only | Fetched with pinned SHA-256 by `tools/fetchdeps`; not shipped |
 | `adirh3/DeXDesk` (protocol/Miracast insights) | MIT | Active (M1a) | Reference for WFD Sink / RTSP / RTP-TS / UIBC & MF DXVA decoder |
 | `Aureliano021/ScrcpyDex` (loopback DeX activator) | Apache-2.0 | Active (M1a) | Reference for clean-room `SemWifiDisplayConfig` loopback DeX helper |
 | `maze-mei/DX-Manager` | MIT | Reference / Active | Multi-session lifecycle & initial DPI ≥ 160 bootstrap reference |

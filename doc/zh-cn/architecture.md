@@ -15,31 +15,32 @@
 | `cmd/androfuse` | 统一 MyGo 原生 UI 入口（Windows 启用 `mygo_nowebview`） |
 | `cmd/androfuse-svc` | 无头引擎命令行（`version`、`check [--json]`、`probe [--json]`、`run [--socket <path>]`） |
 | `internal/version` | 全局唯一产品版本号（`Version`），测试强制与 `mygo.json` 一致 |
-| `internal/core` | `androfuse_core` C ABI v5 加载器、`NV12Ring` 零分配帧环、`AudioPlayer` 与 `MicCapturer` |
+| `internal/core` | `androfuse_core` C ABI v6 加载器、`NV12Ring` 零分配帧环、`AudioPlayer` 与 `MicCapturer` |
 | `internal/localapi` | 同用户 AF_UNIX NDJSON 服务（`SIO_AF_UNIX_GETPEERPID` + Windows SID 校验），提供含 `unified_devices` 的设备列表与 `vm.*` 虚拟机控制 |
 | `internal/vm` | 按需下载的轻量无头 Android 虚拟机管理器（`%LOCALAPPDATA%\AndroFuse\vm`，原生 `arm64-v8a` / `x86_64`，`INV-03`、`INV-10`） |
 | `internal/companion` | 桌面与 Android APK 共用的 TLS 1.3 加密 Companion NDJSON 协议（遥测、剪贴板、通知回复、文件传输、应用接力、显示守护与 ADB 信标；`INV-07`、`INV-09`） |
-| `internal/androidhost` | 可选 Android 伴侣端宿主服务、配置持久化、sysfs 电量/温控探针、脱敏审计日志与 MyGo 分级授权界面（`INV-09`、`INV-11`） |
-| `internal/androidbridge` | 平台安全的 Android 系统服务能力探测包，与 `CompanionServices.kt`（`NotificationListenerService`、`TileService`、`MediaProjection`、`SAF`、`AppWidgetProvider`）协同工作 |
+| `internal/androidhost` | 可选 Android 伴侣端宿主服务、配置持久化、sysfs 电量/温控探针、脱敏审计日志与 MyGo 分级授权界面（`INV-09`、`INV-11`）；可选后台待机与仅在传输期间持有的唤醒锁/Wi-Fi 锁活动租约（PLAN §9.1-3） |
+| `internal/androidbridge` | 平台安全的 Android 系统服务能力探测包，与 `CompanionServices.kt`（`NotificationListenerService`、`TileService`、`MediaProjection`、`SAF`、`AppWidgetProvider`）协同工作；MyGo 移动插件 `androfusePower`（`android/Power.kt`：待机前台服务、`NetworkCallback` 事件、活动租约） |
 | `internal/avbridge` | M5 双向音视频桥接：手机摄像头本地防越权 MJPEG 流、系统 `MFCreateVirtualCamera` 探测与加密 PC→Android 麦克风/摄像头传入链路 |
 | `internal/mcp` | 默认关闭的本机回环（`127.0.0.1`）HTTP JSON-RPC 2.0 本地 MCP 服务，带 30 分钟临时密钥、工具白名单、紧急停止与脱敏审计（`INV-07`、`INV-08`） |
-| `internal/mesh` | 默认关闭的可选用户态 EasyTier（`--no-tun`）跨网组网托管模块（`INV-07`、`INV-08`） |
+| `internal/mesh` | 内置于核心库、默认关闭的 EasyTier v2.7.1 组网客户端（`androfuse_call` `mesh.*`；无 TUN，仅回环端口转发；`INV-07`、`INV-08`） |
 | `internal/bundlesig` | 沿用 Kyokai 规范的 Ed25519 辅助程序包清单（`bundle.json` + `bundle.sig`）签名与校验包 |
-| `internal/adb` | 无 Shell 参数向量 `adb` 客户端、`MergeDevices`（USB 与 TLS 无线去重合并，`INV-02`）、mDNS TLS 无线连接配对、`MaskSerial`/`MaskEndpoint` 脱敏、`emulator-*` 分类与 `--user 0` 应用枚举 |
+| `internal/adb` | 无 Shell 参数向量 `adb` 客户端、`MergeDevices`（USB 与 TLS 无线去重合并，`INV-02`）、mDNS TLS 无线连接配对、`MaskSerial`/`MaskEndpoint` 脱敏、`emulator-*` 分类与 `--user 0` 应用枚举；mDNS `adb-<ro.serialno>-…` 实例映射到 `HardwareHash`，用于热切换重连 |
+| `internal/sysproc` | `HideConsole`：所有控制台子进程（adb、emulator、sdkmanager）均以 `CREATE_NO_WINDOW` 启动，不再弹出控制台或 Windows Terminal 窗口 |
 | `internal/lease` | 原子 `leases.json` 账本，确保虚拟显示、DeX 回环与端口转发完整回收（`INV-03`） |
 | `internal/scrcpy` | `scrcpy-server v5.0.1` 线协议编解码、鼠标/触控/滚动/键盘与 `flex_display` 会话、原始 PCM 音频、`MP4Recorder` 与离线样本 |
 | `internal/dex` | Samsung Native DeX 调度器（`server/dexhelper` 回环 + 30 秒宽限 `Reattach`）、真实应用名称与 96x96 PNG 图标缓存（`ListAppsWithIcons`）、`SelectRoute` 及 `EvaluateTruth` 校验（`INV-06`；Miracast 已隐藏） |
 | `internal/gui` | MyGo 原生 UI 外壳、USB+Wi-Fi 热切换统一设备卡片与编码流余量检查（`INV-01`/`INV-02`）、DeX 路由选择器（`INV-06`）、应用启动器网格、无边框 `SessionModeApp` 与 `SessionWindow` 视频窗口、`SaveNV12AsPNG`、剪贴板/音频控制、托盘与主机诊断 |
 | `locales` | 英文（`en`）与简体中文（`zh-Hans`）ARB 词条目录及生成访问器 |
 | `server/dexhelper` | 洁净室 Java UID 2000 `app_process` 辅助器（`probe`、`apps`、`serve`、`attach`、`recover`），驱动 `SemWifiDisplayConfig` 回环、宽限期控制端重附着与图标提取 |
-| `tools/fetchdeps` | 从上游下载并校验 SHA-256 后缓存 Apache-2.0 `scrcpy-server-v5.0.1` 至 `.dev/cache/` |
+| `tools/fetchdeps` | 下载并校验 SHA-256 后缓存 `scrcpy-server-v5.0.1` 与构建期 `protoc` 36.2 至 `.dev/cache/`；`-check-upstream` 报告更新的 EasyTier 版本 |
 | `tools/builddex` | 编译并打包 `server/dexhelper` 为 `build/androfuse-dex-helper.jar` |
-| `tools/buildapk` | 构建 `arm64-v8a` Android Companion APK（含 Windows Gradle wrapper 回退）并校验 `zipalign -c -P 16 4` |
+| `tools/buildapk` | 构建 `arm64-v8a` Android Companion APK：在 Windows 上补充 `gradlew.bat`（将 MyGo 的 `ORG_GRADLE_PROJECT_*` 属性转为 `-P` 参数）、优先使用 JDK 17，缺少 `lib/arm64-v8a/*.so` 时报错，并校验 `zipalign -c -P 16 4` |
 | `tools/sign` | Ed25519 发布密钥生成与辅助包签名命令行工具（`ANDROFUSE_SIGNING_KEY`，与 Kyokai 同格式） |
-| `tools/checkpe` | 校验所有 `.exe` 与 `.dll` 是否为目标原生 PE 机器码（`0xAA64` / `0x8664`，`INV-10`） |
+| `tools/checkpe` | 校验所有 `.exe` 与 `.dll` 是否为目标原生 PE 机器码（`0xAA64` / `0x8664`，`INV-10`），并校验 `androfuse.exe` 使用 Windows GUI 子系统 |
 | `tools/icon` | 从 `resources/icon.svg` 渲染桌面、UI、托盘与 Android 自适应图标 PNG |
 | `tools/checkdocs` | 校验 `doc/en-us/` 与 `doc/zh-cn/` 的 1:1 结构镜像一致性 |
-| `core/androfuse-core` | Rust 2024 `cdylib`/`rlib` 核心库：C ABI v5、主机自检、`scrcpy v5.0.1` 协议、Media Foundation DXVA NV12 解码（`mf_video.rs`）、WASAPI 音频播放与麦克风采集（`wasapi_audio.rs`）及已隐藏的 Miracast 协议模块（`miracast.rs`） |
+| `core/androfuse-core` | Rust 2024 `cdylib`/`rlib` 核心库：C ABI v6、主机自检、内置 EasyTier 组网（`mesh.rs`，经上游 `easytier-ffi`）、`scrcpy v5.0.1` 协议、Media Foundation DXVA NV12 解码（`mf_video.rs`）、WASAPI 音频播放与麦克风采集（`wasapi_audio.rs`）及已隐藏的 Miracast 协议模块（`miracast.rs`） |
 
 ## 规划中的运行时模块（M2–M4）
 
@@ -49,13 +50,13 @@
 
 ## FFI 边界
 
-`androfuse-core` 导出带版本校验的 C ABI（`androfuse_abi_version() -> u32`，当前为 `5`）：
+`androfuse-core` 导出带版本校验的 C ABI（`androfuse_abi_version() -> u32`，当前为 `6`）：
 
 | 导出函数 | 作用 |
 |---|---|
-| `androfuse_abi_version() -> u32` | 返回 ABI 版本号（`5`）；Go 侧不匹配则拒绝加载 |
+| `androfuse_abi_version() -> u32` | 返回 ABI 版本号（`6`）；Go 侧不匹配则拒绝加载 |
 | `androfuse_start(json, len, *out, *out_len) -> i32` | 以 `{version, state_dir, profile?}` 初始化核心库 |
-| `androfuse_call(json, len, *out, *out_len) -> i32` | 分发 `{method, params}` 请求（`status`、`diagnostics.self_check`、`miracast.test_sink`） |
+| `androfuse_call(json, len, *out, *out_len) -> i32` | 分发 `{method, params}` 请求（`status`、`diagnostics.self_check`、`miracast.test_sink`、`mesh.start`、`mesh.stop`、`mesh.status`） |
 | `androfuse_free(ptr, len)` | 释放 `androfuse_start` / `androfuse_call` 分配的响应缓冲区 |
 | `androfuse_stop()` | 停止核心库、销毁活跃解码器、音频播放器、麦克风采集器与 Miracast 会话并清理内存状态 |
 | `androfuse_decoder_open(codec_id, w, h, *out_handle) -> i32` | 打开 Media Foundation H.264/HEVC 解码器（优先 `MF_SA_D3D11_AWARE` 硬解） |

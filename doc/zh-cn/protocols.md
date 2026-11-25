@@ -21,7 +21,7 @@ AndroFuse 在 Rust（`core/androfuse-core`）与 Go（`internal/adb`、`internal
 
 - **`probe`**：初始化 `Looper` 与 `ActivityThread`（`com.android.shell`）兼容壳，反射检测 `SemWifiDisplayConfig$Builder` 与 `IDisplayManager.connectWifiDisplayWithConfig`，输出 `AFDEX1|PROBE|{json}`。
 - **`apps [--no-icons]`**：通过 `ActivityThread.systemMain()` 获取系统上下文，调用 `PackageManager` 查询 `ACTION_MAIN` / `CATEGORY_LAUNCHER`，过滤 WebAPK/十六进制哈希噪声包名，提取本地化应用名与 `resizeMode` 并渲染 `96x96` ARGB_8888 PNG 图标，逐行输出 `AFDEX1|APP|{json}` 与 `AFDEX1|APPS_DONE|<count>`。
-- **`serve <token> <w> <h> <dpi> <grace_sec>`**：先通过 `KEYCODE_WAKEUP` 唤醒息屏设备，持有 `/data/local/tmp/androfuse-dex.lock` 后调用 `disconnectWifiDisplay()`，绑定本地 UDP 排空端口与本地控制监听端口（`127.0.0.1:<ctrlPort>`，作为 `AFDEX1|<token>|READY|<id>|<w>|<h>|<dpi>|<type>|<flags>|<pid>|<ctrlPort>` 的第 8 字段返回），并调用 `connectWifiDisplayWithConfig`（`127.0.0.1:7236`、`"AndroFuseDeX"`、`mode=2`）完成 WFD RTSP 状态机并遵循**初始 DPI ≥ 160 引导规则**；支持运行期 `RESIZE <w> <h> <dpi>`，在 stdin 意外断开时进入 `grace_sec` 宽限保活窗口（输出 `AFDEX1|<token>|GRACE|<grace_sec>`），并在收到 `STOP` 或宽限到期后完整清理。
+- **`serve <token> <w> <h> <dpi> <grace_sec>`**：先通过 `KEYCODE_WAKEUP` 唤醒息屏设备，持有 `/data/local/tmp/androfuse-dex.lock` 后调用 `disconnectWifiDisplay()`，绑定本地 UDP 排空端口与本地控制监听端口（`127.0.0.1:<ctrlPort>`，作为 `AFDEX1|<token>|READY|<id>|<w>|<h>|<dpi>|<type>|<flags>|<pid>|<ctrlPort>` 的第 8 字段返回），并调用 `connectWifiDisplayWithConfig`（`127.0.0.1:7236`、`"AndroFuseDeX"`、`mode=2`）完成 WFD RTSP 状态机并遵循**初始 DPI ≥ 160 引导规则**；支持运行期 `RESIZE <w> <h> <dpi>`，在 stdin 意外断开时进入 `grace_sec` 宽限保活窗口（输出 `AFDEX1|<token>|GRACE|<grace_sec>`），并在收到 `STOP` 或宽限到期后完整清理。PC 以脱离会话方式启动 `serve`（`setsid -w nohup`；toybox 不支持 `setsid -w` 时退回普通启动）：传输断开（USB 拔线、Wi-Fi 中断）时 adbd 会结束 shell 所在进程组，此前助手因此在宽限期开始前即被终止。
 - **`attach <token> <ctrl_port>`**：在 USB→TLS Wi-Fi 热切换期间（`INV-02`）连接仍在存活的 `127.0.0.1:<ctrl_port>`，发送 `AUTH <token>` 鉴权后接收 `AFDEX1|<token>|REATTACHED|<id>|<w>|<h>|<dpi>`，无缝接管后续 `PING` / `RESIZE` / `STOP` 指令。
 - **`SelectRoute` 与 `EvaluateTruth`（`INV-06`）**：One UI 9.0（`SDK 37`）将 DeX 合并进 SystemUI/Launcher（无独立 `com.sec.android.app.desktoplauncher` 包），因此 `internal/dex` 通过三星厂商身份、活跃 `SemWifiDisplayConfig` 与显示属性进行真伪判定与自动选路，并支持在“原生 DeX”与明确标注的“虚拟桌面兼容模式”间手动切换。
 
@@ -30,11 +30,12 @@ AndroFuse 在 Rust（`core/androfuse-core`）与 Go（`internal/adb`、`internal
 - **全平台隐藏原因**：Windows 第三方应用无法仅凭公开 WinRT API 充当 Miracast 接收端，必须调用微软未公开的私有接口 `wlanapi.dll!WlanNotifyVsIeProviderInt`（`GUID b7d94b4d-5db1-4e70-b5c3-dd003eeebe66`）。在 Windows 11 ARM64（`build 26300`，高通 WCN685x WiFiCx 驱动 `qcwlan8280.sys` `1.0.4122.4000`）真机复测证实，外部手机对注入 `WlanNotifyVsIeProviderInt` 的 Wi-Fi Direct GO 接收端发起 Miracast 关联时，会直接触发 `qcwlan8280.sys` 内核工作线程访问违例蓝屏（`BugCheck 0x0000007E`，`0xC0000005`）。鉴于依赖未公开系统内部接口不具备稳定性保障，Miracast 方案已在全部平台界面中隐藏并在运行期禁用；有线 USB ADB 与 **加密 TLS 无线 ADB（`_adb-tls-connect._tcp`）** 作为正式支持的 DeX 双通道。
 - **保留的纯协议离线单测**：`miracast.rs` 中的纯 Rust WFD RTSP 状态机、RTP 乱序重排、MPEG-TS H.264 解复用与 UIBC 报文编解码仍保留离线单元测试作为技术归档，不触碰任何无线网卡驱动。
 
-## 4. C-ABI v5 NV12 / WASAPI 管线、本地 IPC 与租约账本（`leases.json`）
+## 4. C-ABI v6 NV12 / WASAPI 管线、本地 IPC 与租约账本（`leases.json`）
 
 | 组件 | 契约说明 |
 |---|---|
 | `androfuse_decoder_*` 与 `androfuse_audio_*` | Media Foundation H.264/HEVC DXVA/D3D11 硬解或软解输出 NV12 平面（按 `MF_MT_FRAME_SIZE` 与 `MF_MT_MINIMUM_DISPLAY_APERTURE` 裁剪）以及共享模式 WASAPI 48kHz 双声道 PCM 播放 |
+| `androfuse_call` `mesh.start` / `mesh.stop` / `mesh.status` | 内置 EasyTier v2.7.1（`easytier-ffi`，无 TUN）。`mesh.start` 接收 `{network_name, network_secret, device_name, peers[], port_forwards[{local_port, remote_host, remote_port}]}`（`remote_host` 为组网 IP），生成 `flags.no_tun = true`、`dhcp = true`、无监听端口且转发仅绑定 `127.0.0.1` 的 TOML；`mesh.status` 返回 `{running, engine}`，运行详情从不写入日志（`INV-08`） |
 | `internal/core.NV12Ring` 与 `SessionWindow` | 可复用 NV12 缓冲槽直喂 `ui.Bitmap.UpdateYUV`（`ui.NV12`、`ui.BT709`），稳态每帧零堆分配（`INV-04`），并支持按需 `SaveNV12AsPNG` 截图与 `MP4Recorder` 直存录屏 |
 | `internal/localapi` 与 `internal/lease.Store` | 同用户 AF_UNIX NDJSON 守护服务（`SIO_AF_UNIX_GETPEERPID` + SID 校验）及原子写入 `leases.json`（仅记录 SHA-256 `device_hash`，不写原始序列号或 IP，`INV-03`、`INV-08`） |
 

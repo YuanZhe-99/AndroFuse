@@ -12,6 +12,8 @@ AndroFuse is licensed under **GNU General Public License v3.0 only** (`GPL-3.0-o
 ### Rust Crates
 - **serde**, **serde_json** — MIT OR Apache-2.0.
 - **windows**, **windows-sys** — MIT OR Apache-2.0. Windows Media Foundation, D3D11/DXGI, Wi-Fi Direct WinRT, and Win32 system APIs.
+- **EasyTier** v2.7.1 (`easytier-ffi`, `easytier`, `easytier-core`, `easytier-proto`, and the EasyTier organisation's forks of `tun`, `tokio-websockets`, `kcp-sys`, `windivert`, `service-manager`, `thunk`) — LGPL-3.0, Copyright (C) EasyTier contributors (https://github.com/EasyTier/EasyTier). Statically linked into `androfuse_core` as the embedded no-TUN mesh; AndroFuse as a whole is distributed under GPL-3.0-only, and the corresponding source of the pinned revision is available upstream. Its transitive crates add 0BSD, CDLA-Permissive-2.0, bzip2-1.0.6, CC0-1.0 and WTFPL licences (see `core/deny.toml`).
+- **protoc** 36.2 (Protocol Buffers) — BSD-3-Clause. Build-time tool only, fetched by `tools/fetchdeps`; not distributed.
 
 ## Integrated Protocols & Upstream References (M1a–M4)
 

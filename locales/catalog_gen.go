@@ -1868,6 +1868,46 @@ func (msgs Messages) PermMediaBridge() string {
 	return Catalog.Format(msgs.locale, "PermMediaBridge", nil)
 }
 
+// StandbyTitle says "Background standby"
+// in the language the app shows.
+func StandbyTitle() string { return In(i18n.Locale()).StandbyTitle() }
+
+// StandbyTitle says "Background standby"
+// in the language of msgs.
+func (msgs Messages) StandbyTitle() string {
+	return Catalog.Format(msgs.locale, "StandbyTitle", nil)
+}
+
+// StandbyDesc says "Lets your PC reach this phone after you close the app. Shows a quiet notification."
+// in the language the app shows.
+func StandbyDesc() string { return In(i18n.Locale()).StandbyDesc() }
+
+// StandbyDesc says "Lets your PC reach this phone after you close the app. Shows a quiet notification."
+// in the language of msgs.
+func (msgs Messages) StandbyDesc() string {
+	return Catalog.Format(msgs.locale, "StandbyDesc", nil)
+}
+
+// StandbyNotifTitle says "AndroFuse is on standby"
+// in the language the app shows.
+func StandbyNotifTitle() string { return In(i18n.Locale()).StandbyNotifTitle() }
+
+// StandbyNotifTitle says "AndroFuse is on standby"
+// in the language of msgs.
+func (msgs Messages) StandbyNotifTitle() string {
+	return Catalog.Format(msgs.locale, "StandbyNotifTitle", nil)
+}
+
+// StandbyNotifText says "Your PC can connect to this phone"
+// in the language the app shows.
+func StandbyNotifText() string { return In(i18n.Locale()).StandbyNotifText() }
+
+// StandbyNotifText says "Your PC can connect to this phone"
+// in the language of msgs.
+func (msgs Messages) StandbyNotifText() string {
+	return Catalog.Format(msgs.locale, "StandbyNotifText", nil)
+}
+
 // ActionLaunchCamera says "Phone Camera"
 // in the language the app shows.
 func ActionLaunchCamera() string { return In(i18n.Locale()).ActionLaunchCamera() }
@@ -1968,31 +2008,31 @@ func (msgs Messages) AVUplinkNote() string {
 	return Catalog.Format(msgs.locale, "AVUplinkNote", nil)
 }
 
-// MeshCardTitle says "Cross-Network Userspace Mesh (EasyTier --no-tun)"
+// MeshCardTitle says "Cross-Network Connection (built-in EasyTier)"
 // in the language the app shows.
 func MeshCardTitle() string { return In(i18n.Locale()).MeshCardTitle() }
 
-// MeshCardTitle says "Cross-Network Userspace Mesh (EasyTier --no-tun)"
+// MeshCardTitle says "Cross-Network Connection (built-in EasyTier)"
 // in the language of msgs.
 func (msgs Messages) MeshCardTitle() string {
 	return Catalog.Format(msgs.locale, "MeshCardTitle", nil)
 }
 
-// MeshCardDesc says "Disabled by default (INV-07). Uses an optional user-provided easytier-core --no-tun binary without occupying TAP/TUN …"
+// MeshCardDesc says "Off by default. Built in, nothing to download. It never installs a virtual network adapter or takes the phone's VPN s…"
 // in the language the app shows.
 func MeshCardDesc() string { return In(i18n.Locale()).MeshCardDesc() }
 
-// MeshCardDesc says "Disabled by default (INV-07). Uses an optional user-provided easytier-core --no-tun binary without occupying TAP/TUN …"
+// MeshCardDesc says "Off by default. Built in, nothing to download. It never installs a virtual network adapter or takes the phone's VPN s…"
 // in the language of msgs.
 func (msgs Messages) MeshCardDesc() string {
 	return Catalog.Format(msgs.locale, "MeshCardDesc", nil)
 }
 
-// MeshStatusRunning says "EasyTier --no-tun running ({dev})"
+// MeshStatusRunning says "Connected through the mesh ({dev})"
 // in the language the app shows.
 func MeshStatusRunning(dev string) string { return In(i18n.Locale()).MeshStatusRunning(dev) }
 
-// MeshStatusRunning says "EasyTier --no-tun running ({dev})"
+// MeshStatusRunning says "Connected through the mesh ({dev})"
 // in the language of msgs.
 func (msgs Messages) MeshStatusRunning(dev string) string {
 	return Catalog.Format(msgs.locale, "MeshStatusRunning", map[string]any{"dev": dev})
@@ -2006,16 +2046,6 @@ func MeshStatusStopped() string { return In(i18n.Locale()).MeshStatusStopped() }
 // in the language of msgs.
 func (msgs Messages) MeshStatusStopped() string {
 	return Catalog.Format(msgs.locale, "MeshStatusStopped", nil)
-}
-
-// MeshBinaryMissing says "easytier-core binary not detected in PATH or app directory (optional)"
-// in the language the app shows.
-func MeshBinaryMissing() string { return In(i18n.Locale()).MeshBinaryMissing() }
-
-// MeshBinaryMissing says "easytier-core binary not detected in PATH or app directory (optional)"
-// in the language of msgs.
-func (msgs Messages) MeshBinaryMissing() string {
-	return Catalog.Format(msgs.locale, "MeshBinaryMissing", nil)
 }
 
 // MeshNetNameHint says "Mesh network name"
@@ -2048,11 +2078,11 @@ func (msgs Messages) MeshPeerHint() string {
 	return Catalog.Format(msgs.locale, "MeshPeerHint", nil)
 }
 
-// MeshStartBtn says "Start Mesh (--no-tun)"
+// MeshStartBtn says "Start Mesh"
 // in the language the app shows.
 func MeshStartBtn() string { return In(i18n.Locale()).MeshStartBtn() }
 
-// MeshStartBtn says "Start Mesh (--no-tun)"
+// MeshStartBtn says "Start Mesh"
 // in the language of msgs.
 func (msgs Messages) MeshStartBtn() string {
 	return Catalog.Format(msgs.locale, "MeshStartBtn", nil)

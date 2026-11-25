@@ -26,3 +26,6 @@ Authoritative English → Simplified Chinese glossary for AndroFuse documentatio
 | App Launcher Grid | 应用启动器网格 | Tile grid displaying real localized Android app names and cached 96x96 PNG icons |
 | Chromeless App Window | 无系统边框独立应用窗口 | Virtual-display app window launched with `vd_system_decorations=false` and native titlebar |
 | Fragmented MP4 Recording | 分片 MP4 直存录屏 | Zero-reencode H.264 Annex-B muxing into `ftyp`/`moov`/`moof`/`mdat` |
+| Background Standby | 后台待机 | Opt-in minimum-importance foreground service that keeps the Companion reachable |
+| Activity Lease | 活动租约 | Wake lock + Wi-Fi lock held only during transfers and released after 30 s idle |
+| Delay-Load | 延迟加载 | A DLL import resolved only when one of its functions is first called (e.g. `packet.dll`) |

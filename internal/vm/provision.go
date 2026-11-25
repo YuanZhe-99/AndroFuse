@@ -17,6 +17,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/YuanZhe-99/AndroFuse/internal/sysproc"
 )
 
 const googleRepoManifestURL = "https://dl.google.com/android/repository/repository2-3.xml"
@@ -373,7 +375,7 @@ func extractZipSubdir(zipPath, stripPrefix, destDir string) error {
 
 func runToolWithLicenses(ctx context.Context, toolPath, sdkRoot, avdHome string, args ...string) error {
 	cmd := exec.CommandContext(ctx, toolPath, args...)
-	hideConsoleWindow(cmd)
+	sysproc.HideConsole(cmd)
 	cmd.Env = buildSDKEvn(sdkRoot, avdHome)
 	cmd.Stdin = strings.NewReader(strings.Repeat("y\n", 16))
 	out, err := cmd.CombinedOutput()
@@ -385,7 +387,7 @@ func runToolWithLicenses(ctx context.Context, toolPath, sdkRoot, avdHome string,
 
 func runAVDCreate(ctx context.Context, avdMgr, sdkRoot, avdHome, avdName, sysImgPkg string) error {
 	cmd := exec.CommandContext(ctx, avdMgr, "create", "avd", "--force", "--name", avdName, "--package", sysImgPkg, "--device", "pixel_6")
-	hideConsoleWindow(cmd)
+	sysproc.HideConsole(cmd)
 	cmd.Env = buildSDKEvn(sdkRoot, avdHome)
 	cmd.Stdin = strings.NewReader("no\n")
 	out, err := cmd.CombinedOutput()

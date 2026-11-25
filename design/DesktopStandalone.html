@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>AndroFuse · 独立窗口模式（可随时放回主窗口）</title>
+<link rel="stylesheet" href="common.css">
+</head>
+<body class="artboard">
+<div class="win keep-full" style="background:#CFD7E0">
+  <!-- Main window dimmed on left -->
+  <div style="position:absolute;left:36px;top:40px;width:740px;height:560px;background:var(--base);border:1px solid var(--border);border-radius:var(--r-lg);display:flex;padding:8px;gap:8px;opacity:0.9">
+    <div style="width:168px;display:flex;flex-direction:column;gap:8px;padding:6px">
+      <div style="height:32px;border-radius:7px;background:var(--acc);opacity:0.65"></div>
+      <div style="height:28px;border-radius:6px;background:var(--side-cur)"></div>
+      <div style="height:28px;border-radius:6px;background:var(--side-hover)"></div>
+      <div style="height:28px;border-radius:6px;background:var(--side-hover)"></div>
+    </div>
+    <div style="flex:1;background:var(--pane);border:1px solid var(--border);border-radius:9px"></div>
+  </div>
+
+  <!-- Standalone popped-out window (420x740; min 340x340) -->
+  <section aria-label="微信 · 独立窗口" style="position:absolute;left:800px;top:24px;width:420px;height:748px;background:var(--pane);border:1px solid var(--border);border-radius:var(--r-xl);box-shadow:var(--sheet-shadow);display:flex;flex-direction:column;overflow:hidden">
+    <header class="pane-head" style="padding-left:10px">
+      <span class="app-icon sm" style="background:#07C160">微</span>
+      <span class="ph-title"><b>微信</b></span>
+      <button class="ib" title="返回"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m15 18-6-6 6-6"/></svg></button>
+      <button class="ib" title="旋转"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 12a9 9 0 1 1-3-6.7M21 3v6h-6"/></svg></button>
+      <a class="ib hv" href="DesktopPaneSplit.html" title="放回主窗口">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M14 4v16"/><path d="M6 12h5M9 9.5l2.5 2.5L9 14.5"/></svg>
+      </a>
+      <button class="ib" title="更多"><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></button>
+      <span class="vsep"></span>
+      <div class="wb">
+        <button aria-label="最小化" style="width:34px"><svg width="10" height="10" viewBox="0 0 10 10"><path d="M0 5h10" stroke="currentColor"/></svg></button>
+        <button aria-label="最大化" style="width:34px"><svg width="10" height="10" viewBox="0 0 10 10"><rect x="0.5" y="0.5" width="9" height="9" fill="none" stroke="currentColor"/></svg></button>
+        <button class="wclose" aria-label="关闭窗口" style="width:34px"><svg width="10" height="10" viewBox="0 0 10 10"><path d="M0 0l10 10M10 0L0 10" stroke="currentColor"/></svg></button>
+      </div>
+    </header>
+
+    <div class="tip" role="tooltip" style="right:118px;top:46px">放回主窗口</div>
+
+    <div style="flex:1;background:#F3F5F4;display:flex;flex-direction:column;justify-content:flex-end;gap:12px;padding:18px;color:#1B1D21">
+      <div style="align-self:flex-start;background:#FFFFFF;padding:10px 14px;border-radius:14px 14px 14px 4px;box-shadow:0 1px 2px rgba(0,0,0,0.06)">手机应用默认在主窗口内运行，需要单独挪到副屏时随时点右上角弹出。</div>
+      <div style="align-self:flex-end;background:#95EC69;padding:10px 14px;border-radius:14px 14px 4px 14px">用完还能点 ◧ 一键收回到主窗口分屏，不断连。</div>
+    </div>
+  </section>
+</div>
+<script src="common.js"></script>
+</body>
+</html>

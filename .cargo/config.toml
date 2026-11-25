@@ -1,0 +1,6 @@
+# Build-time protoc for the embedded EasyTier mesh and its protobuf crates (PLAN §9.1-1).
+# Populate it with `go run ./tools/fetchdeps` (pinned, SHA-256 verified); an explicit PROTOC /
+# PROTOC_INCLUDE in the environment still wins.
+[env]
+PROTOC = { value = ".dev/cache/protoc/bin/protoc", relative = true, force = false }
+PROTOC_INCLUDE = { value = ".dev/cache/protoc/include", relative = true, force = false }

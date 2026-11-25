@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>AndroFuse · 主窗口内嵌投屏（三星 DeX · 深色模式）</title>
+<link rel="stylesheet" href="common.css">
+</head>
+<body class="artboard dark-board">
+<div class="win dark keep-full">
+  <div class="shell">
+    <nav class="side" aria-label="侧边栏">
+      <div class="side-top">
+        <a class="ib" href="DesktopDevicesNarrow.html" title="折叠侧边栏"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></a>
+        <a class="cta-connect" href="DesktopConnectDialog.html"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg><span>连接设备</span></a>
+      </div>
+      <a class="cmdk" href="DesktopCommandPalette.html" title="搜索或执行命令 (Ctrl K)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><span class="lbl">搜索或执行…</span><span class="kbd"><kbd>Ctrl</kbd><kbd>K</kbd></span></a>
+      <a class="nav-item" href="DesktopDevices.html"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="6" y="2" width="12" height="20" rx="2"/></svg><span class="lbl">设备</span><span class="cnt">2</span></a>
+      <a class="nav-item" href="DesktopApps.html"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg><span class="lbl">应用</span></a>
+      <a class="nav-item" href="DesktopCompanion.html"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 7h8a4 4 0 0 1 0 8H8a4 4 0 0 1 0-8Z"/></svg><span class="lbl">协同</span></a>
+
+      <div class="side-scroll">
+
+      <div class="side-sec"><span>已打开</span><span>2</span></div>
+      <a class="run-item cur" href="DesktopPaneDeX.html" aria-current="page">
+        <span class="tile-ico sm"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="14" rx="2"/><path d="M8 21h8"/></svg></span>
+        <span class="t"><b>Galaxy Z Fold 8</b><i>三星 DeX · 运行中</i></span>
+      </a>
+      <a class="run-item" href="DesktopPaneSplit.html">
+        <span class="tile-ico sm neutral"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="2" width="12" height="20" rx="2"/></svg></span>
+        <span class="t"><b>手机镜像</b><i>点此并排分屏</i></span>
+      </a>
+
+      <div class="side-sec"><span>独立窗口</span></div>
+      <a class="run-item" href="DesktopStandalone.html">
+        <span class="app-icon sm" style="background:#07C160">微</span>
+        <span class="t"><b>微信</b><i>独立窗口</i></span>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--tx2)" stroke-width="1.8"><path d="M14 4h6v6M20 4l-8 8"/></svg>
+      </a>
+
+      </div>
+      <a class="nav-item" href="DesktopSettings.html"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/></svg><span class="lbl">设置</span></a>
+      <a class="side-status" href="DesktopDiagnostics.html"><span class="dot"></span><span class="t"><b>本机准备就绪</b><i>硬件加速可用</i></span></a>
+    </nav>
+
+    <div class="prow">
+      <section class="pane focus" aria-label="三星 DeX 主窗口">
+        <header class="pane-head">
+          <span class="tile-ico sm"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="14" rx="2"/><path d="M8 21h8"/></svg></span>
+          <span class="ph-title"><b>Galaxy Z Fold 8 · 三星 DeX</b><i>无线 · 1920×1080 · 实测 59.8 fps · 硬件解码</i></span>
+          <a class="ib" href="DesktopStandalone.html" title="在独立窗口打开"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 4h6v6M20 4l-8 8"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg></a>
+          <a class="ib" href="DesktopPaneSplit.html" title="向右分屏"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/></svg></a>
+          <a class="ib" href="DesktopPaneSplit.html" title="向下分屏"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 12h18"/></svg></a>
+          <span class="vsep"></span>
+          <button class="ib" title="截图"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></svg></button>
+          <button class="ib" title="录屏"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="7"/></svg></button>
+          <button class="ib" title="发送剪贴板"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg></button>
+          <button class="ib" title="静音 / 音量"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg></button>
+          <button class="ib" title="更多操作"><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></button>
+          <a class="ib" href="DesktopDevices.html" title="断开并关闭窗格"><svg width="14" height="14" viewBox="0 0 14 14"><path d="M1 1l12 12M13 1L1 13" stroke="currentColor" stroke-width="1.6"/></svg></a>
+          <span class="vsep"></span>
+          <div class="wb">
+            <button aria-label="最小化"><svg width="10" height="10" viewBox="0 0 10 10"><path d="M0 5h10" stroke="currentColor"/></svg></button>
+            <button aria-label="最大化"><svg width="10" height="10" viewBox="0 0 10 10"><rect x="0.5" y="0.5" width="9" height="9" fill="none" stroke="currentColor"/></svg></button>
+            <button class="wclose" aria-label="关闭"><svg width="10" height="10" viewBox="0 0 10 10"><path d="M0 0l10 10M10 0L0 10" stroke="currentColor"/></svg></button>
+          </div>
+        </header>
+
+        <div style="flex:1;min-height:0;background:linear-gradient(135deg,#102127 0%,#173831 55%,#142329 100%);display:flex;flex-direction:column;justify-content:space-between;padding:24px">
+          <div style="display:flex;gap:14px;flex-wrap:wrap">
+            <div style="width:320px;height:210px;border-radius:12px;background:rgba(24,30,36,0.92);border:1px solid rgba(255,255,255,0.12);overflow:hidden;display:flex;flex-direction:column">
+              <div style="height:30px;background:rgba(255,255,255,0.06);padding:0 12px;display:flex;align-items:center;justify-content:space-between;font-size:12px"><span>三星笔记</span><span>—  □  ×</span></div>
+              <div style="padding:14px;font-size:13px;color:#D4DCE2">默认在主窗口以窗格运行，点右上角 ↗ 可弹出为独立窗口。</div>
+            </div>
+            <div style="width:280px;height:180px;border-radius:12px;background:rgba(24,30,36,0.92);border:1px solid rgba(255,255,255,0.12);overflow:hidden;display:flex;flex-direction:column">
+              <div style="height:30px;background:rgba(255,255,255,0.06);padding:0 12px;display:flex;align-items:center;justify-content:space-between;font-size:12px"><span>Chrome</span><span>—  □  ×</span></div>
+              <div style="padding:14px;font-size:13px;color:#9FB0BA">多窗口 · 键盘鼠标 · 任务栏与最近任务</div>
+            </div>
+          </div>
+
+          <div style="height:40px;background:rgba(12,17,21,0.88);border-radius:11px;border:1px solid rgba(255,255,255,0.12);display:flex;align-items:center;padding:0 14px;gap:12px;font-size:12px;color:#D2DCE2">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#5CD6A0" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+            <span style="padding:4px 10px;background:rgba(255,255,255,0.1);border-radius:6px">Chrome</span>
+            <span style="padding:4px 10px;background:rgba(255,255,255,0.1);border-radius:6px">三星笔记</span>
+            <span style="margin-left:auto">22:18 · Wi-Fi · 88%</span>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+<script src="common.js"></script>
+</body>
+</html>

@@ -15,31 +15,32 @@
 | `cmd/androfuse` | Unified MyGo native UI entry point (`mygo_nowebview` on Windows) |
 | `cmd/androfuse-svc` | Headless engine CLI (`version`, `check [--json]`, `probe [--json]`, `run [--socket <path>]`) |
 | `internal/version` | Single product version (`Version`), verified against `mygo.json` |
-| `internal/core` | `LoadLibraryEx` / `purego` loader for `androfuse_core` C ABI v5, `NV12Ring` zero-alloc frames, `AudioPlayer` & `MicCapturer` |
+| `internal/core` | `LoadLibraryEx` / `purego` loader for `androfuse_core` C ABI v6, `NV12Ring` zero-alloc frames, `AudioPlayer` & `MicCapturer` |
 | `internal/localapi` | Per-user AF_UNIX NDJSON IPC server (`SIO_AF_UNIX_GETPEERPID` + Windows SID peer verification) exposing `devices` (including `unified_devices`) and `vm.*` control |
 | `internal/vm` | On-demand downloadable headless Android VM manager (`%LOCALAPPDATA%\AndroFuse\vm`, native `arm64-v8a` / `x86_64`, `INV-03`, `INV-10`) |
 | `internal/companion` | Encrypted TLS 1.3 NDJSON Companion protocol shared by desktop and Android APK (telemetry, clipboard, notifications, files, continuity, display guard, ADB beacon; `INV-07`, `INV-09`) |
-| `internal/androidhost` | Optional Android Companion host service, persistent config, sysfs battery/thermal probe, audit log, and MyGo graded-permission UI (`INV-09`, `INV-11`) |
-| `internal/androidbridge` | Platform-safe Android OS service capability probe paired with `CompanionServices.kt` (`NotificationListenerService`, `TileService`, `MediaProjection`, `SAF`, `AppWidgetProvider`) |
+| `internal/androidhost` | Optional Android Companion host service, persistent config, sysfs battery/thermal probe, audit log, and MyGo graded-permission UI (`INV-09`, `INV-11`); opt-in background standby and a transfer-only wake/Wi-Fi activity lease (PLAN §9.1-3) |
+| `internal/androidbridge` | Platform-safe Android OS service capability probe paired with `CompanionServices.kt` (`NotificationListenerService`, `TileService`, `MediaProjection`, `SAF`, `AppWidgetProvider`); MyGo mobile plugin `androfusePower` (`android/Power.kt`: standby foreground service, `NetworkCallback` events, activity lease) |
 | `internal/avbridge` | M5 phone-camera MJPEG loopback bridge, honest Windows `MFCreateVirtualCamera` probe, and encrypted PC→Android mic/camera uplink |
 | `internal/mcp` | Opt-in, default-disabled loopback (`127.0.0.1`) HTTP JSON-RPC 2.0 MCP server with ephemeral 30-min bearer token, per-tool allowlist, emergency stop, and scrubbed audit log (`INV-07`, `INV-08`) |
-| `internal/mesh` | Optional default-disabled userspace EasyTier (`--no-tun`) cross-network supervisor (`INV-07`, `INV-08`) |
+| `internal/mesh` | Client for the default-disabled EasyTier v2.7.1 mesh embedded in the core (`androfuse_call` `mesh.*`; no TUN, loopback port forwards only; `INV-07`, `INV-08`) |
 | `internal/bundlesig` | Ed25519 manifest (`bundle.json` + `bundle.sig`) helper signer/verifier matching Kyokai's release bundle layout |
-| `internal/adb` | Argument-vector ADB client, `MergeDevices` USB+TLS Wi-Fi deduplication (`INV-02`), mDNS TLS wireless connect/pair, `MaskSerial`/`MaskEndpoint` scrubbing, `emulator-*` classification, `--user 0` probes & app list |
+| `internal/adb` | Argument-vector ADB client, `MergeDevices` USB+TLS Wi-Fi deduplication (`INV-02`), mDNS TLS wireless connect/pair, `MaskSerial`/`MaskEndpoint` scrubbing, `emulator-*` classification, `--user 0` probes & app list; mDNS `adb-<ro.serialno>-…` instances map to `HardwareHash` for handoff reconnects |
+| `internal/sysproc` | `HideConsole`: every console child (adb, emulator, sdkmanager) starts with `CREATE_NO_WINDOW`, so no console or Windows Terminal window opens |
 | `internal/lease` | Atomic `leases.json` ledger guaranteeing cleanup of virtual displays, DeX loopbacks, and port forwards (`INV-03`) |
 | `internal/scrcpy` | `scrcpy-server v5.0.1` wire framing, interactive touch/mouse/scroll/keyboard/flex-display sessions, raw PCM audio, `MP4Recorder`, and offline replay fixtures |
 | `internal/dex` | Samsung Native DeX orchestration (`server/dexhelper` loopback + 30s grace-period `Reattach`), real app label + 96x96 PNG icon cache (`ListAppsWithIcons`), `SelectRoute`, and `EvaluateTruth` (`INV-06`; Miracast hidden) |
 | `internal/gui` | MyGo native UI shell, unified device cards with USB+Wi-Fi hot-handoff & `EncoderHeadroom` (`INV-01`/`INV-02`), DeX route selector (`INV-06`), App Launcher Grid, chromeless `SessionModeApp` & `SessionWindow` NV12 video, `SaveNV12AsPNG`, clipboard/audio controls, tray, and diagnostics |
 | `locales` | English (`en`) and Simplified Chinese (`zh-Hans`) ARB catalogs + generated accessors |
 | `server/dexhelper` | Clean-room Java UID 2000 `app_process` helper (`probe`, `apps`, `serve`, `attach`, `recover`) driving `SemWifiDisplayConfig` loopback, grace control re-attach, and launcher icon extraction |
-| `tools/fetchdeps` | Downloads and SHA-256 verifies official Apache-2.0 `scrcpy-server-v5.0.1` into `.dev/cache/` |
+| `tools/fetchdeps` | Downloads and SHA-256 verifies `scrcpy-server-v5.0.1` and the build-time `protoc` 36.2 into `.dev/cache/`; `-check-upstream` reports newer EasyTier releases |
 | `tools/builddex` | Compiles and dexes `server/dexhelper` into `build/androfuse-dex-helper.jar` |
-| `tools/buildapk` | Builds the `arm64-v8a` Android Companion APK (with Windows Gradle wrapper fallback) and checks `zipalign -c -P 16 4` |
+| `tools/buildapk` | Builds the `arm64-v8a` Android Companion APK: on Windows supplies `gradlew.bat` (forwarding MyGo's `ORG_GRADLE_PROJECT_*` properties as `-P` arguments), prefers a JDK 17, fails when `lib/arm64-v8a/*.so` is missing, and checks `zipalign -c -P 16 4` |
 | `tools/sign` | Ed25519 release keygen & helper bundle signing CLI (`ANDROFUSE_SIGNING_KEY`, Kyokai format) |
-| `tools/checkpe` | Verifies every `.exe` and `.dll` matches target native PE machine (`0xAA64` / `0x8664`, `INV-10`) |
+| `tools/checkpe` | Verifies every `.exe` and `.dll` matches target native PE machine (`0xAA64` / `0x8664`, `INV-10`), and that `androfuse.exe` uses the Windows GUI subsystem |
 | `tools/icon` | Renders `resources/icon.svg` into desktop, UI, tray, and Android adaptive icon PNGs |
 | `tools/checkdocs` | Verifies 1:1 structural parity between `doc/en-us/` and `doc/zh-cn/` |
-| `core/androfuse-core` | Rust 2024 `cdylib`/`rlib` core library: C ABI v5, host diagnostics, `scrcpy v5.0.1` wire framing, Media Foundation DXVA NV12 decode (`mf_video.rs`), WASAPI audio render & mic capture (`wasapi_audio.rs`), and hidden Miracast protocol module (`miracast.rs`) |
+| `core/androfuse-core` | Rust 2024 `cdylib`/`rlib` core library: C ABI v6, host diagnostics, embedded EasyTier mesh (`mesh.rs` via upstream `easytier-ffi`), `scrcpy v5.0.1` wire framing, Media Foundation DXVA NV12 decode (`mf_video.rs`), WASAPI audio render & mic capture (`wasapi_audio.rs`), and hidden Miracast protocol module (`miracast.rs`) |
 
 ## Planned Runtime Modules (M2–M4)
 
@@ -49,13 +50,13 @@
 
 ## FFI
 
-`androfuse-core` exports a versioned C ABI (`androfuse_abi_version() -> u32`, currently `5`):
+`androfuse-core` exports a versioned C ABI (`androfuse_abi_version() -> u32`, currently `6`):
 
 | Export | Does |
 |---|---|
-| `androfuse_abi_version() -> u32` | Returns ABI version (`5`); Go refuses mismatches |
+| `androfuse_abi_version() -> u32` | Returns ABI version (`6`); Go refuses mismatches |
 | `androfuse_start(json, len, *out, *out_len) -> i32` | Initializes core with `{version, state_dir, profile?}` |
-| `androfuse_call(json, len, *out, *out_len) -> i32` | Dispatches `{method, params}` (`status`, `diagnostics.self_check`, `miracast.test_sink`) |
+| `androfuse_call(json, len, *out, *out_len) -> i32` | Dispatches `{method, params}` (`status`, `diagnostics.self_check`, `miracast.test_sink`, `mesh.start`, `mesh.stop`, `mesh.status`) |
 | `androfuse_free(ptr, len)` | Frees response buffer allocated by `androfuse_start` / `androfuse_call` |
 | `androfuse_stop()` | Stops core, destroys active decoders, audio players, mic capturers, and Miracast sessions, and clears in-memory state |
 | `androfuse_decoder_open(codec_id, w, h, *out_handle) -> i32` | Opens a Media Foundation H.264/HEVC decoder preferring `MF_SA_D3D11_AWARE` hardware acceleration |

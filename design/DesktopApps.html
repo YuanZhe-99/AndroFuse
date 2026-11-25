@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>AndroFuse · 应用启动器</title>
+<link rel="stylesheet" href="common.css">
+</head>
+<body class="artboard">
+<div class="win keep-full">
+  <div class="shell">
+    <nav class="side" aria-label="侧边栏">
+      <div class="side-top">
+        <a class="ib" href="DesktopDevicesNarrow.html" title="折叠侧边栏"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></a>
+        <a class="cta-connect" href="DesktopConnectDialog.html"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg><span>连接设备</span></a>
+      </div>
+      <a class="cmdk" href="DesktopCommandPalette.html" title="搜索或执行命令 (Ctrl K)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><span class="lbl">搜索或执行…</span><span class="kbd"><kbd>Ctrl</kbd><kbd>K</kbd></span></a>
+      <a class="nav-item" href="DesktopDevices.html"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="6" y="2" width="12" height="20" rx="2"/></svg><span class="lbl">设备</span><span class="cnt">2</span></a>
+      <a class="nav-item cur" href="DesktopApps.html" aria-current="page"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg><span class="lbl">应用</span><span class="cnt">28</span></a>
+      <a class="nav-item" href="DesktopCompanion.html"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 7h8a4 4 0 0 1 0 8H8a4 4 0 0 1 0-8Z"/></svg><span class="lbl">协同</span></a>
+      <div class="side-sec"><span>已打开</span><span>2</span></div>
+      <a class="grp" href="DesktopPaneSplit.html"><span class="gt">DeX + 手机镜像</span><span class="run-item"><span class="tile-ico sm"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="14" rx="2"/></svg></span><span class="t"><b>三星 DeX</b></span></span><span class="run-item"><span class="tile-ico sm neutral"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="2" width="12" height="20" rx="2"/></svg></span><span class="t"><b>手机镜像</b></span></span></a>
+      <div class="side-sec"><span>独立窗口</span></div>
+      <a class="run-item" href="DesktopStandalone.html"><span class="app-icon sm" style="background:#07C160">微</span><span class="t"><b>微信</b></span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--tx2)" stroke-width="1.8"><path d="M14 4h6v6M20 4l-8 8"/></svg></a>
+      <div style="flex:1"></div>
+      <a class="nav-item" href="DesktopSettings.html"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/></svg><span class="lbl">设置</span></a>
+      <a class="side-status" href="DesktopDiagnostics.html"><span class="dot"></span><span class="t"><b>本机准备就绪</b><i>硬件加速可用</i></span></a>
+    </nav>
+
+    <div class="prow">
+      <main class="pane">
+        <header class="pane-head">
+          <svg width="20" height="20" viewBox="0 0 96 96" aria-hidden="true"><rect width="96" height="96" rx="18" fill="#1D2C33"/><rect x="31.75" y="31.75" width="32.5" height="32.5" rx="5.3" fill="none" stroke="#B8F1D2" stroke-width="4"/></svg>
+          <span class="ph-title"><b>应用</b></span>
+          <a class="ib" href="DesktopPaneSplit.html" title="向右分屏"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/></svg></a>
+          <span class="vsep"></span>
+          <div class="wb">
+            <button aria-label="最小化"><svg width="10" height="10" viewBox="0 0 10 10"><path d="M0 5h10" stroke="currentColor"/></svg></button>
+            <button aria-label="最大化"><svg width="10" height="10" viewBox="0 0 10 10"><rect x="0.5" y="0.5" width="9" height="9" fill="none" stroke="currentColor"/></svg></button>
+            <button class="wclose" aria-label="关闭"><svg width="10" height="10" viewBox="0 0 10 10"><path d="M0 0l10 10M10 0L0 10" stroke="currentColor"/></svg></button>
+          </div>
+        </header>
+
+        <div class="pane-scroll">
+          <div class="pane-inner">
+            <div class="ptop sticky">
+              <h1>应用</h1>
+              <div class="seg" role="group" aria-label="应用来源">
+                <button class="active" type="button">Galaxy Z Fold 8</button>
+                <button type="button">本地环境</button>
+              </div>
+            </div>
+
+            <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px">
+              <label class="search-box">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
+                <input placeholder="搜索应用…">
+              </label>
+              <div class="seg" role="group" aria-label="筛选">
+                <button class="active" type="button">常用</button>
+                <button type="button">全部</button>
+              </div>
+              <span class="hint" style="margin-left:auto">28 个应用 · 右键可在独立窗口打开</span>
+            </div>
+
+            <div class="app-grid">
+              <a class="app-tile" href="DesktopStandalone.html"><span class="app-icon" style="background:#07C160">微<span class="running-dot"></span></span><span class="name">微信</span><span class="sub">独立窗口</span></a>
+              <a class="app-tile" href="DesktopPaneSplit.html"><span class="app-icon" style="background:#4285F4">C</span><span class="name">Chrome</span></a>
+              <a class="app-tile" href="DesktopPaneSplit.html"><span class="app-icon" style="background:#FF2442">红</span><span class="name">小红书</span></a>
+              <a class="app-tile" href="DesktopPaneSplit.html"><span class="app-icon" style="background:#FB7299">B</span><span class="name">哔哩哔哩</span></a>
+              <a class="app-tile" href="DesktopPaneSplit.html"><span class="app-icon" style="background:#00A4FF">Q</span><span class="name">QQ 音乐</span></a>
+              <a class="app-tile" href="DesktopPaneSplit.html"><span class="app-icon" style="background:#146C4B">记</span><span class="name">三星笔记</span></a>
+              <a class="app-tile" href="DesktopPaneSplit.html"><span class="app-icon" style="background:#2A9D8F">算</span><span class="name">计算器</span></a>
+              <a class="app-tile" href="DesktopPaneSplit.html"><span class="app-icon" style="background:#E76F51">支</span><span class="name">支付宝</span></a>
+              <a class="app-tile" href="DesktopPaneSplit.html"><span class="app-icon" style="background:#3B82F6">日</span><span class="name">日历</span></a>
+              <a class="app-tile" href="DesktopPaneSplit.html"><span class="app-icon" style="background:#6366F1">邮</span><span class="name">Outlook</span></a>
+              <a class="app-tile" href="DesktopPaneSplit.html"><span class="app-icon" style="background:#F59E0B">相</span><span class="name">相册</span><span class="sub">固定比例</span></a>
+              <a class="app-tile" href="DesktopPaneSplit.html"><span class="app-icon" style="background:#0E9F6E">健</span><span class="name">三星健康 Samsung Health</span></a>
+              <a class="app-tile" href="DesktopPaneSplit.html"><span class="app-icon" style="background:#475569">设</span><span class="name">设置</span></a>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+</div>
+<script src="common.js"></script>
+</body>
+</html>

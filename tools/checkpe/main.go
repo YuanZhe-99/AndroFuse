@@ -1,5 +1,6 @@
 // Command checkpe verifies that every Windows `.exe` and `.dll` in a build directory
-// carries the expected native PE Machine header (`0xAA64` for ARM64, `0x8664` for amd64, `INV-10`).
+// carries the expected native PE Machine header (`0xAA64` for ARM64, `0x8664` for amd64, `INV-10`),
+// and that the desktop app `androfuse.exe` is a GUI-subsystem binary that never opens a console.
 package main
 
 import (
@@ -37,7 +38,14 @@ func ExpectedMachine(arch string) (uint16, error) {
 	}
 }
 
+// guiBinaries lists executables that must use the Windows GUI subsystem: a console-subsystem
+// desktop app opens a console (Windows Terminal on Windows 11) on every launch.
+var guiBinaries = map[string]bool{"androfuse.exe": true}
+
 // CheckDir recursively validates every `.exe` and `.dll` under dir matches arch (`INV-10`).
+// Returns: the number of binaries checked.
+// Notes: also rejects a console-subsystem build of any name in guiBinaries
+// (build it with `-ldflags=-H=windowsgui` or `go tool mygo build`).
 func CheckDir(dir, arch string) (int, error) {
 	want, err := ExpectedMachine(arch)
 	if err != nil {
@@ -60,9 +68,13 @@ func CheckDir(dir, arch string) (int, error) {
 			return fmt.Errorf("open PE %s: %w", p, err)
 		}
 		got := f.Machine
+		sub := subsystem(f)
 		_ = f.Close()
 		if got != want {
 			return fmt.Errorf("%s has PE machine 0x%04X, expected 0x%04X (%s)", p, got, want, arch)
+		}
+		if guiBinaries[strings.ToLower(d.Name())] && sub != pe.IMAGE_SUBSYSTEM_WINDOWS_GUI {
+			return fmt.Errorf("%s uses PE subsystem %d, expected Windows GUI (%d); build with -ldflags=-H=windowsgui", p, sub, pe.IMAGE_SUBSYSTEM_WINDOWS_GUI)
 		}
 		count++
 		return nil
@@ -74,4 +86,15 @@ func CheckDir(dir, arch string) (int, error) {
 		return 0, fmt.Errorf("no .exe or .dll files found in %s", dir)
 	}
 	return count, nil
+}
+
+// subsystem returns the PE optional-header Subsystem value of f, or 0 when it has none.
+func subsystem(f *pe.File) uint16 {
+	switch h := f.OptionalHeader.(type) {
+	case *pe.OptionalHeader64:
+		return h.Subsystem
+	case *pe.OptionalHeader32:
+		return h.Subsystem
+	}
+	return 0
 }

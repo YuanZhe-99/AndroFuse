@@ -11,6 +11,8 @@ import (
 
 	"github.com/YuanZhe-99/AndroFuse/internal/core"
 	"github.com/YuanZhe-99/AndroFuse/internal/version"
+
+	"github.com/YuanZhe-99/AndroFuse/internal/sysproc"
 )
 
 // HostDiagnostics captures live environment checks without blocking the UI
@@ -124,7 +126,7 @@ func probeADB() (string, string) {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		cmd := exec.CommandContext(ctx, c, "version")
-		hideConsoleWindow(cmd)
+		sysproc.HideConsole(cmd)
 		raw, err := cmd.Output()
 		cancel()
 		if err != nil {

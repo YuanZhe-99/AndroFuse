@@ -53,7 +53,7 @@ func testApp(t *testing.T) *App {
 		},
 	}
 	a.cameraBridgeURL = "http://127.0.0.1:27190/camera/test.mjpeg"
-	a.meshStatus = mesh.Status{BinaryFound: true, BinaryPath: "easytier-core"}
+	a.meshStatus = mesh.Status{Running: true, Engine: "easytier 2.7.1 (embedded, no TUN)"}
 	a.diagReady = true
 	a.diag = HostDiagnostics{
 		CoreLoaded: true,

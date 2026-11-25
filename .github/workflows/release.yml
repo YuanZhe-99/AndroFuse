@@ -26,6 +26,18 @@ jobs:
         with:
           toolchain: stable
           targets: ${{ matrix.target }}
+      - name: Build prerequisites (pinned protoc, clang for ARM64 ring)
+        shell: pwsh
+        run: |
+          go run ./tools/fetchdeps
+          $clang = Get-ChildItem "C:\Program Files\Microsoft Visual Studio\*\*\VC\Tools\Llvm\ARM64\bin\clang.exe", "C:\Program Files\LLVM\bin\clang.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($clang) { Add-Content $env:GITHUB_PATH $clang.DirectoryName }
+      - name: EasyTier upstream check
+        shell: pwsh
+        run: |
+          go run ./tools/fetchdeps -check-upstream
+          if ($LASTEXITCODE -eq 2) { Write-Output "::warning::A newer EasyTier release exists; bump the embedded mesh (tools/fetchdeps -check-upstream)" }
+          exit 0
       - run: cargo build --release --manifest-path core/Cargo.toml --target ${{ matrix.target }}
       - run: |
           mkdir -Force out

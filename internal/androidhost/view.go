@@ -99,6 +99,19 @@ func RenderCompanionView(c *ui.Context, h *Host) {
 			}
 		})
 
+		card(c.Key("comp-standby-card")).Children(func() {
+			standby := cfg.Standby
+			ui.Row(c.Key("standby-row")).FillWidth().AlignItems(ui.Center).Gap(10).Children(func() {
+				ui.Column(c.Key("standby-text")).Grow(1).Gap(2).Children(func() {
+					ui.Text(c, L.StandbyTitle()).Bold().FontSize(15)
+					ui.Text(c, L.StandbyDesc()).FontSize(12).TextColor(t.TextMuted)
+				})
+				if ui.Switch(c.Key("standby-sw"), &standby).Changed() {
+					go h.SetStandby(standby)
+				}
+			})
+		})
+
 		card(c.Key("comp-beacon-card")).Children(func() {
 			ui.Text(c, L.CompanionBeaconTitle()).Bold().FontSize(15)
 			ui.Row(c.Key("comp-beacon-row")).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {

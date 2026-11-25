@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"github.com/YuanZhe-99/AndroFuse/internal/adb"
+
+	"github.com/YuanZhe-99/AndroFuse/internal/sysproc"
 )
 
 const (
@@ -251,7 +253,7 @@ func (m *Manager) Start(ctx context.Context, avdName string) (Status, error) {
 		"-netspeed", "full",
 	}
 	cmd := exec.Command(emuPath, args...)
-	hideConsoleWindow(cmd)
+	sysproc.HideConsole(cmd)
 	cmd.Env = buildSDKEvn(sdkRoot, avdHome)
 
 	if err := cmd.Start(); err != nil {
@@ -520,7 +522,7 @@ func listAVDs(emuPath, sdkRoot, avdHome string) []string {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, emuPath, "-list-avds")
-	hideConsoleWindow(cmd)
+	sysproc.HideConsole(cmd)
 	cmd.Env = buildSDKEvn(sdkRoot, avdHome)
 	out, err := cmd.Output()
 	if err != nil {

@@ -85,6 +85,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           toolchain: stable
@@ -93,6 +96,12 @@ jobs:
         with:
           workspaces: core
           save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Build prerequisites (pinned protoc, clang for ARM64 ring)
+        shell: pwsh
+        run: |
+          go run ./tools/fetchdeps
+          $clang = Get-ChildItem "C:\Program Files\Microsoft Visual Studio\*\*\VC\Tools\Llvm\ARM64\bin\clang.exe", "C:\Program Files\LLVM\bin\clang.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($clang) { Add-Content $env:GITHUB_PATH $clang.DirectoryName }
       - name: Clippy
         run: cargo clippy --manifest-path core/Cargo.toml --workspace --all-targets -- -D warnings
       - name: Rust tests
@@ -123,6 +132,12 @@ jobs:
           workspaces: core
           key: release
           save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Build prerequisites (pinned protoc, clang for ARM64 ring)
+        shell: pwsh
+        run: |
+          go run ./tools/fetchdeps
+          $clang = Get-ChildItem "C:\Program Files\Microsoft Visual Studio\*\*\VC\Tools\Llvm\ARM64\bin\clang.exe", "C:\Program Files\LLVM\bin\clang.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($clang) { Add-Content $env:GITHUB_PATH $clang.DirectoryName }
       - name: Build Rust core & Go binaries
         shell: pwsh
         run: |
@@ -130,7 +145,7 @@ jobs:
           mkdir -Force build
           Copy-Item "core/target/${{ matrix.target }}/release/androfuse_core.dll" build/androfuse_core.dll
           $env:CGO_ENABLED="0"
-          go build -trimpath -ldflags="-s -w" -tags mygo_nowebview -o build/androfuse.exe ./cmd/androfuse
+          go build -trimpath -ldflags="-s -w -H=windowsgui" -tags mygo_nowebview -o build/androfuse.exe ./cmd/androfuse
           go build -trimpath -ldflags="-s -w" -o build/androfuse-svc.exe ./cmd/androfuse-svc
           go run ./tools/checkpe -dir build -arch ${{ matrix.arch }}
       - name: Go tests & MyGo vet

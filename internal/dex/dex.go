@@ -22,6 +22,8 @@ import (
 
 	"github.com/YuanZhe-99/AndroFuse/internal/adb"
 	"github.com/YuanZhe-99/AndroFuse/internal/lease"
+
+	"github.com/YuanZhe-99/AndroFuse/internal/sysproc"
 )
 
 // RemoteHelperPath is the non-world-writable device path for androfuse-dex-helper.jar.
@@ -331,6 +333,18 @@ func Recover(ctx context.Context, client *adb.Client, serial string) error {
 	return nil
 }
 
+// detachedHelperCommand returns the `adb shell` command line that runs helper args
+// (`serve …`) in its own session with SIGHUP ignored.
+// Notes: adbd kills the shell process group when its transport drops (USB unplug, Wi-Fi loss),
+// which used to kill `serve` before its grace window (`INV-02`) could start; detached, the helper
+// only sees stdin EOF, keeps the DeX display alive and waits for `attach` on the new transport.
+// Verified on Fold 8 / toybox 0.8.13. Falls back to a plain launch where `setsid -w` is missing.
+func detachedHelperCommand(args string) string {
+	launch := "app_process / com.androfuse.dexhelper.Main " + args
+	return fmt.Sprintf("export CLASSPATH=%s; if setsid -w true 2>/dev/null; then exec setsid -w nohup %s; else exec %s; fi",
+		RemoteHelperPath, launch, launch)
+}
+
 // StartNativeLoopback launches `androfuse-dex-helper.jar serve` to activate genuine
 // Samsung DeX on loopback (`127.0.0.1:7236`) and waits for READY display metadata.
 func StartNativeLoopback(
@@ -370,9 +384,9 @@ func StartNativeLoopback(
 		}
 	}
 
-	shellCmd := fmt.Sprintf("CLASSPATH=%s app_process / com.androfuse.dexhelper.Main serve %s %d %d %d %d",
-		RemoteHelperPath, token, width, height, dpi, graceSec)
+	shellCmd := detachedHelperCommand(fmt.Sprintf("serve %s %d %d %d %d", token, width, height, dpi, graceSec))
 	cmd := exec.Command(client.Path, "-s", serial, "shell", shellCmd)
+	sysproc.HideConsole(cmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		if store != nil {
@@ -559,6 +573,7 @@ func (s *LoopbackSession) Reattach(ctx context.Context, newSerial string) (Ready
 	shellCmd := fmt.Sprintf("CLASSPATH=%s app_process / com.androfuse.dexhelper.Main attach %s %d",
 		RemoteHelperPath, token, ctrlPort)
 	cmd := exec.Command(adbClient.Path, "-s", newSerial, "shell", shellCmd)
+	sysproc.HideConsole(cmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return ReadyInfo{}, err

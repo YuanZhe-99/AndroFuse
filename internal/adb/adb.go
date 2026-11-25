@@ -18,6 +18,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/YuanZhe-99/AndroFuse/internal/sysproc"
 )
 
 // Transport identifies how ADB reaches a device.
@@ -135,6 +137,9 @@ type MDNSService struct {
 	MaskedAddr  string `json:"masked_addr"`
 	CanConnect  bool   `json:"can_connect"`
 	CanPair     bool   `json:"can_pair"`
+	// HardwareHash is DeviceHash(ro.serialno) parsed from the `adb-<serialno>-<suffix>` instance
+	// name, matching DeviceProfile.HardwareHash; empty when the name has another shape.
+	HardwareHash string `json:"-"`
 }
 
 // AppEntry describes a user-launchable activity installed on Android user 0.
@@ -159,7 +164,7 @@ func (c *Client) Run(ctx context.Context, args ...string) (string, error) {
 		return "", errors.New("adb client uninitialized")
 	}
 	cmd := exec.CommandContext(ctx, c.Path, args...)
-	hideConsoleWindow(cmd)
+	sysproc.HideConsole(cmd)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -270,16 +275,34 @@ func ParseMDNSServices(raw string) []MDNSService {
 		if !canConnect && !canPair {
 			continue
 		}
-		out = append(out, MDNSService{
+		svc := MDNSService{
 			Instance:    MaskSerial(fields[0]),
 			ServiceType: svcType,
 			Addr:        addr,
 			MaskedAddr:  MaskEndpoint(addr),
 			CanConnect:  canConnect,
 			CanPair:     canPair,
-		})
+		}
+		if serial := mdnsHardwareSerial(fields[0]); serial != "" {
+			svc.HardwareHash = DeviceHash(serial)
+		}
+		out = append(out, svc)
 	}
 	return out
+}
+
+// mdnsHardwareSerial extracts ro.serialno from an Android Wireless Debugging mDNS instance
+// name (`adb-<serialno>-<random suffix>`), or returns "" for any other shape.
+func mdnsHardwareSerial(instance string) string {
+	rest, ok := strings.CutPrefix(instance, "adb-")
+	if !ok {
+		return ""
+	}
+	i := strings.LastIndexByte(rest, '-')
+	if i <= 0 {
+		return ""
+	}
+	return rest[:i]
 }
 
 // ConnectTLS connects to a TLS Wireless Debugging `<host>:<port>` endpoint (`INV-07`).

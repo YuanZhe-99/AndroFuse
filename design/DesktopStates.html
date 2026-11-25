@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>AndroFuse · 交互状态规范（设计词汇）</title>
+<link rel="stylesheet" href="common.css">
+<style>
+  .term { font-size: 11px; font-weight: 600; color: var(--tx3); font-family: var(--mono); letter-spacing: 0.02em; }
+  .demo { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+</style>
+</head>
+<body class="artboard">
+<!-- Component-state sheet: every block is one topinspo.design/vocabulary term applied to a real
+     AndroFuse surface. Not a product screen; native views reuse these states. -->
+<div class="win tall-win keep-full">
+  <div class="shell" style="padding-left:8px">
+    <div class="prow">
+      <main class="pane">
+        <header class="pane-head">
+          <span class="tile-ico sm neutral"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></span>
+          <span class="ph-title"><b>交互状态规范</b><i>按 topinspo.design/vocabulary 逐项落地 · 设计稿内部参考</i></span>
+          <a class="btn sm" href="index.html">返回总览</a>
+        </header>
+
+        <div class="pane-scroll">
+          <div class="pane-inner wide">
+            <div class="bento">
+
+              <!-- Skeleton -->
+              <section class="card span-2">
+                <div class="card-h"><b>应用列表加载中</b><span class="term r">Skeleton</span></div>
+                <span class="hint">读取图标与名称需要几秒：按最终布局显示占位，不用转圈。</span>
+                <div class="app-grid" aria-busy="true" aria-label="正在读取应用">
+                  <div class="app-tile"><span class="skel ico"></span><span class="skel line"></span></div>
+                  <div class="app-tile"><span class="skel ico"></span><span class="skel line short"></span></div>
+                  <div class="app-tile"><span class="skel ico"></span><span class="skel line"></span></div>
+                  <div class="app-tile"><span class="skel ico"></span><span class="skel line short"></span></div>
+                </div>
+              </section>
+
+              <!-- Approval Gate -->
+              <section class="span-2 rows-2" style="display:flex;flex-direction:column;gap:8px;min-width:0">
+                <div class="card-h"><b>外部助手请求操作</b><span class="chip warn xs">设计提案</span><span class="term r">Approval Gate</span></div>
+                <div class="gate" role="alertdialog" aria-labelledby="gate-t">
+                  <div class="gate-h">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M12 8v4M12 16h.01"/></svg>
+                    <b id="gate-t">外部助手想在手机上打开应用</b>
+                  </div>
+                  <div class="gate-b">
+                    <dl class="gate-kv">
+                      <dt>操作</dt><dd>在 Galaxy Z Fold 8 上打开「日历」</dd>
+                      <dt>结果</dt><dd>手机启动该应用，电脑主窗口新增一个窗格</dd>
+                      <dt>来源</dt><dd>本机助手 · 临时密钥剩余 <span class="num">24</span> 分钟</dd>
+                    </dl>
+                    <span class="hint">只读查询不会询问；会改动手机状态的操作每次都先确认。</span>
+                  </div>
+                  <div class="gate-f">
+                    <label class="hint" style="display:flex;align-items:center;gap:6px"><input type="checkbox" style="accent-color:var(--acc)">本次会话内不再询问此类操作</label>
+                    <button class="btn sm" type="button">拒绝</button>
+                    <button class="btn sm pri" type="button">允许一次</button>
+                  </div>
+                </div>
+                <div class="card" style="padding:6px 14px">
+                  <div class="card-h" style="padding-top:6px"><b style="font-size:13px">助手操作记录</b><span class="term r">Tool Call Steps</span></div>
+                  <div class="steps">
+                    <div class="step"><span class="st ok"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="m5 12 4.5 4.5L19 7"/></svg></span><span class="lbl">读取设备列表</span><time>21:02:11</time></div>
+                    <div class="step"><span class="st ok"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="m5 12 4.5 4.5L19 7"/></svg></span><span class="lbl">读取应用列表</span><time>21:02:12</time></div>
+                    <div class="step"><span class="st wait"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M12 7v5l3 2"/></svg></span><span class="lbl">打开「日历」 · 等待你确认</span><time>21:02:15</time></div>
+                    <div class="step"><span class="st run"></span><span class="lbl">截取手机画面</span><time>进行中</time></div>
+                  </div>
+                </div>
+              </section>
+
+              <!-- Undo Toast + Hover Reveal -->
+              <section class="card span-2">
+                <div class="card-h"><b>忘记设备</b><span class="term r">Undo Toast · Hover Reveal</span></div>
+                <span class="hint">删除图标只在悬停 / 键盘聚焦时出现；点击后立即生效，5 秒内可撤销，不弹确认框。</span>
+                <div class="list" style="border:1px solid var(--border);border-radius:var(--r-lg);margin:0">
+                  <div class="lr">
+                    <span class="tile-ico neutral"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="6" y="2" width="12" height="20" rx="2"/></svg></span>
+                    <span class="t"><b>Pixel 9a <span class="chip">离线</span></b><span>昨天 20:15 连接</span></span>
+                    <div class="acts"><button class="ib reveal shown" type="button" title="忘记此设备（可撤销）" data-forget="Pixel 9a"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--bad)" stroke-width="1.8"><path d="M3 6h18M8 6V4h8v2M6 6v14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V6"/></svg></button></div>
+                  </div>
+                </div>
+                <div class="toast inline" role="status"><span>已忘记「Galaxy Tab S10」</span><span class="bar"><i></i></span><button class="btn text" type="button">撤销</button></div>
+              </section>
+
+              <!-- Inline Validation -->
+              <section class="card">
+                <div class="card-h"><b>配对码</b><span class="term r">Inline Validation</span></div>
+                <div class="field">
+                  <label for="v-code">6 位配对码</label>
+                  <input id="v-code" class="input num" inputmode="numeric" value="84921" data-validate="digits6">
+                  <span class="err" role="alert"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>配对码是 6 位数字</span>
+                </div>
+              </section>
+
+              <!-- Input Affix -->
+              <section class="card">
+                <div class="card-h"><b>中继节点</b><span class="term r">Input Affix</span></div>
+                <div class="field">
+                  <label for="v-peer">地址</label>
+                  <div class="affix"><span class="pre">tcp://</span><input id="v-peer" class="num" value="relay.example.org"><span class="suf">:11010</span></div>
+                </div>
+              </section>
+
+              <!-- Button states -->
+              <section class="card span-2">
+                <div class="card-h"><b>按钮层级与状态</b><span class="term r">Button Hierarchy · Loading · Disabled · Press</span></div>
+                <div class="demo">
+                  <button class="btn pri" type="button" data-loading="1600">配对并连接</button>
+                  <button class="btn" type="button">刷新</button>
+                  <button class="btn text" type="button">选本地 APK…</button>
+                  <span class="vsep"></span>
+                  <button class="btn pri loading" type="button" style="width:104px"><span>配对并连接</span></button>
+                  <button class="btn" type="button" disabled>向右分屏</button>
+                  <button class="sw" type="button" disabled aria-label="不可用开关"></button>
+                </div>
+                <span class="hint">每个区域只有一个实心主按钮；加载时锁定宽度，相邻按钮不移动；不可用状态是平的哑光底色，不靠降低透明度。</span>
+              </section>
+
+              <!-- Numbers -->
+              <section class="card span-2">
+                <div class="card-h"><b>实时数值</b><span class="term r">Tabular Numbers · Baseline Alignment</span></div>
+                <div class="grid-3">
+                  <div><div class="stat-l">实测帧率</div><div class="stat"><b>59.8</b><small>fps</small></div></div>
+                  <div><div class="stat-l">电量</div><div class="stat"><b>88</b><small>%</small></div></div>
+                  <div><div class="stat-l">温度</div><div class="stat"><b>33.4</b><small>°C</small></div></div>
+                </div>
+              </section>
+
+              <!-- Menus -->
+              <section class="card span-2" style="min-height:220px;position:relative">
+                <div class="card-h"><b>菜单</b><span class="term r">Origin-Aware Motion · Shortcut Hint · Disabled</span></div>
+                <div class="menu" role="menu" style="position:relative;align-self:flex-end;width:280px">
+                  <div class="mi"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></svg>保存 PNG 截图<span class="k kbd"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>S</kbd></span></div>
+                  <div class="mi hl"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="7"/></svg>开始录屏<span class="k kbd"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>R</kbd></span></div>
+                  <div class="mi dis" aria-disabled="true"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/></svg>向右分屏<span class="k">空间不足</span></div>
+                </div>
+              </section>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+</div>
+<script src="common.js"></script>
+</body>
+</html>

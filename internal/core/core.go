@@ -16,7 +16,7 @@ import (
 
 // ABIVersion is the C ABI this package speaks; the library must report the
 // same one.
-const ABIVersion = 5
+const ABIVersion = 6
 
 // Codec identifiers matching scrcpy-server v5.0.1 and androfuse-core.
 const (

@@ -2,6 +2,7 @@
 //! and the Android controller/companion runtime.
 
 pub mod diag;
+pub mod mesh;
 #[cfg(windows)]
 pub mod mf_video;
 pub mod miracast;
@@ -16,7 +17,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 /// C ABI version spoken between Go (`internal/core`) and `androfuse-core`.
-pub const ABI_VERSION: u32 = 5;
+pub const ABI_VERSION: u32 = 6;
 
 static STATE: OnceLock<Mutex<Option<CoreState>>> = OnceLock::new();
 static NEXT_DECODER_ID: AtomicU64 = AtomicU64::new(1);
@@ -93,7 +94,6 @@ struct StartConfig {
 struct CallRequest {
     method: String,
     #[serde(default)]
-    #[allow(dead_code)]
     params: serde_json::Value,
 }
 
@@ -283,6 +283,18 @@ pub unsafe extern "C" fn androfuse_call(
                 Ok(res) => ok_json(res),
                 Err(e) => err_json(&e),
             },
+            "mesh.start" => match serde_json::from_value::<mesh::MeshConfig>(req.params) {
+                Ok(cfg) => match mesh::start(&cfg) {
+                    Ok(st) => ok_json(st),
+                    Err(e) => err_json(&e),
+                },
+                Err(e) => err_json(&format!("invalid mesh config: {e}")),
+            },
+            "mesh.stop" => match mesh::stop() {
+                Ok(()) => ok_json(mesh::status()),
+                Err(e) => err_json(&e),
+            },
+            "mesh.status" => ok_json(mesh::status()),
             "status" => {
                 let guard = match state_lock().lock() {
                     Ok(g) => g,
@@ -330,6 +342,7 @@ pub unsafe extern "C" fn androfuse_free(ptr: *mut u8, len: usize) {
 /// Stops the core, destroys active decoders, and clears in-memory state.
 #[unsafe(no_mangle)]
 pub extern "C" fn androfuse_stop() {
+    let _ = mesh::stop();
     if let Ok(mut d) = decoders_map().lock() {
         d.clear();
     }
