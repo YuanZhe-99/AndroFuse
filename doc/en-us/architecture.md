@@ -20,6 +20,8 @@
 | `internal/vm` | On-demand downloadable headless Android VM manager (`%LOCALAPPDATA%\AndroFuse\vm`, native `arm64-v8a` / `x86_64`, `INV-03`, `INV-10`) |
 | `internal/companion` | Encrypted TLS 1.3 NDJSON Companion protocol shared by desktop and Android APK (telemetry, clipboard, notifications, files, continuity, display guard, ADB beacon; `INV-07`, `INV-09`) |
 | `internal/androidhost` | Optional Android Companion host service, persistent config, sysfs battery/thermal probe, audit log, and MyGo graded-permission UI (`INV-09`, `INV-11`) |
+| `internal/mesh` | Optional default-disabled userspace EasyTier (`--no-tun`) cross-network supervisor (`INV-07`, `INV-08`) |
+| `internal/bundlesig` | Ed25519 manifest (`bundle.json` + `bundle.sig`) helper signer/verifier matching Kyokai's release bundle layout |
 | `internal/adb` | Argument-vector ADB client, `MergeDevices` USB+TLS Wi-Fi deduplication (`INV-02`), mDNS TLS wireless connect/pair, `MaskSerial`/`MaskEndpoint` scrubbing, `emulator-*` classification, `--user 0` probes & app list |
 | `internal/lease` | Atomic `leases.json` ledger guaranteeing cleanup of virtual displays, DeX loopbacks, and port forwards (`INV-03`) |
 | `internal/scrcpy` | `scrcpy-server v5.0.1` wire framing, interactive touch/mouse/scroll/keyboard/flex-display sessions, raw PCM audio, `MP4Recorder`, and offline replay fixtures |
@@ -29,6 +31,9 @@
 | `server/dexhelper` | Clean-room Java UID 2000 `app_process` helper (`probe`, `apps`, `serve`, `attach`, `recover`) driving `SemWifiDisplayConfig` loopback, grace control re-attach, and launcher icon extraction |
 | `tools/fetchdeps` | Downloads and SHA-256 verifies official Apache-2.0 `scrcpy-server-v5.0.1` into `.dev/cache/` |
 | `tools/builddex` | Compiles and dexes `server/dexhelper` into `build/androfuse-dex-helper.jar` |
+| `tools/buildapk` | Builds the `arm64-v8a` Android Companion APK (with Windows Gradle wrapper fallback) and checks `zipalign -c -P 16 4` |
+| `tools/sign` | Ed25519 release keygen & helper bundle signing CLI (`ANDROFUSE_SIGNING_KEY`, Kyokai format) |
+| `tools/checkpe` | Verifies every `.exe` and `.dll` matches target native PE machine (`0xAA64` / `0x8664`, `INV-10`) |
 | `tools/icon` | Renders `resources/icon.svg` into desktop, UI, tray, and Android adaptive icon PNGs |
 | `tools/checkdocs` | Verifies 1:1 structural parity between `doc/en-us/` and `doc/zh-cn/` |
 | `core/androfuse-core` | Rust 2024 `cdylib`/`rlib` core library: C ABI v4, host diagnostics, `scrcpy v5.0.1` wire framing, Media Foundation DXVA NV12 decode (`mf_video.rs`), WASAPI audio output (`wasapi_audio.rs`), and hidden Miracast protocol module (`miracast.rs`) |

@@ -250,21 +250,21 @@ flowchart TB
   3. **路由策略选择器与编码器并发余量保护（`INV-01`、`INV-06`）**：新增 `FormatOneUIVersion` + `SelectRoute` 与卡片路由分段选择器（自动选路 / 原生 DeX / 虚拟兼容模式），并在“设备”与“工作模式”页实时展示硬件编码流并发计数与上限拦截，防止静默黑屏。
 - **待真机实测收口**：接上物理三星 Fold 8 后执行有线 USB 拔线热切换至加密 TLS Wi-Fi DeX 的真机端到端验收；非 DeX 机型在 `Pixel_9a_API_36` 与离线回归测试中均已校验诚实回退标注。
 
-### M3：Android Companion APK 与跨端协同（`0.3.0` — 🚧 M3a 内建 VM 与 M3b Companion 协议/宿主/UI 已落地，待真机端到端验收）
+### M3：Android Companion APK 与跨端协同（`0.3.0` — 🚧 协议/宿主/UI/EasyTier `--no-tun` 托管与 APK 构建工具已就绪，待真机系统权限联调）
 - **M3a 已落地（内建可下载 Android 虚拟机，§6.6）**：
   - 新增 `internal/vm`（`NativeABIForArch`、`Provision` 官方仓库清单解析与校验下载、`Start` `-no-window` 无头启动、`Stop` `adb emu kill` 干净清理、`DeleteManaged` 镜像回收）、`localapi` `vm.*` 控制接口、`androfuse-svc run` 托管以及 GUI「内建 Android 虚拟机」一键下载/无头启停卡片；
-- **M3b 已落地（同仓 Companion 协议/宿主/UI，待真机联调与异网 EasyTier 组网扩展）**：
-  1. 新增 `internal/companion`（TLS 1.3 + 自签证书 SHA-256 指纹固定 + 常量时间配对码校验 + 遥测/剪贴板/通知回复/文件防穿越传输/应用接力/显示守护/无线 ADB 信标协议，全链路回环单测通过）与 `internal/androidhost`（Android sysfs 电量温控探针、`companion.json` 持久化、脱敏审计日志及 MyGo 移动端分级授权界面，完成 `arm64` 交叉编译）；
-  2. 桌面 GUI 接入可选「Android Companion 协同与异网直连」卡片（不强制安装 APK，`INV-11`），支持直连 Companion、一键「接力打开前台应用」、一键「直连信标无线 ADB」与「清理残留虚拟屏」；
-  3. 后续真机扩展：Android `NotificationListenerService` / `SAF` / `MediaProjection` 系统权限桥接与用户态 EasyTier `--no-tun` 异网直连。
+- **M3b 已落地（同仓 Companion 协议/宿主/UI、EasyTier `--no-tun` 与 APK 构建工具）**：
+  1. 新增 `internal/companion`（TLS 1.3 + 自签证书 SHA-256 指纹固定 + 常量时间配对码校验 + 遥测/剪贴板/通知回复/文件防穿越传输/应用接力/显示守护/无线 ADB 信标协议，全链路回环单测通过）与 `internal/androidhost`（Android sysfs 电量温控探针、`companion.json` 持久化、脱敏审计日志及 MyGo 移动端分级授权界面）；
+  2. 新增 `internal/mesh`（默认关闭、用户态 EasyTier `--no-tun` 端口转发与密钥/IP 脱敏，全单测通过）及 `tools/buildapk`（支持 Linux/Windows 构建 `arm64-v8a` APK 并校验 `zipalign -c -P 16 4`）；
+  3. 桌面 GUI 接入可选「Android Companion 协同与异网直连」卡片（不强制安装 APK，`INV-11`）；后续待接入物理真机的系统级 Kotlin 权限桥接（`NotificationListenerService` / `SAF` / `MediaProjection`）。
 - **Done When**：内建 VM 支持原生架构下载/无头启停并无缝运行独立 APP 窗口；卸载 Companion APK 时基础有线/无线 ADB 模式 100% 正常；安装并显式授权后 P1 全部跨端协同功能通过真机端到端验收。
 
-### M4：双架构正式发布、Windows 10 评估与长稳打磨（`0.4.0`）
-- **交付范围**：
-  1. Windows 11 `x64` 与原生 `ARM64` CI 构建、PE 架构校验、NSIS 安装包与便携 ZIP、MyGo Ed25519 签名自动更新；
-  2. Windows 10 兼容性真机实测与明确支持边界文档；
-  3. 完整第三方许可证与署名审计随包打包；
-  4. 长时间稳定性、高 DPI 多显示器跨屏、休眠唤醒与资源占用压测。
+### M4：双架构正式发布、Windows 10 评估与长稳打磨（`0.4.0` — 🚧 签名/PE 校验/打包脚本与 GitHub CI/Release 工作流已落地，待真机 x64/Win10 与 30 分钟压测）
+- **已落地（工程与 CI/CD 基础设施）**：
+  1. 新增 `internal/bundlesig` + `tools/sign`（对齐 Kyokai 的 Ed25519 `bundle.json` + `bundle.sig` 辅助包签名与 `keygen` 工具）与 `scripts/build.sh`（许可随包、核心 DLL、PE 校验、Bundle 签名、NSIS 安装包/ZIP）；
+  2. 新增 `tools/checkpe`（逐一验证输出 `.exe` / `.dll` 为原生 `0xAA64` / `0x8664` PE，拒绝转译，`INV-10`）；
+  3. 新增 `.github/workflows/ci.yml` 与 `.github/workflows/release.yml`（Win11 ARM64 + Win11 x64 + Android arm64 构建、`govulncheck`、`gitleaks`、`cargo deny` 与 `SHA256SUMS.txt` 发布流程；不自动打 Tag）。
+- **待真机硬件验收**：Windows 11 `x64` 真机与 Windows 10（`19045+`）安装/运行实测、多显示器跨屏高 DPI、休眠唤醒与 30 分钟连续烤机压测。
 - **Done When**：双 Windows 架构均在真实硬件完成安装、升级、卸载与全套验收清单。
 
 ### M5：后续增强（`0.5.0+`）

@@ -1,0 +1,212 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    name: Changes
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: diff
+        shell: bash
+        env:
+          BEFORE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          code=true
+          if [ "$GITHUB_EVENT_NAME" != workflow_dispatch ] && [ -n "$BEFORE" ] &&
+            git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            if ! git diff --name-only "$BEFORE" HEAD | grep -qvE '^doc/|\.md$'; then
+              code=false
+            fi
+          fi
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          echo "code changed: $code"
+
+  check:
+    name: Checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+      - name: Formatting
+        run: |
+          unformatted=$(gofmt -l cmd internal tools)
+          if [ -n "$unformatted" ]; then
+            echo "gofmt needed:"; echo "$unformatted"; exit 1
+          fi
+      - run: GOOS=windows go vet ./...
+      - name: Interface catalogs
+        run: go tool mygo i18n check
+      - name: Documentation mirror
+        run: go run ./tools/checkdocs
+      - name: Rust formatting
+        run: cargo fmt --manifest-path core/Cargo.toml --all --check
+      - name: Dependency licenses and advisories
+        uses: EmbarkStudios/cargo-deny-action@17aeb3c839e42274e2b8adf721c8c65edfdc74dd # v2.1.3
+        with:
+          manifest-path: core/Cargo.toml
+      - name: Go advisories
+        run: |
+          GOBIN="$RUNNER_TEMP" go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+          GOOS=windows "$RUNNER_TEMP/govulncheck" ./...
+      - name: Secret scan
+        run: go run github.com/zricethezav/gitleaks/v8@v8.30.1 git --no-banner --redact .
+
+  rust:
+    name: Rust (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-11-arm }
+          - { os: windows-latest }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: stable
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: core
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Clippy
+        run: cargo clippy --manifest-path core/Cargo.toml --workspace --all-targets -- -D warnings
+      - name: Rust tests
+        run: cargo test --manifest-path core/Cargo.toml --workspace
+
+  windows:
+    name: Windows (${{ matrix.arch }})
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-11-arm, arch: arm64, target: aarch64-pc-windows-msvc }
+          - { os: windows-latest, arch: amd64, target: x86_64-pc-windows-msvc }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: core
+          key: release
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Build Rust core & Go binaries
+        shell: pwsh
+        run: |
+          cargo build --release --manifest-path core/Cargo.toml --target ${{ matrix.target }}
+          mkdir -Force build
+          Copy-Item "core/target/${{ matrix.target }}/release/androfuse_core.dll" build/androfuse_core.dll
+          $env:CGO_ENABLED="0"
+          go build -trimpath -ldflags="-s -w" -tags mygo_nowebview -o build/androfuse.exe ./cmd/androfuse
+          go build -trimpath -ldflags="-s -w" -o build/androfuse-svc.exe ./cmd/androfuse-svc
+          go run ./tools/checkpe -dir build -arch ${{ matrix.arch }}
+      - name: Go tests & MyGo vet
+        shell: pwsh
+        run: |
+          go test -count=1 ./...
+          $env:CGO_ENABLED="0"
+          go test -count=1 ./...
+          go tool mygo vet .
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-${{ matrix.arch }}
+          path: |
+            build/androfuse.exe
+            build/androfuse-svc.exe
+            build/androfuse_core.dll
+          if-no-files-found: error
+
+  android:
+    name: Android Companion (arm64-v8a)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Android SDK & NDK
+        run: |
+          sdk="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          yes | "$sdk/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null
+          "$sdk/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0" "ndk;29.0.14206865" >/dev/null
+      - name: Android companion vet & APK
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROFUSE_ANDROID_KEYSTORE }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROFUSE_ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROFUSE_ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROFUSE_ANDROID_KEY_PASSWORD }}
+        run: |
+          CGO_ENABLED=0 GOOS=android GOARCH=arm64 go build ./internal/companion
+          sdk="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          ndk=$(ls -d "$sdk"/ndk/* | sort -V | tail -1)
+          CGO_ENABLED=1 GOOS=android GOARCH=arm64 CC="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang" \
+            go vet ./internal/companion ./internal/androidhost
+          if [ -n "$KEYSTORE_B64" ]; then
+            ks="$RUNNER_TEMP/release.jks"
+            echo "$KEYSTORE_B64" | base64 --decode > "$ks"
+            python3 - "$ks" "${KEY_ALIAS:-androfuse}" <<'PY'
+          import json, sys
+          with open("mygo.json", "r", encoding="utf-8") as f:
+              cfg = json.load(f)
+          cfg.setdefault("android", {})["keystore"] = sys.argv[1]
+          cfg["android"]["keyAlias"] = sys.argv[2]
+          with open("mygo.json", "w", encoding="utf-8") as f:
+              json.dump(cfg, f, indent=2)
+              f.write("\n")
+          PY
+            MYGO_ANDROID_KEYSTORE_PASSWORD="$KEYSTORE_PASSWORD" MYGO_ANDROID_KEY_PASSWORD="${KEY_PASSWORD:-$KEYSTORE_PASSWORD}" \
+              go tool mygo build -platform android/arm64 .
+            rm -f "$ks"
+            git checkout -- mygo.json
+          else
+            go tool mygo build -platform android/arm64 .
+          fi
+          version=$(sed -n 's/^const Version = "\(.*\)"/\1/p' internal/version/version.go)
+          bt=$(ls -d "$sdk"/build-tools/* | sort -V | tail -1)
+          "$bt/zipalign" -c -P 16 4 "build/android/androfuse-$version.apk"
+          mkdir -p dist
+          cp "build/android/androfuse-$version.apk" "dist/AndroFuse-$version-android-arm64.apk"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: android-arm64
+          path: dist/AndroFuse-*-android-arm64.apk
+          if-no-files-found: error

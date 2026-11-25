@@ -20,6 +20,8 @@
 | `internal/vm` | 按需下载的轻量无头 Android 虚拟机管理器（`%LOCALAPPDATA%\AndroFuse\vm`，原生 `arm64-v8a` / `x86_64`，`INV-03`、`INV-10`） |
 | `internal/companion` | 桌面与 Android APK 共用的 TLS 1.3 加密 Companion NDJSON 协议（遥测、剪贴板、通知回复、文件传输、应用接力、显示守护与 ADB 信标；`INV-07`、`INV-09`） |
 | `internal/androidhost` | 可选 Android 伴侣端宿主服务、配置持久化、sysfs 电量/温控探针、脱敏审计日志与 MyGo 分级授权界面（`INV-09`、`INV-11`） |
+| `internal/mesh` | 默认关闭的可选用户态 EasyTier（`--no-tun`）跨网组网托管模块（`INV-07`、`INV-08`） |
+| `internal/bundlesig` | 沿用 Kyokai 规范的 Ed25519 辅助程序包清单（`bundle.json` + `bundle.sig`）签名与校验包 |
 | `internal/adb` | 无 Shell 参数向量 `adb` 客户端、`MergeDevices`（USB 与 TLS 无线去重合并，`INV-02`）、mDNS TLS 无线连接配对、`MaskSerial`/`MaskEndpoint` 脱敏、`emulator-*` 分类与 `--user 0` 应用枚举 |
 | `internal/lease` | 原子 `leases.json` 账本，确保虚拟显示、DeX 回环与端口转发完整回收（`INV-03`） |
 | `internal/scrcpy` | `scrcpy-server v5.0.1` 线协议编解码、鼠标/触控/滚动/键盘与 `flex_display` 会话、原始 PCM 音频、`MP4Recorder` 与离线样本 |
@@ -29,6 +31,9 @@
 | `server/dexhelper` | 洁净室 Java UID 2000 `app_process` 辅助器（`probe`、`apps`、`serve`、`attach`、`recover`），驱动 `SemWifiDisplayConfig` 回环、宽限期控制端重附着与图标提取 |
 | `tools/fetchdeps` | 从上游下载并校验 SHA-256 后缓存 Apache-2.0 `scrcpy-server-v5.0.1` 至 `.dev/cache/` |
 | `tools/builddex` | 编译并打包 `server/dexhelper` 为 `build/androfuse-dex-helper.jar` |
+| `tools/buildapk` | 构建 `arm64-v8a` Android Companion APK（含 Windows Gradle wrapper 回退）并校验 `zipalign -c -P 16 4` |
+| `tools/sign` | Ed25519 发布密钥生成与辅助包签名命令行工具（`ANDROFUSE_SIGNING_KEY`，与 Kyokai 同格式） |
+| `tools/checkpe` | 校验所有 `.exe` 与 `.dll` 是否为目标原生 PE 机器码（`0xAA64` / `0x8664`，`INV-10`） |
 | `tools/icon` | 从 `resources/icon.svg` 渲染桌面、UI、托盘与 Android 自适应图标 PNG |
 | `tools/checkdocs` | 校验 `doc/en-us/` 与 `doc/zh-cn/` 的 1:1 结构镜像一致性 |
 | `core/androfuse-core` | Rust 2024 `cdylib`/`rlib` 核心库：C ABI v4、主机自检、`scrcpy v5.0.1` 协议、Media Foundation DXVA NV12 解码（`mf_video.rs`）、WASAPI 音频输出（`wasapi_audio.rs`）及已隐藏的 Miracast 协议模块（`miracast.rs`） |
