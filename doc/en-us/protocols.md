@@ -12,7 +12,7 @@ AndroFuse implements direct wire-protocol engines in Rust (`core/androfuse-core`
    - **Media packet** (`byte[0] & 0x80 == 0`): `is_config` (bit 62), `is_keyframe` (bit 61), `pts_us` (lower 61 bits), `size = BE u32(8..12)`. Cached CSD config packets are prepended to keyframes automatically and passed to `MP4Recorder` when recording.
 3. **Interactive control, chromeless app windows, & CLI rules**:
    - Never pass `start_app` or `mouse=uhid` on the `com.genymobile.scrcpy.Server` CLI, and never pass both `display_id` and `new_display`.
-   - Independent App Windows launch with 16px-aligned dimensions (`544x960/200`), `flex_display=true`, `vd_system_decorations=false`, and `TYPE_START_APP` (`+pkg`) for pure chromeless rendering without Android status/nav bars.
+   - Independent App Windows launch with 16px-aligned dimensions (`640x1120/220`, dynamically scaled at `1.5x` on resize), `flex_display=true`, `vd_system_decorations=false`, and `TYPE_START_APP` (`+pkg`) for pure chromeless rendering without Android status/nav bars.
    - Desktop interaction routes directly per window (`INV-12`) via `TYPE_INJECT_TOUCH_EVENT` (`2`, supporting both `PointerIDMouse = -1` and `PointerIDGenericFinger = -2`), `TYPE_INJECT_SCROLL_EVENT` (`3`, fixed-point `i16`), `TYPE_INJECT_KEYCODE` (`0`), `TYPE_INJECT_TEXT` (`1`), `TYPE_SET_CLIPBOARD` (`9`, plus device→PC clipboard callbacks), `TYPE_SET_DISPLAY_POWER` (`10`), `TYPE_ROTATE_DEVICE` (`11`), `TYPE_UHID_*` (`12–14`), `TYPE_START_APP` (`16`), and `TYPE_RESIZE_DISPLAY` (`21`).
 
 ## 2. Samsung Native DeX Loopback & App Icon Extraction (`server/dexhelper`)

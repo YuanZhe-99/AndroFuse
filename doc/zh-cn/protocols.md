@@ -12,7 +12,7 @@ AndroFuse 在 Rust（`core/androfuse-core`）与 Go（`internal/adb`、`internal
    - **Media 包**（`byte[0] & 0x80 == 0`）：`is_config`（第 62 位）、`is_keyframe`（第 61 位）、`pts_us`（低 61 位）、`size = BE u32(8..12)`。客户端自动缓存最近的配置包（CSD）并在关键帧前补齐，录屏开启时同步写入 `MP4Recorder`。
 3. **交互控制、无边框应用窗口与启动参数规则**：
    - 严禁在 `com.genymobile.scrcpy.Server` 启动命令行传递 `start_app` 或 `mouse=uhid`，也不得同时指定 `display_id` 与 `new_display`。
-   - 独立 APP 窗口默认以 16 像素对齐的 `544x960/200`、`flex_display=true`、`vd_system_decorations=false` 与 `TYPE_START_APP`（`+pkg`）启动，剥离 Android 状态栏、导航栏与壁纸装饰。
+   - 独立 APP 窗口默认以 16 像素对齐的 `640x1120/220`（缩放时按 `1.5×` 像素倍率请求）、`flex_display=true`、`vd_system_decorations=false` 与 `TYPE_START_APP`（`+pkg`）启动，剥离 Android 状态栏、导航栏与壁纸装饰。
    - 桌面交互按窗口级别隔离路由（`INV-12`）：通过 `TYPE_INJECT_TOUCH_EVENT`（`2`，支持 `PointerIDMouse = -1` 与 `PointerIDGenericFinger = -2`）、`TYPE_INJECT_SCROLL_EVENT`（`3`，`i16` 定点数）、`TYPE_INJECT_KEYCODE`（`0`）、`TYPE_INJECT_TEXT`（`1`）、`TYPE_SET_CLIPBOARD`（`9`，配合设备→电脑剪贴板回传）、`TYPE_SET_DISPLAY_POWER`（`10`）、`TYPE_ROTATE_DEVICE`（`11`）、`TYPE_UHID_*`（`12–14`）、`TYPE_START_APP`（`16`）与 `TYPE_RESIZE_DISPLAY`（`21`）发送。
 
 ## 2. Samsung Native DeX 本地回环与应用图标提取（`server/dexhelper`）

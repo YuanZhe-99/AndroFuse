@@ -515,7 +515,7 @@ func (a *App) LaunchAppWindow(d DiscoveredDevice, app adb.AppEntry) {
 			Mode:         SessionModeApp,
 			Transport:    tLabel,
 			BackendLabel: label,
-			TargetSpec:   "544×960 flex · 60 fps",
+			TargetSpec:   fmt.Sprintf("%d×%d flex · 60 fps", appWinInitW, appWinInitH),
 			AllowResize:  true,
 			AppIcon:      icon,
 			AppPackage:   pkg,
@@ -526,7 +526,7 @@ func (a *App) LaunchAppWindow(d DiscoveredDevice, app adb.AppEntry) {
 		vSess, err := scrcpy.StartADB(ctx, client, lib, store, scrcpy.LaunchConfig{
 			SessionID:             sid,
 			Serial:                d.Target.Serial,
-			NewDisplay:            "544x960/200",
+			NewDisplay:            fmt.Sprintf("%dx%d/%d", appWinInitW, appWinInitH, appWinInitDPI),
 			FlexDisplay:           true,
 			HideSystemDecorations: true,
 			StartAppPackage:       startArg,
@@ -534,8 +534,8 @@ func (a *App) LaunchAppWindow(d DiscoveredDevice, app adb.AppEntry) {
 			VideoBitRate:          8_000_000,
 			EnableControl:         true,
 			Audio:                 true,
-			InitialWidth:          544,
-			InitialHeight:         960,
+			InitialWidth:          uint32(appWinInitW),
+			InitialHeight:         uint32(appWinInitH),
 			OnFrame: func(f core.NV12Frame) {
 				if vSess != nil {
 					st := vSess.Stats()

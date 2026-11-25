@@ -147,7 +147,7 @@ flowchart TB
 
 ### 5.3 模式三：独立 APP 原生窗口（已对标 AndroMeld 在 `Pixel_9a_API_36` 完成重构验证）
 1. **真实应用图标与名称提取器（无需等待 APK 亦可工作）**：`server/dexhelper` `apps` 子命令（`ActivityThread.systemMain()` + `PackageManager` + `96x96` PNG 渲染）提取真实本地化应用名称、`resizeMode` 与高清 PNG 图标并过滤 WebAPK/十六进制哈希噪声；`internal/dex.ListAppsWithIcons` 落盘缓存并在 `internal/gui` 以 **独立应用启动器网格（App Launcher Grid）** 呈现，单点即刻启动；
-2. **无系统边框纯应用融合窗口（`vd_system_decorations=false`）**：默认以 16 像素对齐的 `544x960/200` 竖屏比例启动 `scrcpy-server v5.0.1`（隐藏虚拟屏 Android 状态栏、导航栏与桌面壁纸），通过 `TitleBarHidden` 将应用图标、应用名、返回/旋转/截图/录屏/静音与 Windows Snap Layouts 最大化按钮融入原生标题栏；
+2. **无系统边框纯应用融合窗口（`vd_system_decorations=false`）**：默认以 16 像素对齐的 `640x1120/220` 竖屏比例启动 `scrcpy-server v5.0.1`（隐藏虚拟屏 Android 状态栏、导航栏与桌面壁纸），动态缩放按 `1.5×` 像素倍率（`16 px` 对齐）同步至 `TYPE_RESIZE_DISPLAY` 以保持清晰桌面级密度，通过 `TitleBarHidden` 将应用图标、应用名、返回/旋转/截图/录屏/静音与 Windows Snap Layouts 最大化按钮融入原生标题栏；
 3. **多窗口并发、Snap Layouts 与单实例迁移**：拖动或 Windows Snap Layouts 改变原生窗口宽高时按 `16 px` 对齐并防抖触发 `TYPE_RESIZE_DISPLAY`；通过 `+pkg` 避免与手机主屏锁死，并在启动器提示不可自由缩放应用（后续 M3 Companion 补充「迁回主屏」接力）。
 
 ### 5.4 三模式并存真值表
@@ -178,6 +178,11 @@ flowchart TB
 | `scrcpy v5.0.1` Display `0` 主屏镜像、独立 APP 窗口（`--flex-display` 多窗口与 Snap Layouts）、Mouse/Touch/IME 控制 | **可全程开发与回归**（非三星设备亦可用于验证 `INV-06` 虚拟回退提示） | 验证 Snapdragon 8850（`SM8850`）多路编码器实测并发上限 |
 | Media Foundation NV12 + `ui.Bitmap.UpdateYUV` 多窗口渲染、HUD、剪贴板、音频、录屏、Companion APK (`M3`) | **可全程开发与回归** | 长期烤机稳定性（30 min 压测） |
 | Samsung Native DeX（`SemWifiDisplayConfig` `127.0.0.1:7236`）、Miracast Wireless DeX（`0.0.0.0:7236`） | **无法替代**（AOSP 模拟器无三星 `SemWifiDisplayConfig` 与无线网卡 P2P） | **本次已采集完整实测数据，后续改动相关协议需保留离线单测，并在正式发布前由用户带真机复测** |
+
+### 6.6 内建可下载 Android 虚拟机（Built-in Downloadable Android VM，M3–M4 规划）
+- **定位与体积控制**：基础安装包零内置镜像膨胀；提供按需一键下载并校验 SHA-256 的内置轻量 Android 虚拟机运行环境（存放于 `%LOCALAPPDATA%\AndroFuse\vm\`），让没有实体 Android 手机的用户也能直接在 Windows 上以「独立 APP 原生窗口」和虚拟桌面运行 Android 应用。
+- **架构对等（`INV-10`）**：Windows 11 原生 `ARM64` 下载原生 `arm64-v8a` 系统镜像并通过 WHPX 硬件加速运行；Windows `x64` 下载 `x86_64` 镜像并通过 WHPX/AEHD 加速运行（严禁以跨架构模拟宣称原生支持）。
+- **无头托管与无缝接入**：由 `androfuse-svc` 提供 `vm.download` / `vm.start` / `vm.stop` / `vm.status` 控制，默认以无窗口模式（`-no-window`）在后台启动并自动接入 AndroFuse 统一设备中心与租约账本（`INV-02`、`INV-03`），支持冷启动一键下载、启停与镜像清理。
 
 ---
 
@@ -249,7 +254,8 @@ flowchart TB
 - **交付范围**：
   1. 同仓构建并签名发布可选 **Android Companion APK**（`arm64-v8a`、16 KB 对齐）；
   2. 实现 P1 全部增强能力：应用清单与图标、通知同步与回复、双向剪贴板协助、SAF 文件浏览/双向传输/拖放、设备状态与温控、APP 接力、断线虚拟显示恢复守护（分级权限开关）；
-  3. USB 拔线 30 秒宽限期自动热切换至 TLS Wi-Fi ADB 重连，以及跨 Wi-Fi/5G 结合 VPN 或用户态 EasyTier（`--no-tun`）异网直连。
+  3. USB 拔线 30 秒宽限期自动热切换至 TLS Wi-Fi ADB 重连，以及跨 Wi-Fi/5G 结合 VPN 或用户态 EasyTier（`--no-tun`）异网直连；
+  4. **内建可下载 Android 虚拟机（基础期，§6.6）**：`androfuse-svc` 托管按需下载/校验/无头启停原生架构（`arm64-v8a` / `x86_64`）Android VM 并无缝接入独立 APP 窗口体验。
 - **Done When**：卸载 Companion APK 时基础有线/无线 ADB 模式 100% 正常；安装并显式授权后 P1 全部跨端协同功能通过真机端到端验收。
 
 ### M4：双架构正式发布、Windows 10 评估与长稳打磨（`0.4.0`）

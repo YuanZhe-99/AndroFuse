@@ -854,11 +854,13 @@ func (sw *SessionWindow) onStageBounds(box ui.Rect) {
 		return
 	}
 	minW, minH := 480, 360
+	scale := float32(1)
 	if sw.spec.Mode == SessionModeApp {
 		minW, minH = appMinResizePx, appMinResizePx
+		scale = appWinPixelScale
 	}
-	targetW := clampEven(int(box.W), minW, 2560)
-	targetH := clampEven(int(box.H), minH, 1600)
+	targetW := clampEven(int(box.W*scale), minW, 2560)
+	targetH := clampEven(int(box.H*scale), minH, 1600)
 
 	sw.mu.Lock()
 	sw.lastResizeBox = box
