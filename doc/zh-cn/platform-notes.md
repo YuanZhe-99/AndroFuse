@@ -17,7 +17,7 @@
 
 | 目标 | 状态 | 说明 |
 |---|---|---|
-| Windows 11 `x64` | 尚未实机验证 | M4 阶段与原生 `ARM64` 同等作为首版发布门槛 |
+| Windows 11 `x64` | CI 编译与 PE/单测已通过；待 x64 真机实测 | GitHub Actions `#45528710584`（`Windows (amd64)` 与 `Rust (windows-latest)`）成功构建并通过 `tools/checkpe -arch amd64`（`0x8664`）与全套 Go/Rust 单测及 `mygo vet`；真实 x64 硬件验证仍为 M4 门禁 |
 | Windows 10（`19045+`） | 待评估（M4） | MyGo D3D11 与 Media Foundation 可运行（无 Mica 材质回退为纯色）；Wi-Fi Direct Miracast 接收依赖网卡 NDIS/WDDM 驱动 |
 
 ## Android 设备与 Companion APK
@@ -26,4 +26,4 @@
 |---|---|---|
 | 三星 Galaxy Z Fold 8（`SM-F971U1`，Android 17 / SDK 37，One UI 9.0 `90000`，`SM8850`） | 已在 `androfuse.exe` 通过 USB 与 TLS Wi-Fi ADB 实测 | **有线 USB 与无线 TLS Wi-Fi（`_adb-tls-connect._tcp`）**：手机主屏镜像与交互式原生 Samsung DeX（`SemWifiDisplayConfig` 回环、`1920x1080`、DXVA `hw=true`、鼠标悬停/左键/右键/滚轮/最近任务、动态缩放至 `1600x900`）均已在自动化套件与 `androfuse.exe` 桌面窗口实测正常（`leases.json` 零残留）。**Miracast**：因依赖未公开 `WlanNotifyVsIeProviderInt` 且触发 `qcwlan8280.sys` 内核 `BugCheck 0x7E` 已全平台隐藏禁用。**独立应用窗口体验**：下一阶段在模拟器按 AndroMeld 标准重构无边框窗口与图标网格 |
 | Android 模拟器（`Pixel_9a_API_36`，Android 16 / SDK 36）与普通 Android 设备 | 已在 AVD 实测通过（M1b） | `TestLiveEmulatorAppWindowsAndIcons` 在 `Pixel_9a_API_36`（`arm64-v8a` WHPX）实测通过：`ListAppsWithIcons` 成功提取 18/18 真实本地化应用名称与 `96x96` PNG 图标并过滤 WebAPK；并发 2 路 `vd_system_decorations=false` + `flex_display=true` 无边框独立应用窗口（`544x960` 动态缩放至 `720x1280`、`resizedAck=true`、DXVA `hw=true`、音频 Socket 激活），退出后零残留虚拟屏与 `leases.json` 记录（`INV-03`、`INV-06`） |
-| Android Companion APK（`arm64-v8a`） | Android Go/MyGo 核心库已编译通过；Windows 侧 APK 打包脚本待完善 | `GOOS=android GOARCH=arm64 CGO_ENABLED=0 go build ./internal/companion` 通过；`go tool mygo build -platform android/arm64` 已借由 NDK `30.0.16248370` 编译生成 `arm64` Android 原生载荷，但在 Windows 调用 Gradle 打包阶段因上游 `mygo v0.10.0` 仅生成 `.mygo/android/gradlew` 与 `gradle-wrapper.jar` 而缺少 `gradlew.bat` 报错中止；`internal/companion` TLS 1.3 全链路单测与 `internal/androidhost` 移动端渲染单测已在宿主机全通 |
+| Android Companion APK（`arm64-v8a`） | CI 已构建并在模拟器实测通过（M3b） | GitHub Actions `#45528710584`（`Android Companion (arm64-v8a)`）产出 `AndroFuse-0.1.0-android-arm64.apk`（`15,062,609` 字节）并通过 `zipalign -c -P 16 4`（16 KB 页对齐）；已实测安装并冷启动至 `Pixel_9a_API_36`（`arm64-v8a`，Android 16 / SDK 36）：`adb install -r` 成功、`com.yuanzhe.androfuse/dev.mygo.MyGoActivity` 启动正常（`TotalTime: 3316ms`、`libmygoapp.so` 加载成功、`PID=2714`、零崩溃），同时 `internal/companion` TLS 1.3 与 `internal/androidhost` 单测全部通过 |

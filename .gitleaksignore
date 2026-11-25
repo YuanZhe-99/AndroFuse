@@ -1,0 +1,2 @@
+# Base32 pairing token alphabet ("ABCDEFGHJKLMNPQRSTUVWXYZ23456789") — not a secret
+79a81e096c499a2787a4ba64d6c5ad2c0c339966:internal/companion/protocol.go:generic-api-key:158
