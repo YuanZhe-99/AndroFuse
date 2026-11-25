@@ -32,6 +32,11 @@ type LaunchConfig struct {
 	HideSystemDecorations bool
 	KeepContentOnClose    bool
 	StartAppPackage       string
+	VideoSource           string // "" or "display", or "camera"
+	CameraFacing          string // "front", "back", "external"
+	CameraSize            string // e.g. "1280x720"
+	CameraFPS             int
+	AudioSource           string // "" or "output", or "mic"
 	CodecID               uint32 // 0 defaults to CodecH264
 	MaxSize               int
 	MaxFPS                float64
@@ -110,6 +115,10 @@ func BuildServerArgs(scid uint32, cfg LaunchConfig) []string {
 	if cfg.EnableUHID || cfg.FlexDisplay || cfg.StartAppPackage != "" {
 		ctrl = true
 	}
+	isCamera := cfg.VideoSource == "camera"
+	if isCamera {
+		ctrl = false
+	}
 
 	args := []string{
 		ServerVersion,
@@ -122,30 +131,48 @@ func BuildServerArgs(scid uint32, cfg LaunchConfig) []string {
 		"video_codec=" + codecName,
 		fmt.Sprintf("video_bit_rate=%d", bitRate),
 		"cleanup=true",
-		"power_on=true",
+	}
+	if isCamera {
+		args = append(args, "video_source=camera")
+		if cfg.CameraFacing != "" {
+			args = append(args, "camera_facing="+cfg.CameraFacing)
+		}
+		if cfg.CameraSize != "" {
+			args = append(args, "camera_size="+cfg.CameraSize)
+		}
+		if cfg.CameraFPS > 0 {
+			args = append(args, fmt.Sprintf("camera_fps=%d", cfg.CameraFPS))
+		}
+	} else {
+		args = append(args, "power_on=true")
 	}
 	if cfg.Audio {
 		args = append(args, "audio_codec=raw")
-	}
-	if cfg.MaxSize > 0 {
-		args = append(args, fmt.Sprintf("max_size=%d", cfg.MaxSize))
-	}
-	if cfg.MaxFPS > 0 {
-		args = append(args, fmt.Sprintf("max_fps=%.2f", cfg.MaxFPS))
-	}
-	if cfg.NewDisplay != "" {
-		args = append(args, "new_display="+cfg.NewDisplay)
-		if cfg.FlexDisplay {
-			args = append(args, "flex_display=true")
+		if cfg.AudioSource != "" {
+			args = append(args, "audio_source="+cfg.AudioSource)
 		}
-		if cfg.HideSystemDecorations {
-			args = append(args, "vd_system_decorations=false")
+	}
+	if !isCamera {
+		if cfg.MaxSize > 0 {
+			args = append(args, fmt.Sprintf("max_size=%d", cfg.MaxSize))
 		}
-		if cfg.KeepContentOnClose {
-			args = append(args, "vd_destroy_content=false")
+		if cfg.MaxFPS > 0 {
+			args = append(args, fmt.Sprintf("max_fps=%.2f", cfg.MaxFPS))
 		}
-	} else if cfg.DisplayID > 0 {
-		args = append(args, fmt.Sprintf("display_id=%d", cfg.DisplayID))
+		if cfg.NewDisplay != "" {
+			args = append(args, "new_display="+cfg.NewDisplay)
+			if cfg.FlexDisplay {
+				args = append(args, "flex_display=true")
+			}
+			if cfg.HideSystemDecorations {
+				args = append(args, "vd_system_decorations=false")
+			}
+			if cfg.KeepContentOnClose {
+				args = append(args, "vd_destroy_content=false")
+			}
+		} else if cfg.DisplayID > 0 {
+			args = append(args, fmt.Sprintf("display_id=%d", cfg.DisplayID))
+		}
 	}
 	return args
 }
@@ -238,7 +265,7 @@ func StartADB(ctx context.Context, client *adb.Client, lib *core.Lib, store *lea
 		}
 	}
 
-	ctrlNeeded := cfg.EnableControl || cfg.EnableUHID || cfg.FlexDisplay || cfg.StartAppPackage != ""
+	ctrlNeeded := cfg.VideoSource != "camera" && (cfg.EnableControl || cfg.EnableUHID || cfg.FlexDisplay || cfg.StartAppPackage != "")
 	var ctrlConn net.Conn
 	if ctrlNeeded {
 		ctrlConn, err = net.DialTimeout("tcp", addr, 5*time.Second)

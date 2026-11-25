@@ -180,5 +180,16 @@
   "MCPEmergencyStopBtn": "紧急停止 MCP",
   "MCPAllowLaunchLabel": "允许执行 launch_app（默认仅开放只读诊断）",
   "MCPTokenLabel": "当前会话令牌：{token}",
-  "MCPAuditTitle": "本地 MCP 最近审计记录"
+  "MCPAuditTitle": "本地 MCP 最近审计记录",
+  "PermMediaBridge": "PC 摄像头与麦克风传入辅助",
+  "ActionLaunchCamera": "手机摄像头",
+  "AVBridgeCardTitle": "双向音视频桥接（M5）",
+  "AVBridgeCardDesc": "通过 scrcpy 摄像头直采将手机前后摄画面与麦克风渲染为原生窗口及本机防越权 MJPEG 流，并支持经 Companion 加密回传 PC 麦克风/摄像头帧。",
+  "AVCameraFacingLabel": "手机默认摄像头",
+  "AVCameraBack": "后置主摄",
+  "AVCameraFront": "前置自拍",
+  "AVBridgeLocalURL": "本机 MJPEG 流地址：{url}",
+  "AVVirtualCamAPIReady": "检测到系统 MFCreateVirtualCamera 接口（当前启用本机 MJPEG 桥接；未安装独立 COM 虚拟摄像头驱动）",
+  "AVVirtualCamAPIMissing": "当前系统未提供 MFCreateVirtualCamera 接口（使用本机 MJPEG 桥接与原生预览）",
+  "AVUplinkNote": "非 Root 下 PC→Android 麦克风 PCM / 摄像头 JPEG 回传需在手机 Companion 显式开启 MediaBridge 授权（默认关闭）。"
 }

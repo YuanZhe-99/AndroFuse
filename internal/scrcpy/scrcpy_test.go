@@ -55,6 +55,31 @@ func TestBuildServerArgsAndEncoders(t *testing.T) {
 		t.Fatalf("unexpected StartApp packet header: %x", appPkt[:2])
 	}
 
+	camArgs := BuildServerArgs(0xabcdef01, LaunchConfig{
+		VideoSource:   "camera",
+		CameraFacing:  "back",
+		CameraSize:    "1280x720",
+		CameraFPS:     30,
+		Audio:         true,
+		AudioSource:   "mic",
+		EnableControl: true, // must be forced false for camera stream
+		DisplayID:     2,
+	})
+	camJoined := strings.Join(camArgs, " ")
+	if !strings.Contains(camJoined, "video_source=camera") ||
+		!strings.Contains(camJoined, "camera_facing=back") ||
+		!strings.Contains(camJoined, "camera_size=1280x720") ||
+		!strings.Contains(camJoined, "camera_fps=30") ||
+		!strings.Contains(camJoined, "audio_source=mic") ||
+		!strings.Contains(camJoined, "control=false") {
+		t.Fatalf("missing camera/mic server args: %s", camJoined)
+	}
+	if strings.Contains(camJoined, "display_id=") ||
+		strings.Contains(camJoined, "new_display=") ||
+		strings.Contains(camJoined, "power_on=true") {
+		t.Fatalf("unexpected display/power args in camera mode: %s", camJoined)
+	}
+
 	keyPkt := EncodeInjectKeycode(KeyActionDown, KeycodeBack, 0, MetaCtrlOn)
 	if len(keyPkt) != 14 || keyPkt[0] != MsgInjectKeycode || keyPkt[1] != KeyActionDown {
 		t.Fatalf("unexpected InjectKeycode packet: %x", keyPkt)

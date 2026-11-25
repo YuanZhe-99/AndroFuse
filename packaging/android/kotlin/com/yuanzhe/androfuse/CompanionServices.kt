@@ -2,6 +2,9 @@ package com.yuanzhe.androfuse
 
 import android.app.Activity
 import android.app.Notification
+import android.app.PendingIntent
+import android.appwidget.AppWidgetManager
+import android.appwidget.AppWidgetProvider
 import android.content.Context
 import android.content.Intent
 import android.media.projection.MediaProjectionManager
@@ -93,6 +96,36 @@ object AndroFuseProjectionContract {
 
     fun markMediaProjectionResult(resultCode: Int) {
         CompanionBridgeRegistry.mediaProjectionGranted = resultCode == Activity.RESULT_OK
+    }
+}
+
+/**
+ * Home-screen AppWidget synced with CompanionBridgeRegistry for quick companion launch and display guard.
+ */
+class AndroFuseWidgetProvider : AppWidgetProvider() {
+    override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
+        val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)?.apply {
+            action = ACTION_OPEN_COMPANION
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        val pi = if (launchIntent != null) {
+            PendingIntent.getActivity(context, 0, launchIntent, PendingIntent.FLAG_IMMUTABLE)
+        } else {
+            null
+        }
+        CompanionBridgeRegistry.quickTileReady = true
+        for (appWidgetId in appWidgetIds) {
+            val info = appWidgetManager.getAppWidgetInfo(appWidgetId)
+            if (info != null && pi != null) {
+                // Host layouts attach pi when custom RemoteViews layout resources are packaged.
+                appWidgetManager.notifyAppWidgetViewDataChanged(appWidgetId, 0)
+            }
+        }
+    }
+
+    companion object {
+        const val ACTION_OPEN_COMPANION = "com.yuanzhe.androfuse.action.OPEN_COMPANION"
+        const val ACTION_RUN_DISPLAY_GUARD = "com.yuanzhe.androfuse.action.RUN_DISPLAY_GUARD"
     }
 }
 

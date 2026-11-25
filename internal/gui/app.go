@@ -20,6 +20,7 @@ import (
 
 	"github.com/YuanZhe-99/AndroFuse/internal/adb"
 	"github.com/YuanZhe-99/AndroFuse/internal/androidhost"
+	"github.com/YuanZhe-99/AndroFuse/internal/avbridge"
 	"github.com/YuanZhe-99/AndroFuse/internal/companion"
 	"github.com/YuanZhe-99/AndroFuse/internal/dex"
 	"github.com/YuanZhe-99/AndroFuse/internal/mcp"
@@ -82,6 +83,9 @@ type App struct {
 	mcpStatus       mcp.Status
 	mcpAllowLaunch  bool
 	mcpNotice       string
+	cameraFacingIdx int
+	cameraBridgeURL string
+	vcamCap         avbridge.VirtualCameraCapability
 	sessions        map[string]*SessionWindow
 }
 
@@ -119,6 +123,7 @@ func New(profile, stateDir string) *App {
 		page:      string(pageDevices),
 		appIcons:  make(map[string]*ui.Bitmap),
 		dexRoutes: make(map[string]dex.RoutePreference),
+		vcamCap:   avbridge.ProbeVirtualCamera(),
 		sessions:  make(map[string]*SessionWindow),
 	}
 	a.loadPrefs()
@@ -752,6 +757,18 @@ func (a *App) devicesPage(c *ui.Context, k tokens) {
 					if ui.Button(c.Key(devKey+"-mirror"), L.ActionLaunchMirror()).Clicked() {
 						a.LaunchMirror(d)
 					}
+					if d.Target.Transport != adb.TransportEmulator {
+						if ui.Button(c.Key(devKey+"-cam"), L.ActionLaunchCamera()).Clicked() {
+							a.mu.Lock()
+							fIdx := a.cameraFacingIdx
+							a.mu.Unlock()
+							facing := "back"
+							if fIdx == 1 {
+								facing = "front"
+							}
+							a.LaunchPhoneCamera(d, facing)
+						}
+					}
 					if wirelessSerial != "" {
 						if ui.Button(c.Key(devKey+"-disc"), L.ActionDisconnect()).Clicked() {
 							a.DisconnectWireless(wirelessSerial)
@@ -1103,10 +1120,44 @@ func (a *App) modesPage(c *ui.Context, k tokens) {
 				}
 			}
 		})
+		a.avBridgeCard(c, k)
 		card(c.Key("mode-coexist")).Children(func() {
 			ui.Text(c, L.ModeCoexistenceNote()).Bold().FontSize(sizeBody)
 			ui.Text(c, L.ModeCoexistenceDesc()).FontSize(sizeBody).TextColor(k.muted)
 		})
+	})
+}
+
+func (a *App) avBridgeCard(c *ui.Context, k tokens) {
+	a.mu.Lock()
+	facingIdx := a.cameraFacingIdx
+	bridgeURL := a.cameraBridgeURL
+	vcam := a.vcamCap
+	a.mu.Unlock()
+
+	card(c.Key("mode-av-bridge")).Children(func() {
+		ui.Text(c, L.AVBridgeCardTitle()).Bold().FontSize(sizeHeading)
+		ui.Text(c, L.AVBridgeCardDesc()).FontSize(sizeSmall).TextColor(k.muted)
+
+		ui.Row(c.Key("av-facing-row")).FillWidth().AlignItems(ui.Center).Gap(8).Children(func() {
+			ui.Text(c, L.AVCameraFacingLabel()).FontSize(sizeBody).Grow(1)
+			seg := ui.Segmented(c.Key("av-cam-facing"), &facingIdx, L.AVCameraBack(), L.AVCameraFront())
+			if seg.Changed() {
+				a.mu.Lock()
+				a.cameraFacingIdx = facingIdx
+				a.mu.Unlock()
+			}
+		})
+
+		if vcam.MFVirtualCameraAPI {
+			ui.Text(c, L.AVVirtualCamAPIReady()).FontSize(sizeSmall).TextColor(k.good)
+		} else {
+			ui.Text(c, L.AVVirtualCamAPIMissing()).FontSize(sizeSmall).TextColor(k.muted)
+		}
+		if bridgeURL != "" {
+			ui.Text(c, L.AVBridgeLocalURL(bridgeURL)).FontSize(sizeSmall).TextColor(k.brand)
+		}
+		ui.Text(c, L.AVUplinkNote()).FontSize(sizeSmall).TextColor(k.muted)
 	})
 }
 

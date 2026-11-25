@@ -18,6 +18,8 @@ const (
 	DefaultPort = 27189
 	// MaxFilePushBytes caps a single inlined FilePushRequest payload at 16 MiB.
 	MaxFilePushBytes = 16 << 20
+	// MaxMediaFrameBytes caps a single PC->Android camera JPEG or mic PCM frame at 2 MiB.
+	MaxMediaFrameBytes = 2 << 20
 )
 
 // Permissions controls graded, opt-in Companion capabilities enforced server-side (`INV-09`).
@@ -29,6 +31,7 @@ type Permissions struct {
 	AppContinuity bool `json:"app_continuity"`
 	DisplayGuard  bool `json:"display_guard"`
 	ADBBeacon     bool `json:"adb_beacon"`
+	MediaBridge   bool `json:"media_bridge"`
 }
 
 // DefaultPermissions returns conservative defaults (telemetry enabled; sensitive hooks opt-in).
@@ -137,6 +140,24 @@ type DisplayGuardRequest struct {
 type DisplayGuardResponse struct {
 	CleanedCount int    `json:"cleaned_count"`
 	Message      string `json:"message,omitempty"`
+}
+
+// MediaFrameRequest carries a bounded PC-to-Android microphone PCM or webcam JPEG frame (`INV-09`).
+type MediaFrameRequest struct {
+	Kind       string `json:"kind"` // "mic_pcm" | "camera_jpeg"
+	SampleRate int    `json:"sample_rate,omitempty"`
+	Channels   int    `json:"channels,omitempty"`
+	Width      int    `json:"width,omitempty"`
+	Height     int    `json:"height,omitempty"`
+	DataBase64 string `json:"data_base64"`
+	Timestamp  int64  `json:"timestamp"`
+}
+
+// MediaFrameResponse acknowledges one accepted PC-to-Android media frame.
+type MediaFrameResponse struct {
+	OK            bool   `json:"ok"`
+	ReceivedBytes int    `json:"received_bytes"`
+	Message       string `json:"message,omitempty"`
 }
 
 // SanitizeFileName enforces a single clean basename without traversal (`..`, separators, or NUL).

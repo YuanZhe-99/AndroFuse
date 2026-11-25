@@ -20,7 +20,8 @@
 | `internal/vm` | 按需下载的轻量无头 Android 虚拟机管理器（`%LOCALAPPDATA%\AndroFuse\vm`，原生 `arm64-v8a` / `x86_64`，`INV-03`、`INV-10`） |
 | `internal/companion` | 桌面与 Android APK 共用的 TLS 1.3 加密 Companion NDJSON 协议（遥测、剪贴板、通知回复、文件传输、应用接力、显示守护与 ADB 信标；`INV-07`、`INV-09`） |
 | `internal/androidhost` | 可选 Android 伴侣端宿主服务、配置持久化、sysfs 电量/温控探针、脱敏审计日志与 MyGo 分级授权界面（`INV-09`、`INV-11`） |
-| `internal/androidbridge` | 平台安全的 Android 系统服务能力探测包，与 `CompanionServices.kt`（`NotificationListenerService`、`TileService`、`MediaProjection`、`SAF`）协同工作 |
+| `internal/androidbridge` | 平台安全的 Android 系统服务能力探测包，与 `CompanionServices.kt`（`NotificationListenerService`、`TileService`、`MediaProjection`、`SAF`、`AppWidgetProvider`）协同工作 |
+| `internal/avbridge` | M5 双向音视频桥接：手机摄像头本地防越权 MJPEG 流、系统 `MFCreateVirtualCamera` 探测与加密 PC→Android 麦克风/摄像头传入链路 |
 | `internal/mcp` | 默认关闭的本机回环（`127.0.0.1`）HTTP JSON-RPC 2.0 本地 MCP 服务，带 30 分钟临时密钥、工具白名单、紧急停止与脱敏审计（`INV-07`、`INV-08`） |
 | `internal/mesh` | 默认关闭的可选用户态 EasyTier（`--no-tun`）跨网组网托管模块（`INV-07`、`INV-08`） |
 | `internal/bundlesig` | 沿用 Kyokai 规范的 Ed25519 辅助程序包清单（`bundle.json` + `bundle.sig`）签名与校验包 |

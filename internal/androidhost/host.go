@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/YuanZhe-99/AndroFuse/internal/androidbridge"
 	"github.com/YuanZhe-99/AndroFuse/internal/companion"
 )
 
@@ -186,6 +187,15 @@ func (h *Host) StartServer() error {
 			h.notify()
 			return companion.DisplayGuardResponse{CleanedCount: 0, Message: "virtual display check complete"}, nil
 		},
+		OnMediaFrame: func(req companion.MediaFrameRequest) (companion.MediaFrameResponse, error) {
+			rawLen := len(req.DataBase64) * 3 / 4
+			h.mu.Lock()
+			h.receiveBytes += int64(rawLen)
+			h.appendAuditLocked(fmt.Sprintf("media bridge %s frame accepted", req.Kind))
+			h.mu.Unlock()
+			h.notify()
+			return companion.MediaFrameResponse{OK: true, ReceivedBytes: rawLen, Message: "accepted"}, nil
+		},
 	})
 	if err != nil {
 		h.mu.Lock()
@@ -213,8 +223,10 @@ func (h *Host) StartServer() error {
 	h.cancelSrv = cancel
 	h.running = true
 	h.lastErr = ""
+	wPort := h.cfg.WirelessADBPort
 	h.appendAuditLocked("TLS 1.3 companion listening on " + srv.Addr())
 	h.mu.Unlock()
+	androidbridge.SyncCompanionWidget(true, wPort, readDeviceTelemetry().BatteryPct)
 	h.notify()
 
 	go func() {
@@ -225,6 +237,7 @@ func (h *Host) StartServer() error {
 			h.srv = nil
 		}
 		h.mu.Unlock()
+		androidbridge.SyncCompanionWidget(false, 0, readDeviceTelemetry().BatteryPct)
 		h.notify()
 	}()
 	return nil
@@ -238,6 +251,7 @@ func (h *Host) StopServer() error {
 	h.srv = nil
 	h.cancelSrv = nil
 	h.running = false
+	wPort := h.cfg.WirelessADBPort
 	if srv != nil {
 		h.appendAuditLocked("companion server stopped")
 	}
@@ -248,6 +262,7 @@ func (h *Host) StopServer() error {
 	if srv != nil {
 		_ = srv.Close()
 	}
+	androidbridge.SyncCompanionWidget(false, wPort, readDeviceTelemetry().BatteryPct)
 	h.notify()
 	return nil
 }
@@ -352,6 +367,8 @@ func (h *Host) SetPermission(name string, enabled bool) {
 		h.cfg.Permissions.DisplayGuard = enabled
 	case "adb_beacon":
 		h.cfg.Permissions.ADBBeacon = enabled
+	case "media_bridge":
+		h.cfg.Permissions.MediaBridge = enabled
 	}
 	h.appendAuditLocked(fmt.Sprintf("permission %s=%v", name, enabled))
 	h.saveConfigLocked()
@@ -391,6 +408,7 @@ func (h *Host) SetWirelessADBPort(port int) {
 	}
 	h.mu.Lock()
 	h.cfg.WirelessADBPort = port
+	running := h.running
 	if port > 0 {
 		h.beaconInput = strconv.Itoa(port)
 		h.appendAuditLocked(fmt.Sprintf("wireless ADB beacon port updated (%d)", port))
@@ -400,6 +418,7 @@ func (h *Host) SetWirelessADBPort(port int) {
 	}
 	h.saveConfigLocked()
 	h.mu.Unlock()
+	androidbridge.SyncCompanionWidget(running, port, readDeviceTelemetry().BatteryPct)
 	h.notify()
 }
 

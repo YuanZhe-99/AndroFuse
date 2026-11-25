@@ -33,6 +33,7 @@ type Handler struct {
 	OnAppContinuity     func(AppContinuityRequest) (AppContinuityResponse, error)
 	OnFilePush          func(name string, data []byte, shaHex string) (FilePushResponse, error)
 	OnDisplayGuard      func(DisplayGuardRequest) (DisplayGuardResponse, error)
+	OnMediaFrame        func(MediaFrameRequest) (MediaFrameResponse, error)
 }
 
 // Server serves authenticated TLS 1.3 Companion NDJSON requests.
@@ -416,6 +417,34 @@ func (s *Server) dispatch(env Envelope) Envelope {
 		}
 		return mustEnvelope(env.ID, "display.guard.res", res)
 
+	case "av.push":
+		if !perms.MediaBridge {
+			return Envelope{ID: env.ID, Type: "av.push.res", Error: "media bridge permission disabled"}
+		}
+		var req MediaFrameRequest
+		if err := json.Unmarshal(env.Payload, &req); err != nil {
+			return Envelope{ID: env.ID, Type: "av.push.res", Error: err.Error()}
+		}
+		if req.Kind != "mic_pcm" && req.Kind != "camera_jpeg" {
+			return Envelope{ID: env.ID, Type: "av.push.res", Error: "unsupported media frame kind"}
+		}
+		raw, err := base64.StdEncoding.DecodeString(req.DataBase64)
+		if err != nil || len(raw) == 0 || len(raw) > MaxMediaFrameBytes {
+			return Envelope{ID: env.ID, Type: "av.push.res", Error: "invalid or oversized media frame payload"}
+		}
+		if s.handler.OnMediaFrame == nil {
+			return mustEnvelope(env.ID, "av.push.res", MediaFrameResponse{
+				OK:            true,
+				ReceivedBytes: len(raw),
+				Message:       "accepted",
+			})
+		}
+		res, err := s.handler.OnMediaFrame(req)
+		if err != nil {
+			return Envelope{ID: env.ID, Type: "av.push.res", Error: err.Error()}
+		}
+		return mustEnvelope(env.ID, "av.push.res", res)
+
 	default:
 		return Envelope{ID: env.ID, Type: "error", Error: fmt.Sprintf("unknown request %q", env.Type)}
 	}
@@ -562,6 +591,13 @@ func (c *Client) PushFile(ctx context.Context, name string, data []byte) (FilePu
 func (c *Client) RunDisplayGuard(ctx context.Context) (DisplayGuardResponse, error) {
 	var res DisplayGuardResponse
 	err := c.call(ctx, "display.guard", DisplayGuardRequest{Action: "cleanup_orphans"}, &res)
+	return res, err
+}
+
+// PushMediaFrame delivers a PC mic PCM or webcam JPEG frame to Android Companion (`INV-09`).
+func (c *Client) PushMediaFrame(ctx context.Context, req MediaFrameRequest) (MediaFrameResponse, error) {
+	var res MediaFrameResponse
+	err := c.call(ctx, "av.push", req, &res)
 	return res, err
 }
 

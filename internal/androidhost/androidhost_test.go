@@ -24,6 +24,7 @@ func TestHostLifecycleAndPermissions(t *testing.T) {
 	}
 
 	h.SetPermission("file_transfer", true)
+	h.SetPermission("media_bridge", true)
 	h.SetWirelessADBPort(41235)
 	oldTok := h.Config().Token
 	newTok, err := h.RotateToken()
@@ -32,7 +33,7 @@ func TestHostLifecycleAndPermissions(t *testing.T) {
 	}
 
 	reloaded := New(dir, nil)
-	if !reloaded.Config().Permissions.FileTransfer || reloaded.Config().WirelessADBPort != 41235 || reloaded.Config().Token != newTok {
+	if !reloaded.Config().Permissions.FileTransfer || !reloaded.Config().Permissions.MediaBridge || reloaded.Config().WirelessADBPort != 41235 || reloaded.Config().Token != newTok {
 		t.Fatalf("persisted config mismatch: %+v", reloaded.Config())
 	}
 

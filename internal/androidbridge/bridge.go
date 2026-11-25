@@ -15,9 +15,17 @@ type Capabilities struct {
 	Notes                string `json:"notes,omitempty"`
 }
 
+// WidgetState summarizes the Android home-screen widget state synced from androidhost.
+type WidgetState struct {
+	CompanionActive bool `json:"companionActive"`
+	WirelessADBPort int  `json:"wirelessAdbPort,omitempty"`
+	BatteryPct      int  `json:"batteryPct,omitempty"`
+}
+
 var (
-	stateMu sync.RWMutex
-	granted Capabilities
+	stateMu     sync.RWMutex
+	granted     Capabilities
+	widgetState WidgetState
 )
 
 // UpdateGranted records permission state reported by the Android Companion Kotlin layer.
@@ -30,6 +38,25 @@ func UpdateGranted(notificationListener, quickTile, mediaProjection, saf bool) {
 	granted.QuickSettingsTile = quickTile
 	granted.MediaProjection = mediaProjection
 	granted.SAF = saf
+}
+
+// SyncCompanionWidget updates home-screen widget state rendered by AndroFuseWidgetProvider.
+// Side effects: Stores latest companion status for Quick Settings & home widget display.
+func SyncCompanionWidget(active bool, adbPort, batteryPct int) {
+	stateMu.Lock()
+	defer stateMu.Unlock()
+	widgetState = WidgetState{
+		CompanionActive: active,
+		WirelessADBPort: adbPort,
+		BatteryPct:      batteryPct,
+	}
+}
+
+// CurrentWidgetState returns a snapshot of the synced home-screen widget state.
+func CurrentWidgetState() WidgetState {
+	stateMu.RLock()
+	defer stateMu.RUnlock()
+	return widgetState
 }
 
 // Probe returns the current platform's safe capability summary.

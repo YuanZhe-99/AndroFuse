@@ -314,5 +314,21 @@
       "token": { "type": "String" }
     }
   },
-  "MCPAuditTitle": "Recent Local MCP Audit"
+  "MCPAuditTitle": "Recent Local MCP Audit",
+  "PermMediaBridge": "PC Camera & Mic Uplink Bridge",
+  "ActionLaunchCamera": "Phone Camera",
+  "AVBridgeCardTitle": "Bidirectional Camera & Mic Bridge (M5)",
+  "AVBridgeCardDesc": "Stream phone camera + mic via scrcpy camera source into a native window & token-gated local MJPEG stream, and push PC mic/camera frames via Companion.",
+  "AVCameraFacingLabel": "Phone Camera Facing",
+  "AVCameraBack": "Rear Camera",
+  "AVCameraFront": "Front Camera",
+  "AVBridgeLocalURL": "Local MJPEG bridge: {url}",
+  "@AVBridgeLocalURL": {
+    "placeholders": {
+      "url": { "type": "String" }
+    }
+  },
+  "AVVirtualCamAPIReady": "Windows MFCreateVirtualCamera API detected (loopback MJPEG active; OS COM media source not registered)",
+  "AVVirtualCamAPIMissing": "Windows MFCreateVirtualCamera API unavailable (loopback MJPEG active)",
+  "AVUplinkNote": "Non-root PC→Android mic PCM / camera JPEG frames use Companion permission MediaBridge (off by default)."
 }

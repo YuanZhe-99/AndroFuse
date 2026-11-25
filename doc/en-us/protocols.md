@@ -52,3 +52,8 @@ AndroFuse implements direct wire-protocol engines in Rust (`core/androfuse-core`
 
 - **Default-Disabled Loopback Binding (`INV-07`, `INV-08`)**: Starts disabled (`Enabled=false`). Explicit activation from Settings binds strictly to `127.0.0.1:0` over HTTP (`POST`) with a fresh 32-char random bearer token checked via `subtle.ConstantTimeCompare` and a bounded 30-minute TTL.
 - **Allowlist, Emergency Stop & Scrubbed Audit**: `tools/list` and `tools/call` enforce per-tool `Allowlist` flags (`list_devices` and `run_diagnostics` allowed by default when enabled; `launch_app` requires an explicit Settings toggle). `EmergencyStop()` (also invoked automatically on app shutdown) clears tokens/listeners immediately, and audit entries never log bearer tokens or raw device serials.
+
+## 8. Bidirectional Camera & Mic Bridge (`internal/avbridge`, `M5`)
+
+- **Phone Camera + Mic Capture**: `internal/scrcpy` supports `video_source=camera` (`camera_facing`, `camera_size`, `camera_fps`, `control=false`) alongside `audio_source=mic` into a desktop `SessionWindow` and a loopback-only (`127.0.0.1`) token-gated MJPEG HTTP server (`avbridge.MJPEGServer`) that skips JPEG encoding whenever no local client is connected; Windows `MFCreateVirtualCamera` API presence is probed honestly (`ProbeVirtualCamera`) while noting no standalone COM media-source driver is installed.
+- **Non-Root PC-to-Android Uplink (`INV-09`)**: `av.push` on `internal/companion` carries bounded (`<= 2 MiB`) `mic_pcm` / `camera_jpeg` frames over TLS 1.3 only when the `MediaBridge` permission switch is explicitly enabled in Android Companion.

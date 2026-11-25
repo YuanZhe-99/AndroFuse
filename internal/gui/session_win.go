@@ -27,6 +27,7 @@ const (
 	SessionModeDeX         SessionMode = "dex"
 	SessionModeMirror      SessionMode = "mirror"
 	SessionModeApp         SessionMode = "app"
+	SessionModeCamera      SessionMode = "camera"
 	SessionModeMiracastDeX SessionMode = "miracast_dex"
 	SessionModeDeXFallback SessionMode = "dex_fallback"
 )
@@ -47,6 +48,7 @@ type SessionSpec struct {
 	ScreenOffCap bool
 	AppIcon      *ui.Bitmap
 	AppPackage   string
+	OnClose      func()
 }
 
 type nv12Slot struct {
@@ -643,6 +645,9 @@ func (sw *SessionWindow) Close() {
 		}
 		if ap != nil {
 			ap.Close()
+		}
+		if sw.spec.OnClose != nil {
+			sw.spec.OnClose()
 		}
 	}()
 }

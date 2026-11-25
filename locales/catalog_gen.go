@@ -1857,3 +1857,113 @@ func MCPAuditTitle() string { return In(i18n.Locale()).MCPAuditTitle() }
 func (msgs Messages) MCPAuditTitle() string {
 	return Catalog.Format(msgs.locale, "MCPAuditTitle", nil)
 }
+
+// PermMediaBridge says "PC Camera & Mic Uplink Bridge"
+// in the language the app shows.
+func PermMediaBridge() string { return In(i18n.Locale()).PermMediaBridge() }
+
+// PermMediaBridge says "PC Camera & Mic Uplink Bridge"
+// in the language of msgs.
+func (msgs Messages) PermMediaBridge() string {
+	return Catalog.Format(msgs.locale, "PermMediaBridge", nil)
+}
+
+// ActionLaunchCamera says "Phone Camera"
+// in the language the app shows.
+func ActionLaunchCamera() string { return In(i18n.Locale()).ActionLaunchCamera() }
+
+// ActionLaunchCamera says "Phone Camera"
+// in the language of msgs.
+func (msgs Messages) ActionLaunchCamera() string {
+	return Catalog.Format(msgs.locale, "ActionLaunchCamera", nil)
+}
+
+// AVBridgeCardTitle says "Bidirectional Camera & Mic Bridge (M5)"
+// in the language the app shows.
+func AVBridgeCardTitle() string { return In(i18n.Locale()).AVBridgeCardTitle() }
+
+// AVBridgeCardTitle says "Bidirectional Camera & Mic Bridge (M5)"
+// in the language of msgs.
+func (msgs Messages) AVBridgeCardTitle() string {
+	return Catalog.Format(msgs.locale, "AVBridgeCardTitle", nil)
+}
+
+// AVBridgeCardDesc says "Stream phone camera + mic via scrcpy camera source into a native window & token-gated local MJPEG stream, and push PC…"
+// in the language the app shows.
+func AVBridgeCardDesc() string { return In(i18n.Locale()).AVBridgeCardDesc() }
+
+// AVBridgeCardDesc says "Stream phone camera + mic via scrcpy camera source into a native window & token-gated local MJPEG stream, and push PC…"
+// in the language of msgs.
+func (msgs Messages) AVBridgeCardDesc() string {
+	return Catalog.Format(msgs.locale, "AVBridgeCardDesc", nil)
+}
+
+// AVCameraFacingLabel says "Phone Camera Facing"
+// in the language the app shows.
+func AVCameraFacingLabel() string { return In(i18n.Locale()).AVCameraFacingLabel() }
+
+// AVCameraFacingLabel says "Phone Camera Facing"
+// in the language of msgs.
+func (msgs Messages) AVCameraFacingLabel() string {
+	return Catalog.Format(msgs.locale, "AVCameraFacingLabel", nil)
+}
+
+// AVCameraBack says "Rear Camera"
+// in the language the app shows.
+func AVCameraBack() string { return In(i18n.Locale()).AVCameraBack() }
+
+// AVCameraBack says "Rear Camera"
+// in the language of msgs.
+func (msgs Messages) AVCameraBack() string {
+	return Catalog.Format(msgs.locale, "AVCameraBack", nil)
+}
+
+// AVCameraFront says "Front Camera"
+// in the language the app shows.
+func AVCameraFront() string { return In(i18n.Locale()).AVCameraFront() }
+
+// AVCameraFront says "Front Camera"
+// in the language of msgs.
+func (msgs Messages) AVCameraFront() string {
+	return Catalog.Format(msgs.locale, "AVCameraFront", nil)
+}
+
+// AVBridgeLocalURL says "Local MJPEG bridge: {url}"
+// in the language the app shows.
+func AVBridgeLocalURL(url string) string { return In(i18n.Locale()).AVBridgeLocalURL(url) }
+
+// AVBridgeLocalURL says "Local MJPEG bridge: {url}"
+// in the language of msgs.
+func (msgs Messages) AVBridgeLocalURL(url string) string {
+	return Catalog.Format(msgs.locale, "AVBridgeLocalURL", map[string]any{"url": url})
+}
+
+// AVVirtualCamAPIReady says "Windows MFCreateVirtualCamera API detected (loopback MJPEG active; OS COM media source not registered)"
+// in the language the app shows.
+func AVVirtualCamAPIReady() string { return In(i18n.Locale()).AVVirtualCamAPIReady() }
+
+// AVVirtualCamAPIReady says "Windows MFCreateVirtualCamera API detected (loopback MJPEG active; OS COM media source not registered)"
+// in the language of msgs.
+func (msgs Messages) AVVirtualCamAPIReady() string {
+	return Catalog.Format(msgs.locale, "AVVirtualCamAPIReady", nil)
+}
+
+// AVVirtualCamAPIMissing says "Windows MFCreateVirtualCamera API unavailable (loopback MJPEG active)"
+// in the language the app shows.
+func AVVirtualCamAPIMissing() string { return In(i18n.Locale()).AVVirtualCamAPIMissing() }
+
+// AVVirtualCamAPIMissing says "Windows MFCreateVirtualCamera API unavailable (loopback MJPEG active)"
+// in the language of msgs.
+func (msgs Messages) AVVirtualCamAPIMissing() string {
+	return Catalog.Format(msgs.locale, "AVVirtualCamAPIMissing", nil)
+}
+
+// AVUplinkNote says "Non-root PC→Android mic PCM / camera JPEG frames use Companion permission MediaBridge (off by default)."
+// in the language the app shows.
+func AVUplinkNote() string { return In(i18n.Locale()).AVUplinkNote() }
+
+// AVUplinkNote says "Non-root PC→Android mic PCM / camera JPEG frames use Companion permission MediaBridge (off by default)."
+// in the language of msgs.
+func (msgs Messages) AVUplinkNote() string {
+	return Catalog.Format(msgs.locale, "AVUplinkNote", nil)
+}

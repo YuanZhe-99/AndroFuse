@@ -51,6 +51,7 @@ func testApp(t *testing.T) *App {
 			{Method: "server.emergency_stop", Allowed: true, Outcome: "revoked"},
 		},
 	}
+	a.cameraBridgeURL = "http://127.0.0.1:27190/camera/test.mjpeg"
 	a.diagReady = true
 	a.diag = HostDiagnostics{
 		CoreLoaded: true,

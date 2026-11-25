@@ -268,9 +268,13 @@ flowchart TB
 - **待真机硬件验收**：Windows 11 `x64` 真机与 Windows 10（`19045+`）安装/运行实测、多显示器跨屏高 DPI、休眠唤醒与 30 分钟连续烤机压测。
 - **Done When**：双 Windows 架构均在真实硬件完成安装、升级、卸载与全套验收清单。
 
-### M5：后续增强（`0.5.0+` — 🚧 本地 MCP 已实现，待音视频虚拟化扩展）
+### M5：后续增强（`0.5.0+` — ✅ 软件主干已落地，待真机权限联调与独立 COM 驱动评估）
 - **已落地（M5 本地 MCP 控制面，`INV-07`、`INV-08`）**：新增 `internal/mcp`（默认关闭、仅绑定 `127.0.0.1`、30 分钟临时密钥常量时间校验、按工具白名单与一键紧急停止、脱敏审计日志）并接入 Settings 面板，退出主窗口时自动执行 `EmergencyStop()`。
-- **待扩展**：Android Widget / 快捷磁贴深度联动、手机摄像头作为 Windows 摄像头、PC 摄像头/麦克风传入 Android。
+- **已落地（M5 Android 小组件与双向音视频桥接）**：
+  1. 新增 `AndroFuseWidgetProvider`（`CompanionServices.kt`）与 `internal/androidbridge.SyncCompanionWidget` 状态联动；
+  2. 扩展 `internal/scrcpy` 支持 `video_source=camera`（前后摄切换/分辨率/帧率）与 `audio_source=mic` 采集；
+  3. 新增 `internal/avbridge`（本机防越权 MJPEG 流、`MFCreateVirtualCamera` 系统能力诚实探测与经 Companion `MediaBridge` 加密隧道回传 PC 麦克风/摄像头帧的 `UplinkBridge`），并接入桌面设备卡片、工作模式页与 Companion 移动授权开关；
+  4. **诚实边界**：尚未打包需要管理员签名/安装的独立 Windows COM `MFCreateVirtualCamera` Media Source 驱动，当前通过原生预览窗口 + 本机防越权 MJPEG 流提供通用接入能力；PC→Android 在非 Root 手机上通过 Companion App 会话内接入，暂未做全系统 HAL 虚拟设备注入。
 
 ---
 

@@ -85,6 +85,7 @@ func RenderCompanionView(c *ui.Context, h *Host) {
 				{"app_continuity", L.PermAppContinuity(), cfg.Permissions.AppContinuity},
 				{"display_guard", L.PermDisplayGuard(), cfg.Permissions.DisplayGuard},
 				{"adb_beacon", L.PermADBBeacon(), cfg.Permissions.ADBBeacon},
+				{"media_bridge", L.PermMediaBridge(), cfg.Permissions.MediaBridge},
 			}
 			for _, p := range perms {
 				cur := p.val

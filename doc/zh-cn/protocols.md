@@ -52,3 +52,8 @@ AndroFuse 在 Rust（`core/androfuse-core`）与 Go（`internal/adb`、`internal
 
 - **默认关闭与本机回环绑定（`INV-07`、`INV-08`）**：进程启动时默认关闭（`Enabled=false`）；用户仅在设置页主动开启后才监听 `127.0.0.1:0` HTTP（`POST`），生成 30 分钟有效期随机 Bearer 令牌并通过常量时间校验（`subtle.ConstantTimeCompare`）。
 - **白名单门控、紧急停止与脱敏审计**：`tools/list` 与 `tools/call` 严格遵循按工具 `Allowlist` 开关（启用时默认开放只读的 `list_devices` 与 `run_diagnostics`，`launch_app` 需单独授权）。`EmergencyStop()`（应用退出时自动调用）立即吊销密钥并关闭端口；审计日志永不记录令牌或原始设备序列号。
+
+## 8. 双向摄像头与麦克风桥接协议（`internal/avbridge`，`M5`）
+
+- **手机摄像头 + 麦克风回传**：`internal/scrcpy` 支持 `video_source=camera`（`camera_facing`、`camera_size`、`camera_fps`，强制 `control=false`）与 `audio_source=mic` 直采进入桌面 `SessionWindow` 及仅绑定 `127.0.0.1` 的随机路径令牌 MJPEG 服务（`avbridge.MJPEGServer`，无本地订阅客户端时零编码开销）；同时通过 `ProbeVirtualCamera` 诚实探测系统 `MFCreateVirtualCamera` 接口并明确提示未安装独立 COM 虚拟摄像头驱动。
+- **非 Root 下 PC→Android 回传（`INV-09`）**：`internal/companion` 的 `av.push` 帧在 TLS 1.3 加密隧道上传输有界（`<= 2 MiB`）的 `mic_pcm` / `camera_jpeg` 媒体帧，严格受手机 Companion 端默认关闭的 `MediaBridge` 开关门控。

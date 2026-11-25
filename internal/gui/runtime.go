@@ -17,6 +17,7 @@ import (
 
 	"github.com/YuanZhe-99/AndroFuse/internal/adb"
 	"github.com/YuanZhe-99/AndroFuse/internal/androidhost"
+	"github.com/YuanZhe-99/AndroFuse/internal/avbridge"
 	"github.com/YuanZhe-99/AndroFuse/internal/companion"
 	"github.com/YuanZhe-99/AndroFuse/internal/core"
 	"github.com/YuanZhe-99/AndroFuse/internal/dex"
@@ -1198,6 +1199,106 @@ func (a *App) EmergencyStopMCP() {
 	a.mcpStatus = srv.Status()
 	a.mu.Unlock()
 	a.runOnMain(func() {})
+}
+
+// LaunchPhoneCamera opens a scrcpy camera+mic stream paired with a loopback MJPEG bridge (`M5`).
+// Side effects: Starts avbridge.MJPEGServer, opens a SessionWindow, and clears state on close.
+func (a *App) LaunchPhoneCamera(d DiscoveredDevice, facing string) {
+	devKey := d.HardwareHash
+	if devKey == "" {
+		devKey = d.Target.DeviceHash
+	}
+	if used, limit, atLimit, _ := EncoderHeadroom(d.Profile, a.activeStreamCountFor(devKey)); atLimit {
+		a.update(func() { a.deviceNotice = L.EncoderLimitReached(used, limit) })
+		return
+	}
+	if facing != "front" && facing != "back" {
+		facing = "back"
+	}
+	a.update(func() { a.deviceNotice = "" })
+	go func() {
+		a.rt.coreMu.Lock()
+		lib, lErr := a.ensureCoreLocked()
+		a.rt.coreMu.Unlock()
+		if lErr != nil {
+			a.update(func() { a.deviceNotice = lErr.Error() })
+			return
+		}
+		client, store, aErr := a.ensureADBAndLeases()
+		if aErr != nil {
+			a.update(func() { a.deviceNotice = aErr.Error() })
+			return
+		}
+
+		mjpegSrv := avbridge.NewMJPEGServer()
+		mjpegURL, mErr := mjpegSrv.Start()
+		if mErr != nil {
+			a.update(func() { a.deviceNotice = mErr.Error() })
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+
+		tLabel := transportLabel(d.Target.Transport)
+		sid := newSessionID("cam")
+		sw := newSessionWindow(a, SessionSpec{
+			ID:           sid,
+			DeviceKey:    devKey,
+			Serial:       d.Target.Serial,
+			Title:        fmt.Sprintf("%s · %s (%s)", d.Profile.Model, L.ActionLaunchCamera(), facing),
+			Mode:         SessionModeCamera,
+			Transport:    tLabel,
+			BackendLabel: "scrcpy camera + loopback MJPEG",
+			TargetSpec:   "1280×720 @ 30 fps (" + facing + ")",
+			OnClose: func() {
+				_ = mjpegSrv.Close()
+				a.update(func() {
+					if a.cameraBridgeURL == mjpegURL {
+						a.cameraBridgeURL = ""
+					}
+				})
+			},
+		})
+		ap, _ := lib.OpenAudioPlayer(48000, 2)
+		sw.attachAudio(ap)
+
+		var vSess *scrcpy.Session
+		vSess, err := scrcpy.StartADB(ctx, client, lib, store, scrcpy.LaunchConfig{
+			SessionID:     sid,
+			Serial:        d.Target.Serial,
+			VideoSource:   "camera",
+			CameraFacing:  facing,
+			CameraSize:    "1280x720",
+			CameraFPS:     30,
+			VideoBitRate:  6_000_000,
+			Audio:         true,
+			AudioSource:   "mic",
+			InitialWidth:  1280,
+			InitialHeight: 720,
+			OnFrame: func(f core.NV12Frame) {
+				mjpegSrv.PushNV12(f.Width, f.Height, f.YStride, f.UVStride, f.Y, f.UV)
+				if vSess != nil {
+					st := vSess.Stats()
+					sw.PushNV12(f, st.MeasuredFPS, st.AvgDecodeUs)
+				} else {
+					sw.PushNV12(f, 0, int64(f.DecodeUs))
+				}
+			},
+			OnAudioPCM: sw.PushAudioPCM,
+		})
+		if err != nil {
+			_ = mjpegSrv.Close()
+			if ap != nil {
+				ap.Close()
+			}
+			a.update(func() { a.deviceNotice = err.Error() })
+			return
+		}
+		a.update(func() { a.cameraBridgeURL = mjpegURL })
+		a.addSession(sw)
+		a.runOnMain(func() { sw.attachScrcpy(vSess, nil, sessionDefW, sessionDefH) })
+	}()
 }
 
 func transportLabel(t adb.Transport) string {
