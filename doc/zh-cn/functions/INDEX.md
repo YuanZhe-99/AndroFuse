@@ -8,6 +8,8 @@
 | `internal/core` | Rust 核心 C-ABI v4 加载器、零分配 NV12 环形缓冲与 WASAPI 音频 | `Open`、`Lib.Start`、`Lib.SelfCheck`、`Lib.OpenDecoder`、`Lib.OpenAudioPlayer`、`Decoder.PullInto`、`NV12Ring`、`AudioPlayer` |
 | `internal/localapi` | 同用户 AF_UNIX NDJSON 服务（Windows SID 校验） | `Listen`、`Server.Serve`、`RecoverLeases`、`Call` |
 | `internal/vm` | 按需下载的轻量无头 Android 虚拟机管理器（`INV-03`、`INV-10`） | `NewManager`、`NativeABIForArch`、`DefaultVMRoot`、`ParseCmdlineToolsManifest`、`Manager.Status`、`Manager.Provision`、`Manager.Start`、`Manager.Stop`、`Manager.DeleteManaged` |
+| `internal/companion` | TLS 1.3 加密 Companion NDJSON 协议栈（`INV-07`、`INV-09`） | `NewServer`、`Dial`、`GenerateSelfSignedCert`、`GeneratePairingToken`、`SanitizeFileName`、`Client.GetStatus`、`Client.PushFile`、`Client.RequestContinuity`、`Client.RunDisplayGuard` |
+| `internal/androidhost` | 可选 Android Companion APK 宿主状态、授权管理与 MyGo 移动界面（`INV-09`） | `New`、`Host.StartServer`、`Host.StopServer`、`Host.SetPermission`、`Host.RotateToken`、`Host.SetWirelessADBPort`、`RenderCompanionView` |
 | `internal/adb` | 无 Shell `adb` 客户端、多传输去重聚合、mDNS TLS 无线连接配对与 `--user 0` 设备探测 | `FindClient`、`MaskSerial`、`MaskEndpoint`、`MergeDevices`、`UnifiedDevice`、`Client.Devices`、`Client.MDNSServices`、`Client.ConnectTLS`、`Client.PairTLS`、`Client.WakeScreen`、`Client.ListLaunchableApps`、`IsNoisyAppPackage` |
 | `internal/lease` | 原子 `leases.json` 崩溃回收租约账本 | `Open`、`Store.Acquire`、`Store.Release`、`Store.List`、`Store.RecoverAll` |
 | `internal/scrcpy` | `scrcpy-server v5.0.1` 线协议、交互控制、音频/剪贴板、MP4 录屏与回放样本 | `BuildServerArgs`、`StartADB`、`Session.Resize`、`Session.SetClipboard`、`Session.StartRecording`、`MP4Recorder`、`StartMockFixture` |

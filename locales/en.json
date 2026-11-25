@@ -252,5 +252,48 @@
   "AboutLicense": "Licensed under GPL-3.0-only. Open-source alternative and enhancement for Samsung DeX for PC and general Android devices.",
   "AboutTrademarks": "Samsung, Samsung DeX, Galaxy, and One UI are trademarks of Samsung Electronics Co., Ltd. Android is a trademark of Google LLC.",
   "TrayShow": "Show AndroFuse",
-  "TrayQuit": "Quit AndroFuse"
+  "TrayQuit": "Quit AndroFuse",
+  "CompanionTitle": "AndroFuse Companion (Android)",
+  "CompanionSubtitle": "Optional TLS 1.3 companion for telemetry, notifications, files, continuity, and cross-network ADB discovery.",
+  "CompanionStatusRunning": "Listening on port {port}",
+  "@CompanionStatusRunning": {
+    "placeholders": {
+      "port": { "type": "int" }
+    }
+  },
+  "CompanionStatusStopped": "Service Stopped",
+  "CompanionActionStart": "Start Companion Service",
+  "CompanionActionStop": "Stop Service",
+  "CompanionActionRotate": "Rotate Token",
+  "CompanionTokenLabel": "Pairing Token",
+  "CompanionFingerprintLabel": "TLS SHA-256 Fingerprint",
+  "CompanionPermissionsTitle": "Graded Opt-In Permissions",
+  "PermTelemetry": "Battery, Thermal & Network Telemetry",
+  "PermClipboard": "Clipboard Sync Assist",
+  "PermNotifications": "Notification Sync & Inline Reply",
+  "PermFileTransfer": "SAF File Push & Drop",
+  "PermAppContinuity": "Foreground App Handoff",
+  "PermDisplayGuard": "Orphan Virtual Display Cleanup",
+  "PermADBBeacon": "Cross-Network TLS ADB Port Beacon",
+  "CompanionBeaconTitle": "Cross-Network Wireless ADB Beacon",
+  "CompanionBeaconHint": "Dynamic _adb-tls-connect port",
+  "CompanionBeaconSave": "Update Port",
+  "CompanionAuditTitle": "Recent Security & Control Audit",
+  "CompanionCardTitle": "Android Companion & Cross-Network (Optional)",
+  "CompanionCardDesc": "Connect an optional AndroFuse APK over LAN, VPN, or EasyTier for telemetry, foreground app handoff, file push, and dynamic TLS ADB discovery. Basic DeX/mirroring do not require an APK.",
+  "CompanionAddrHint": "Companion host:port",
+  "CompanionTokenHint": "Pairing token",
+  "CompanionConnectBtn": "Connect Companion",
+  "CompanionDisconnectBtn": "Disconnect Companion",
+  "CompanionContinueApp": "Continue App on PC",
+  "CompanionConnectBeaconADB": "Connect Beaconed TLS ADB",
+  "CompanionRunDisplayGuard": "Run Display Guard",
+  "CompanionConnectedSummary": "Battery {batt}% · {temp}°C · Foreground: {pkg}",
+  "@CompanionConnectedSummary": {
+    "placeholders": {
+      "batt": { "type": "int" },
+      "temp": { "type": "String" },
+      "pkg": { "type": "String" }
+    }
+  }
 }

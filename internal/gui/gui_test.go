@@ -14,6 +14,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/YuanZhe-99/AndroFuse/internal/adb"
+	"github.com/YuanZhe-99/AndroFuse/internal/companion"
 	"github.com/YuanZhe-99/AndroFuse/internal/core"
 	"github.com/YuanZhe-99/AndroFuse/internal/dex"
 	"github.com/YuanZhe-99/AndroFuse/internal/scrcpy"
@@ -24,6 +25,16 @@ import (
 func testApp(t *testing.T) *App {
 	t.Helper()
 	a := New("test", t.TempDir())
+	a.compAddr = "100.64.0.2:27189"
+	a.compConnected = true
+	a.compStatus = companion.DeviceStatus{
+		BatteryPct:        88,
+		Charging:          true,
+		TempC:             33.4,
+		NetworkType:       "vpn",
+		ForegroundPackage: "com.android.chrome",
+		WirelessADBPort:   41235,
+	}
 	a.vmStatus = vm.Status{
 		State:          vm.StateStopped,
 		NativeABI:      "arm64-v8a",

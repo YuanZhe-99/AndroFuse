@@ -42,3 +42,8 @@ AndroFuse 在 Rust（`core/androfuse-core`）与 Go（`internal/adb`、`internal
 
 - 离线测试使用脱敏 64×48 H.264 数据（`internal/scrcpy/testdata/fold8_scrcpy_session.json`），经本地回环 Socket 跑通 Media Foundation NV12 → `ui.Bitmap.UpdateYUV`（`ui.NewTester`）全链路，不含任何真机屏幕图像或序列号。
 - 真机实时串流测试（`Spike S1、S2、S4`）通过环境变量 `$env:ANDROFUSE_LIVE_DEVICE = "1"` 在 `internal/scrcpy` 与 `internal/dex` 中按需触发，结束时自动断言无残留显示与端口转发。
+
+## 6. 可选 Android Companion TLS 1.3 协同协议（`internal/companion`）
+
+- **认证加密通道（`INV-07`）**：`internal/androidhost` 默认在 `27189` 端口托管可选 ECDSA P-256 TLS 1.3 服务并支持 SHA-256 证书指纹固定；首帧 `auth` 必须通过常量时间配对码校验（`subtle.ConstantTimeCompare`）。
+- **分级授权开关与异网 ADB 端口信标（`INV-09`、`INV-11`）**：`status.get`、`clipboard.set`、`notification.reply`、`app.continuity`、`file.push`（路径穿越拦截 + SHA-256 校验）、`display.guard` 与动态 `_adb-tls-connect._tcp` 端口信标均由手机伴侣端独立开关门控；卸载 Companion APK 时基础有线/无线投屏与 DeX 仍完全可用。

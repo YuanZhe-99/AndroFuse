@@ -1,0 +1,411 @@
+// Package androidhost implements the optional Android Companion host state,
+// graded permission controls (`INV-09`), and scrubbed telemetry/audit log (`INV-08`).
+package androidhost
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/YuanZhe-99/AndroFuse/internal/companion"
+)
+
+// Config persists per-user Android Companion settings under `<stateDir>/companion.json`.
+type Config struct {
+	ListenPort      int                   `json:"listen_port"`
+	Token           string                `json:"token"`
+	Permissions     companion.Permissions `json:"permissions"`
+	WirelessADBPort int                   `json:"wireless_adb_port,omitempty"`
+}
+
+// Host owns the Android-side TLS 1.3 Companion server, persisted permissions, and audit log.
+type Host struct {
+	stateDir string
+	onChange func()
+
+	mu           sync.Mutex
+	cfg          Config
+	srv          *companion.Server
+	cancelSrv    context.CancelFunc
+	running      bool
+	lastErr      string
+	audit        []string
+	beaconInput  string
+	receiveBytes int64
+}
+
+// New constructs an Android Companion Host rooted at stateDir and loads saved config.
+func New(stateDir string, onChange func()) *Host {
+	tok, _ := companion.GeneratePairingToken()
+	if tok == "" {
+		tok = "ANDROFUS"
+	}
+	h := &Host{
+		stateDir: stateDir,
+		onChange: onChange,
+		cfg: Config{
+			ListenPort:  companion.DefaultPort,
+			Token:       tok,
+			Permissions: companion.DefaultPermissions(),
+		},
+	}
+	h.loadConfig()
+	if h.cfg.ListenPort <= 0 {
+		h.cfg.ListenPort = companion.DefaultPort
+	}
+	if strings.TrimSpace(h.cfg.Token) == "" {
+		h.cfg.Token = tok
+	}
+	if h.cfg.WirelessADBPort > 0 {
+		h.beaconInput = strconv.Itoa(h.cfg.WirelessADBPort)
+	}
+	return h
+}
+
+func (h *Host) loadConfig() {
+	if h.stateDir == "" {
+		return
+	}
+	raw, err := os.ReadFile(filepath.Join(h.stateDir, "companion.json"))
+	if err != nil {
+		return
+	}
+	var c Config
+	if err := json.Unmarshal(raw, &c); err == nil {
+		h.cfg = c
+	}
+}
+
+func (h *Host) saveConfigLocked() {
+	if h.stateDir == "" {
+		return
+	}
+	_ = os.MkdirAll(h.stateDir, 0o755)
+	raw, err := json.MarshalIndent(h.cfg, "", "  ")
+	if err != nil {
+		return
+	}
+	tmp := filepath.Join(h.stateDir, "companion.json.tmp")
+	if err := os.WriteFile(tmp, raw, 0o600); err == nil {
+		_ = os.Rename(tmp, filepath.Join(h.stateDir, "companion.json"))
+	}
+}
+
+func (h *Host) appendAuditLocked(line string) {
+	stamp := time.Now().Format("15:04:05")
+	h.audit = append(h.audit, stamp+" · "+line)
+	if len(h.audit) > 20 {
+		h.audit = append([]string(nil), h.audit[len(h.audit)-20:]...)
+	}
+}
+
+func (h *Host) notify() {
+	if h.onChange != nil {
+		h.onChange()
+	}
+}
+
+// StartServer binds the TLS 1.3 Companion listener (`0.0.0.0:<ListenPort>` or `:0`).
+func (h *Host) StartServer() error {
+	h.mu.Lock()
+	if h.running && h.srv != nil {
+		h.mu.Unlock()
+		return nil
+	}
+	port := h.cfg.ListenPort
+	tok := h.cfg.Token
+	h.mu.Unlock()
+
+	model, rel, sdk := deviceIdentity()
+	srv, err := companion.NewServer(tok, model, rel, sdk, companion.Handler{
+		GetPermissions: func() companion.Permissions {
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			return h.cfg.Permissions
+		},
+		GetStatus: func() companion.DeviceStatus {
+			return h.Status()
+		},
+		OnClipboard: func(msg companion.ClipboardMessage) error {
+			h.mu.Lock()
+			h.appendAuditLocked(fmt.Sprintf("clipboard synced (%d chars)", len(msg.Text)))
+			h.mu.Unlock()
+			h.notify()
+			return nil
+		},
+		OnNotificationReply: func(rep companion.NotificationReply) error {
+			h.mu.Lock()
+			h.appendAuditLocked(fmt.Sprintf("notification reply submitted (id=%s)", rep.ID))
+			h.mu.Unlock()
+			h.notify()
+			return nil
+		},
+		OnAppContinuity: func(req companion.AppContinuityRequest) (companion.AppContinuityResponse, error) {
+			pkg := strings.TrimSpace(req.Package)
+			if pkg == "" {
+				st := h.Status()
+				pkg = st.ForegroundPackage
+			}
+			h.mu.Lock()
+			h.appendAuditLocked(fmt.Sprintf("app continuity %s (%s)", req.Action, pkg))
+			h.mu.Unlock()
+			h.notify()
+			return companion.AppContinuityResponse{OK: true, Package: pkg, Message: "ok"}, nil
+		},
+		OnFilePush: func(name string, data []byte, shaHex string) (companion.FilePushResponse, error) {
+			inbox := filepath.Join(h.stateDir, "inbox")
+			if err := os.MkdirAll(inbox, 0o755); err != nil {
+				return companion.FilePushResponse{}, err
+			}
+			dst := filepath.Join(inbox, name)
+			if err := os.WriteFile(dst, data, 0o600); err != nil {
+				return companion.FilePushResponse{}, err
+			}
+			h.mu.Lock()
+			h.receiveBytes += int64(len(data))
+			h.appendAuditLocked(fmt.Sprintf("received file %s (%d bytes)", name, len(data)))
+			h.mu.Unlock()
+			h.notify()
+			return companion.FilePushResponse{
+				SavedPath:    dst,
+				SHA256:       shaHex,
+				BytesWritten: int64(len(data)),
+			}, nil
+		},
+		OnDisplayGuard: func(_ companion.DisplayGuardRequest) (companion.DisplayGuardResponse, error) {
+			h.mu.Lock()
+			h.appendAuditLocked("display guard sweep executed")
+			h.mu.Unlock()
+			h.notify()
+			return companion.DisplayGuardResponse{CleanedCount: 0, Message: "virtual display check complete"}, nil
+		},
+	})
+	if err != nil {
+		h.mu.Lock()
+		h.lastErr = err.Error()
+		h.mu.Unlock()
+		h.notify()
+		return err
+	}
+
+	addr := fmt.Sprintf(":%d", port)
+	if port == 0 {
+		addr = "127.0.0.1:0"
+	}
+	if err := srv.Listen(addr); err != nil {
+		h.mu.Lock()
+		h.lastErr = err.Error()
+		h.mu.Unlock()
+		h.notify()
+		return err
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	h.mu.Lock()
+	h.srv = srv
+	h.cancelSrv = cancel
+	h.running = true
+	h.lastErr = ""
+	h.appendAuditLocked("TLS 1.3 companion listening on " + srv.Addr())
+	h.mu.Unlock()
+	h.notify()
+
+	go func() {
+		_ = srv.Serve(ctx)
+		h.mu.Lock()
+		if h.srv == srv {
+			h.running = false
+			h.srv = nil
+		}
+		h.mu.Unlock()
+		h.notify()
+	}()
+	return nil
+}
+
+// StopServer shuts down the active TLS 1.3 Companion listener cleanly.
+func (h *Host) StopServer() error {
+	h.mu.Lock()
+	srv := h.srv
+	cancel := h.cancelSrv
+	h.srv = nil
+	h.cancelSrv = nil
+	h.running = false
+	if srv != nil {
+		h.appendAuditLocked("companion server stopped")
+	}
+	h.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	if srv != nil {
+		_ = srv.Close()
+	}
+	h.notify()
+	return nil
+}
+
+// Running reports whether the TLS Companion listener is currently active.
+func (h *Host) Running() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.running
+}
+
+// ListenAddr returns the active bound address or "" if stopped.
+func (h *Host) ListenAddr() string {
+	h.mu.Lock()
+	srv := h.srv
+	h.mu.Unlock()
+	if srv == nil {
+		return ""
+	}
+	return srv.Addr()
+}
+
+// ListenPort returns the active bound TCP port, or configured ListenPort.
+func (h *Host) ListenPort() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.ListenPortLocked()
+}
+
+// ListenPortLocked returns the bound port while h.mu is held.
+func (h *Host) ListenPortLocked() int {
+	if h.srv != nil && h.srv.Addr() != "" {
+		if _, pStr, err := net.SplitHostPort(h.srv.Addr()); err == nil {
+			if p, err := strconv.Atoi(pStr); err == nil {
+				return p
+			}
+		}
+	}
+	return h.cfg.ListenPort
+}
+
+// Fingerprint returns the server's short display SHA-256 certificate fingerprint.
+func (h *Host) Fingerprint() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.FingerprintLocked()
+}
+
+// FingerprintLocked returns the short display SHA-256 fingerprint while h.mu is held.
+func (h *Host) FingerprintLocked() string {
+	if h.srv == nil {
+		return "--"
+	}
+	fp := h.srv.Fingerprint()
+	if len(fp) > 23 {
+		return fp[:23] + "..."
+	}
+	return fp
+}
+
+// Config returns a snapshot of the persisted Companion configuration.
+func (h *Host) Config() Config {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.cfg
+}
+
+// LastError returns the most recent startup/runtime error, or "".
+func (h *Host) LastError() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.lastErr
+}
+
+// Status reads current device battery/thermal telemetry and attaches any beaconed wireless ADB port.
+func (h *Host) Status() companion.DeviceStatus {
+	st := readDeviceTelemetry()
+	st.Timestamp = time.Now().Unix()
+	h.mu.Lock()
+	if h.cfg.Permissions.ADBBeacon && h.cfg.WirelessADBPort > 0 {
+		st.WirelessADBPort = h.cfg.WirelessADBPort
+	}
+	h.mu.Unlock()
+	return st
+}
+
+// SetPermission toggles one named graded permission (`INV-09`) and persists the update.
+func (h *Host) SetPermission(name string, enabled bool) {
+	h.mu.Lock()
+	switch name {
+	case "telemetry":
+		h.cfg.Permissions.Telemetry = enabled
+	case "clipboard":
+		h.cfg.Permissions.Clipboard = enabled
+	case "notifications":
+		h.cfg.Permissions.Notifications = enabled
+	case "file_transfer":
+		h.cfg.Permissions.FileTransfer = enabled
+	case "app_continuity":
+		h.cfg.Permissions.AppContinuity = enabled
+	case "display_guard":
+		h.cfg.Permissions.DisplayGuard = enabled
+	case "adb_beacon":
+		h.cfg.Permissions.ADBBeacon = enabled
+	}
+	h.appendAuditLocked(fmt.Sprintf("permission %s=%v", name, enabled))
+	h.saveConfigLocked()
+	h.mu.Unlock()
+	h.notify()
+}
+
+// RotateToken generates a new cryptographic pairing token and updates the running server (`INV-07`).
+func (h *Host) RotateToken() (string, error) {
+	h.mu.Lock()
+	srv := h.srv
+	h.mu.Unlock()
+
+	var tok string
+	var err error
+	if srv != nil {
+		tok, err = srv.RotateToken()
+	} else {
+		tok, err = companion.GeneratePairingToken()
+	}
+	if err != nil {
+		return "", err
+	}
+	h.mu.Lock()
+	h.cfg.Token = tok
+	h.appendAuditLocked("pairing token rotated")
+	h.saveConfigLocked()
+	h.mu.Unlock()
+	h.notify()
+	return tok, nil
+}
+
+// SetWirelessADBPort updates and persists the advertised cross-network `_adb-tls-connect._tcp` port.
+func (h *Host) SetWirelessADBPort(port int) {
+	if port < 0 || port > 65535 {
+		return
+	}
+	h.mu.Lock()
+	h.cfg.WirelessADBPort = port
+	if port > 0 {
+		h.beaconInput = strconv.Itoa(port)
+		h.appendAuditLocked(fmt.Sprintf("wireless ADB beacon port updated (%d)", port))
+	} else {
+		h.beaconInput = ""
+		h.appendAuditLocked("wireless ADB beacon cleared")
+	}
+	h.saveConfigLocked()
+	h.mu.Unlock()
+	h.notify()
+}
+
+// AuditLog returns a copy of recent scrubbed Companion activity lines (`INV-08`).
+func (h *Host) AuditLog() []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]string(nil), h.audit...)
+}

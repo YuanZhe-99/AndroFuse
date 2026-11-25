@@ -1,0 +1,172 @@
+// Package companion defines the encrypted TLS 1.3 NDJSON protocol shared between
+// the Windows desktop AndroFuse client and the optional Android Companion APK (`INV-07`, `INV-09`, `INV-11`).
+package companion
+
+import (
+	"crypto/rand"
+	"encoding/json"
+	"errors"
+	"path"
+	"path/filepath"
+	"strings"
+)
+
+const (
+	// ProtocolVersion is the NDJSON Companion wire schema version.
+	ProtocolVersion = 1
+	// DefaultPort is the default TLS port the Android Companion listens on.
+	DefaultPort = 27189
+	// MaxFilePushBytes caps a single inlined FilePushRequest payload at 16 MiB.
+	MaxFilePushBytes = 16 << 20
+)
+
+// Permissions controls graded, opt-in Companion capabilities enforced server-side (`INV-09`).
+type Permissions struct {
+	Telemetry     bool `json:"telemetry"`
+	Clipboard     bool `json:"clipboard"`
+	Notifications bool `json:"notifications"`
+	FileTransfer  bool `json:"file_transfer"`
+	AppContinuity bool `json:"app_continuity"`
+	DisplayGuard  bool `json:"display_guard"`
+	ADBBeacon     bool `json:"adb_beacon"`
+}
+
+// DefaultPermissions returns conservative defaults (telemetry enabled; sensitive hooks opt-in).
+func DefaultPermissions() Permissions {
+	return Permissions{
+		Telemetry: true,
+	}
+}
+
+// Envelope is one newline-delimited JSON RPC frame over the TLS 1.3 Companion socket.
+type Envelope struct {
+	ID      string          `json:"id,omitempty"`
+	Type    string          `json:"type"`
+	Payload json.RawMessage `json:"payload,omitempty"`
+	Error   string          `json:"error,omitempty"`
+}
+
+// AuthRequest authenticates a desktop client against the Companion server using the pairing token.
+type AuthRequest struct {
+	Token           string `json:"token"`
+	ClientName      string `json:"client_name,omitempty"`
+	ProtocolVersion int    `json:"protocol_version"`
+}
+
+// AuthResponse summarizes device identity, certificate fingerprint, and active permissions.
+type AuthResponse struct {
+	OK              bool        `json:"ok"`
+	DeviceModel     string      `json:"device_model"`
+	AndroidRelease  string      `json:"android_release"`
+	SDKInt          int         `json:"sdk_int"`
+	CertFingerprint string      `json:"cert_fingerprint"`
+	Permissions     Permissions `json:"permissions"`
+	Error           string      `json:"error,omitempty"`
+}
+
+// DeviceStatus reports battery, thermal, foreground app, and cross-network ADB beacon state.
+type DeviceStatus struct {
+	BatteryPct        int     `json:"battery_pct"`
+	Charging          bool    `json:"charging"`
+	TempC             float64 `json:"temp_c"`
+	ThermalWarning    bool    `json:"thermal_warning"`
+	NetworkType       string  `json:"network_type"`
+	ForegroundPackage string  `json:"foreground_package,omitempty"`
+	WirelessADBPort   int     `json:"wireless_adb_port,omitempty"`
+	Timestamp         int64   `json:"timestamp"`
+}
+
+// NotificationEvent represents one synced Android notification.
+type NotificationEvent struct {
+	ID        string `json:"id"`
+	Package   string `json:"package"`
+	AppLabel  string `json:"app_label"`
+	Title     string `json:"title"`
+	Text      string `json:"text"`
+	Timestamp int64  `json:"timestamp"`
+	CanReply  bool   `json:"can_reply"`
+}
+
+// NotificationReply delivers an inline notification reply from desktop back to Android.
+type NotificationReply struct {
+	ID        string `json:"id"`
+	ReplyText string `json:"reply_text"`
+}
+
+// ClipboardMessage carries bidirectional clipboard text.
+type ClipboardMessage struct {
+	Seq    uint64 `json:"seq"`
+	Text   string `json:"text"`
+	Source string `json:"source,omitempty"`
+}
+
+// AppContinuityRequest asks Companion to report/hand off foreground apps between phone and PC.
+type AppContinuityRequest struct {
+	Action  string `json:"action"` // "handoff_to_pc" | "return_to_phone"
+	Package string `json:"package,omitempty"`
+}
+
+// AppContinuityResponse acknowledges a continuity action and returns the resolved package.
+type AppContinuityResponse struct {
+	OK      bool   `json:"ok"`
+	Package string `json:"package,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
+// FilePushRequest transfers one file payload alongside its SHA-256 integrity digest.
+type FilePushRequest struct {
+	Name       string `json:"name"`
+	Size       int64  `json:"size"`
+	SHA256     string `json:"sha256"`
+	DataBase64 string `json:"data_base64"`
+}
+
+// FilePushResponse confirms sanitized file persistence and checksum verification on Android.
+type FilePushResponse struct {
+	SavedPath    string `json:"saved_path"`
+	SHA256       string `json:"sha256"`
+	BytesWritten int64  `json:"bytes_written"`
+}
+
+// DisplayGuardRequest invokes virtual display cleanup (`INV-03`).
+type DisplayGuardRequest struct {
+	Action string `json:"action"` // "cleanup_orphans"
+}
+
+// DisplayGuardResponse reports how many stale virtual/overlay display entries were cleared.
+type DisplayGuardResponse struct {
+	CleanedCount int    `json:"cleaned_count"`
+	Message      string `json:"message,omitempty"`
+}
+
+// SanitizeFileName enforces a single clean basename without traversal (`..`, separators, or NUL).
+func SanitizeFileName(name string) (string, error) {
+	if name == "" || strings.ContainsRune(name, '\x00') {
+		return "", errors.New("invalid empty or NUL file name")
+	}
+	if strings.Contains(name, "..") || strings.ContainsAny(name, "/\\") {
+		return "", errors.New("path traversal or directory separator rejected")
+	}
+	base := path.Base(strings.TrimSpace(name))
+	base = filepath.Base(base)
+	if base == "" || base == "." || base == ".." {
+		return "", errors.New("invalid file name")
+	}
+	return base, nil
+}
+
+const tokenAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+// GeneratePairingToken generates a cryptographically random 8-character pairing token (`INV-07`).
+func GeneratePairingToken() (string, error) {
+	var raw [8]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	b.Grow(len(raw))
+	for _, v := range raw {
+		b.WriteByte(tokenAlphabet[int(v)%len(tokenAlphabet)])
+	}
+	return b.String(), nil
+}

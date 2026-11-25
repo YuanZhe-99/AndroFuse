@@ -19,6 +19,8 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/YuanZhe-99/AndroFuse/internal/adb"
+	"github.com/YuanZhe-99/AndroFuse/internal/androidhost"
+	"github.com/YuanZhe-99/AndroFuse/internal/companion"
 	"github.com/YuanZhe-99/AndroFuse/internal/dex"
 	"github.com/YuanZhe-99/AndroFuse/internal/version"
 	"github.com/YuanZhe-99/AndroFuse/internal/vm"
@@ -71,6 +73,11 @@ type App struct {
 	appIcons        map[string]*ui.Bitmap
 	dexRoutes       map[string]dex.RoutePreference
 	vmStatus        vm.Status
+	compAddr        string
+	compToken       string
+	compConnected   bool
+	compStatus      companion.DeviceStatus
+	compNotice      string
 	sessions        map[string]*SessionWindow
 }
 
@@ -504,12 +511,19 @@ func (a *App) pageBody(c *ui.Context, k tokens) {
 }
 
 func (a *App) devicesPage(c *ui.Context, k tokens) {
+	if runtime.GOOS == "android" {
+		androidhost.RenderCompanionView(c, a.ensureAndroidHost())
+		return
+	}
 	a.mu.Lock()
 	scanning := a.scanningDevices
 	devs := append([]DiscoveredDevice(nil), a.devices...)
 	mdns := append([]adb.MDNSService(nil), a.mdnsServices...)
 	notice := a.deviceNotice
 	vmSt := a.vmStatus
+	compConnected := a.compConnected
+	compSt := a.compStatus
+	compNotice := a.compNotice
 	sessList := make([]*SessionWindow, 0, len(a.sessions))
 	for _, s := range a.sessions {
 		sessList = append(sessList, s)
@@ -608,6 +622,7 @@ func (a *App) devicesPage(c *ui.Context, k tokens) {
 		})
 
 		a.vmCard(c, k, vmSt)
+		a.companionCard(c, k, compConnected, compSt, compNotice)
 
 		if len(devs) == 0 {
 			card(c.Key("devices-empty")).Children(func() {
@@ -848,6 +863,62 @@ func (a *App) vmCard(c *ui.Context, k tokens, st vm.Status) {
 				}
 			}
 		})
+	})
+}
+
+func (a *App) companionCard(c *ui.Context, k tokens, connected bool, st companion.DeviceStatus, notice string) {
+	card(c.Key("companion-card")).Children(func() {
+		ui.Row(c.Key("companion-head")).FillWidth().AlignItems(ui.Center).Gap(8).Wrap().Children(func() {
+			ui.Icon(c, iconWifi).Size(18, 18).TextColor(k.brand)
+			ui.Text(c, L.CompanionCardTitle()).Bold().FontSize(sizeHeading).Grow(1)
+			if connected {
+				fg := st.ForegroundPackage
+				if fg == "" {
+					fg = "--"
+				}
+				summary := L.CompanionConnectedSummary(st.BatteryPct, fmt.Sprintf("%.1f", st.TempC), fg)
+				ui.Row(c.Key("comp-status-pill")).Padding(badgePadV, badgePadH).Radius(pillRadius).Background(k.brandSoft).Children(func() {
+					ui.Text(c, summary).FontSize(sizeSmall).TextColor(k.good).Bold().SingleLine()
+				})
+			}
+		})
+		ui.Text(c, L.CompanionCardDesc()).FontSize(sizeSmall).TextColor(k.muted)
+
+		if notice != "" {
+			ui.Text(c, notice).FontSize(sizeSmall).TextColor(k.warn)
+		}
+
+		ui.Row(c.Key("comp-connect-row")).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
+			ui.TextInput(c.Key("comp-addr"), &a.compAddr).Placeholder(L.CompanionAddrHint()).Grow(2)
+			ui.TextInput(c.Key("comp-token"), &a.compToken).Placeholder(L.CompanionTokenHint()).Grow(1)
+			if connected {
+				if ui.Button(c.Key("btn-comp-disc"), L.CompanionDisconnectBtn()).Clicked() {
+					a.DisconnectCompanion()
+				}
+			} else {
+				if ui.Button(c.Key("btn-comp-conn"), L.CompanionConnectBtn()).Clicked() {
+					a.ConnectCompanion(a.compAddr, a.compToken)
+				}
+			}
+		})
+
+		if connected {
+			ui.Row(c.Key("comp-actions-row")).Gap(8).Wrap().AlignItems(ui.Center).Children(func() {
+				if st.ForegroundPackage != "" {
+					if ui.Button(c.Key("btn-comp-cont"), L.CompanionContinueApp()).Clicked() {
+						a.ContinueCompanionApp()
+					}
+				}
+				if st.WirelessADBPort > 0 {
+					if ui.Button(c.Key("btn-comp-beacon"), L.CompanionConnectBeaconADB()).Clicked() {
+						a.ConnectCompanionBeaconADB()
+					}
+				}
+				if ui.Button(c.Key("btn-comp-guard"), L.CompanionRunDisplayGuard()).Clicked() {
+					a.RunCompanionDisplayGuard()
+				}
+			})
+		}
 	})
 }
 

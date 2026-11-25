@@ -18,6 +18,8 @@
 | `internal/core` | `LoadLibraryEx` / `purego` loader for `androfuse_core` C ABI v4, `NV12Ring` zero-alloc frames, and `AudioPlayer` |
 | `internal/localapi` | Per-user AF_UNIX NDJSON IPC server (`SIO_AF_UNIX_GETPEERPID` + Windows SID peer verification) exposing `devices` (including `unified_devices`) and `vm.*` control |
 | `internal/vm` | On-demand downloadable headless Android VM manager (`%LOCALAPPDATA%\AndroFuse\vm`, native `arm64-v8a` / `x86_64`, `INV-03`, `INV-10`) |
+| `internal/companion` | Encrypted TLS 1.3 NDJSON Companion protocol shared by desktop and Android APK (telemetry, clipboard, notifications, files, continuity, display guard, ADB beacon; `INV-07`, `INV-09`) |
+| `internal/androidhost` | Optional Android Companion host service, persistent config, sysfs battery/thermal probe, audit log, and MyGo graded-permission UI (`INV-09`, `INV-11`) |
 | `internal/adb` | Argument-vector ADB client, `MergeDevices` USB+TLS Wi-Fi deduplication (`INV-02`), mDNS TLS wireless connect/pair, `MaskSerial`/`MaskEndpoint` scrubbing, `emulator-*` classification, `--user 0` probes & app list |
 | `internal/lease` | Atomic `leases.json` ledger guaranteeing cleanup of virtual displays, DeX loopbacks, and port forwards (`INV-03`) |
 | `internal/scrcpy` | `scrcpy-server v5.0.1` wire framing, interactive touch/mouse/scroll/keyboard/flex-display sessions, raw PCM audio, `MP4Recorder`, and offline replay fixtures |

@@ -1455,3 +1455,315 @@ func TrayQuit() string { return In(i18n.Locale()).TrayQuit() }
 func (msgs Messages) TrayQuit() string {
 	return Catalog.Format(msgs.locale, "TrayQuit", nil)
 }
+
+// CompanionTitle says "AndroFuse Companion (Android)"
+// in the language the app shows.
+func CompanionTitle() string { return In(i18n.Locale()).CompanionTitle() }
+
+// CompanionTitle says "AndroFuse Companion (Android)"
+// in the language of msgs.
+func (msgs Messages) CompanionTitle() string {
+	return Catalog.Format(msgs.locale, "CompanionTitle", nil)
+}
+
+// CompanionSubtitle says "Optional TLS 1.3 companion for telemetry, notifications, files, continuity, and cross-network ADB discovery."
+// in the language the app shows.
+func CompanionSubtitle() string { return In(i18n.Locale()).CompanionSubtitle() }
+
+// CompanionSubtitle says "Optional TLS 1.3 companion for telemetry, notifications, files, continuity, and cross-network ADB discovery."
+// in the language of msgs.
+func (msgs Messages) CompanionSubtitle() string {
+	return Catalog.Format(msgs.locale, "CompanionSubtitle", nil)
+}
+
+// CompanionStatusRunning says "Listening on port {port}"
+// in the language the app shows.
+func CompanionStatusRunning(port int) string { return In(i18n.Locale()).CompanionStatusRunning(port) }
+
+// CompanionStatusRunning says "Listening on port {port}"
+// in the language of msgs.
+func (msgs Messages) CompanionStatusRunning(port int) string {
+	return Catalog.Format(msgs.locale, "CompanionStatusRunning", map[string]any{"port": port})
+}
+
+// CompanionStatusStopped says "Service Stopped"
+// in the language the app shows.
+func CompanionStatusStopped() string { return In(i18n.Locale()).CompanionStatusStopped() }
+
+// CompanionStatusStopped says "Service Stopped"
+// in the language of msgs.
+func (msgs Messages) CompanionStatusStopped() string {
+	return Catalog.Format(msgs.locale, "CompanionStatusStopped", nil)
+}
+
+// CompanionActionStart says "Start Companion Service"
+// in the language the app shows.
+func CompanionActionStart() string { return In(i18n.Locale()).CompanionActionStart() }
+
+// CompanionActionStart says "Start Companion Service"
+// in the language of msgs.
+func (msgs Messages) CompanionActionStart() string {
+	return Catalog.Format(msgs.locale, "CompanionActionStart", nil)
+}
+
+// CompanionActionStop says "Stop Service"
+// in the language the app shows.
+func CompanionActionStop() string { return In(i18n.Locale()).CompanionActionStop() }
+
+// CompanionActionStop says "Stop Service"
+// in the language of msgs.
+func (msgs Messages) CompanionActionStop() string {
+	return Catalog.Format(msgs.locale, "CompanionActionStop", nil)
+}
+
+// CompanionActionRotate says "Rotate Token"
+// in the language the app shows.
+func CompanionActionRotate() string { return In(i18n.Locale()).CompanionActionRotate() }
+
+// CompanionActionRotate says "Rotate Token"
+// in the language of msgs.
+func (msgs Messages) CompanionActionRotate() string {
+	return Catalog.Format(msgs.locale, "CompanionActionRotate", nil)
+}
+
+// CompanionTokenLabel says "Pairing Token"
+// in the language the app shows.
+func CompanionTokenLabel() string { return In(i18n.Locale()).CompanionTokenLabel() }
+
+// CompanionTokenLabel says "Pairing Token"
+// in the language of msgs.
+func (msgs Messages) CompanionTokenLabel() string {
+	return Catalog.Format(msgs.locale, "CompanionTokenLabel", nil)
+}
+
+// CompanionFingerprintLabel says "TLS SHA-256 Fingerprint"
+// in the language the app shows.
+func CompanionFingerprintLabel() string { return In(i18n.Locale()).CompanionFingerprintLabel() }
+
+// CompanionFingerprintLabel says "TLS SHA-256 Fingerprint"
+// in the language of msgs.
+func (msgs Messages) CompanionFingerprintLabel() string {
+	return Catalog.Format(msgs.locale, "CompanionFingerprintLabel", nil)
+}
+
+// CompanionPermissionsTitle says "Graded Opt-In Permissions"
+// in the language the app shows.
+func CompanionPermissionsTitle() string { return In(i18n.Locale()).CompanionPermissionsTitle() }
+
+// CompanionPermissionsTitle says "Graded Opt-In Permissions"
+// in the language of msgs.
+func (msgs Messages) CompanionPermissionsTitle() string {
+	return Catalog.Format(msgs.locale, "CompanionPermissionsTitle", nil)
+}
+
+// PermTelemetry says "Battery, Thermal & Network Telemetry"
+// in the language the app shows.
+func PermTelemetry() string { return In(i18n.Locale()).PermTelemetry() }
+
+// PermTelemetry says "Battery, Thermal & Network Telemetry"
+// in the language of msgs.
+func (msgs Messages) PermTelemetry() string {
+	return Catalog.Format(msgs.locale, "PermTelemetry", nil)
+}
+
+// PermClipboard says "Clipboard Sync Assist"
+// in the language the app shows.
+func PermClipboard() string { return In(i18n.Locale()).PermClipboard() }
+
+// PermClipboard says "Clipboard Sync Assist"
+// in the language of msgs.
+func (msgs Messages) PermClipboard() string {
+	return Catalog.Format(msgs.locale, "PermClipboard", nil)
+}
+
+// PermNotifications says "Notification Sync & Inline Reply"
+// in the language the app shows.
+func PermNotifications() string { return In(i18n.Locale()).PermNotifications() }
+
+// PermNotifications says "Notification Sync & Inline Reply"
+// in the language of msgs.
+func (msgs Messages) PermNotifications() string {
+	return Catalog.Format(msgs.locale, "PermNotifications", nil)
+}
+
+// PermFileTransfer says "SAF File Push & Drop"
+// in the language the app shows.
+func PermFileTransfer() string { return In(i18n.Locale()).PermFileTransfer() }
+
+// PermFileTransfer says "SAF File Push & Drop"
+// in the language of msgs.
+func (msgs Messages) PermFileTransfer() string {
+	return Catalog.Format(msgs.locale, "PermFileTransfer", nil)
+}
+
+// PermAppContinuity says "Foreground App Handoff"
+// in the language the app shows.
+func PermAppContinuity() string { return In(i18n.Locale()).PermAppContinuity() }
+
+// PermAppContinuity says "Foreground App Handoff"
+// in the language of msgs.
+func (msgs Messages) PermAppContinuity() string {
+	return Catalog.Format(msgs.locale, "PermAppContinuity", nil)
+}
+
+// PermDisplayGuard says "Orphan Virtual Display Cleanup"
+// in the language the app shows.
+func PermDisplayGuard() string { return In(i18n.Locale()).PermDisplayGuard() }
+
+// PermDisplayGuard says "Orphan Virtual Display Cleanup"
+// in the language of msgs.
+func (msgs Messages) PermDisplayGuard() string {
+	return Catalog.Format(msgs.locale, "PermDisplayGuard", nil)
+}
+
+// PermADBBeacon says "Cross-Network TLS ADB Port Beacon"
+// in the language the app shows.
+func PermADBBeacon() string { return In(i18n.Locale()).PermADBBeacon() }
+
+// PermADBBeacon says "Cross-Network TLS ADB Port Beacon"
+// in the language of msgs.
+func (msgs Messages) PermADBBeacon() string {
+	return Catalog.Format(msgs.locale, "PermADBBeacon", nil)
+}
+
+// CompanionBeaconTitle says "Cross-Network Wireless ADB Beacon"
+// in the language the app shows.
+func CompanionBeaconTitle() string { return In(i18n.Locale()).CompanionBeaconTitle() }
+
+// CompanionBeaconTitle says "Cross-Network Wireless ADB Beacon"
+// in the language of msgs.
+func (msgs Messages) CompanionBeaconTitle() string {
+	return Catalog.Format(msgs.locale, "CompanionBeaconTitle", nil)
+}
+
+// CompanionBeaconHint says "Dynamic _adb-tls-connect port"
+// in the language the app shows.
+func CompanionBeaconHint() string { return In(i18n.Locale()).CompanionBeaconHint() }
+
+// CompanionBeaconHint says "Dynamic _adb-tls-connect port"
+// in the language of msgs.
+func (msgs Messages) CompanionBeaconHint() string {
+	return Catalog.Format(msgs.locale, "CompanionBeaconHint", nil)
+}
+
+// CompanionBeaconSave says "Update Port"
+// in the language the app shows.
+func CompanionBeaconSave() string { return In(i18n.Locale()).CompanionBeaconSave() }
+
+// CompanionBeaconSave says "Update Port"
+// in the language of msgs.
+func (msgs Messages) CompanionBeaconSave() string {
+	return Catalog.Format(msgs.locale, "CompanionBeaconSave", nil)
+}
+
+// CompanionAuditTitle says "Recent Security & Control Audit"
+// in the language the app shows.
+func CompanionAuditTitle() string { return In(i18n.Locale()).CompanionAuditTitle() }
+
+// CompanionAuditTitle says "Recent Security & Control Audit"
+// in the language of msgs.
+func (msgs Messages) CompanionAuditTitle() string {
+	return Catalog.Format(msgs.locale, "CompanionAuditTitle", nil)
+}
+
+// CompanionCardTitle says "Android Companion & Cross-Network (Optional)"
+// in the language the app shows.
+func CompanionCardTitle() string { return In(i18n.Locale()).CompanionCardTitle() }
+
+// CompanionCardTitle says "Android Companion & Cross-Network (Optional)"
+// in the language of msgs.
+func (msgs Messages) CompanionCardTitle() string {
+	return Catalog.Format(msgs.locale, "CompanionCardTitle", nil)
+}
+
+// CompanionCardDesc says "Connect an optional AndroFuse APK over LAN, VPN, or EasyTier for telemetry, foreground app handoff, file push, and dy…"
+// in the language the app shows.
+func CompanionCardDesc() string { return In(i18n.Locale()).CompanionCardDesc() }
+
+// CompanionCardDesc says "Connect an optional AndroFuse APK over LAN, VPN, or EasyTier for telemetry, foreground app handoff, file push, and dy…"
+// in the language of msgs.
+func (msgs Messages) CompanionCardDesc() string {
+	return Catalog.Format(msgs.locale, "CompanionCardDesc", nil)
+}
+
+// CompanionAddrHint says "Companion host:port"
+// in the language the app shows.
+func CompanionAddrHint() string { return In(i18n.Locale()).CompanionAddrHint() }
+
+// CompanionAddrHint says "Companion host:port"
+// in the language of msgs.
+func (msgs Messages) CompanionAddrHint() string {
+	return Catalog.Format(msgs.locale, "CompanionAddrHint", nil)
+}
+
+// CompanionTokenHint says "Pairing token"
+// in the language the app shows.
+func CompanionTokenHint() string { return In(i18n.Locale()).CompanionTokenHint() }
+
+// CompanionTokenHint says "Pairing token"
+// in the language of msgs.
+func (msgs Messages) CompanionTokenHint() string {
+	return Catalog.Format(msgs.locale, "CompanionTokenHint", nil)
+}
+
+// CompanionConnectBtn says "Connect Companion"
+// in the language the app shows.
+func CompanionConnectBtn() string { return In(i18n.Locale()).CompanionConnectBtn() }
+
+// CompanionConnectBtn says "Connect Companion"
+// in the language of msgs.
+func (msgs Messages) CompanionConnectBtn() string {
+	return Catalog.Format(msgs.locale, "CompanionConnectBtn", nil)
+}
+
+// CompanionDisconnectBtn says "Disconnect Companion"
+// in the language the app shows.
+func CompanionDisconnectBtn() string { return In(i18n.Locale()).CompanionDisconnectBtn() }
+
+// CompanionDisconnectBtn says "Disconnect Companion"
+// in the language of msgs.
+func (msgs Messages) CompanionDisconnectBtn() string {
+	return Catalog.Format(msgs.locale, "CompanionDisconnectBtn", nil)
+}
+
+// CompanionContinueApp says "Continue App on PC"
+// in the language the app shows.
+func CompanionContinueApp() string { return In(i18n.Locale()).CompanionContinueApp() }
+
+// CompanionContinueApp says "Continue App on PC"
+// in the language of msgs.
+func (msgs Messages) CompanionContinueApp() string {
+	return Catalog.Format(msgs.locale, "CompanionContinueApp", nil)
+}
+
+// CompanionConnectBeaconADB says "Connect Beaconed TLS ADB"
+// in the language the app shows.
+func CompanionConnectBeaconADB() string { return In(i18n.Locale()).CompanionConnectBeaconADB() }
+
+// CompanionConnectBeaconADB says "Connect Beaconed TLS ADB"
+// in the language of msgs.
+func (msgs Messages) CompanionConnectBeaconADB() string {
+	return Catalog.Format(msgs.locale, "CompanionConnectBeaconADB", nil)
+}
+
+// CompanionRunDisplayGuard says "Run Display Guard"
+// in the language the app shows.
+func CompanionRunDisplayGuard() string { return In(i18n.Locale()).CompanionRunDisplayGuard() }
+
+// CompanionRunDisplayGuard says "Run Display Guard"
+// in the language of msgs.
+func (msgs Messages) CompanionRunDisplayGuard() string {
+	return Catalog.Format(msgs.locale, "CompanionRunDisplayGuard", nil)
+}
+
+// CompanionConnectedSummary says "Battery {batt}% · {temp}°C · Foreground: {pkg}"
+// in the language the app shows.
+func CompanionConnectedSummary(batt int, temp string, pkg string) string {
+	return In(i18n.Locale()).CompanionConnectedSummary(batt, temp, pkg)
+}
+
+// CompanionConnectedSummary says "Battery {batt}% · {temp}°C · Foreground: {pkg}"
+// in the language of msgs.
+func (msgs Messages) CompanionConnectedSummary(batt int, temp string, pkg string) string {
+	return Catalog.Format(msgs.locale, "CompanionConnectedSummary", map[string]any{"batt": batt, "temp": temp, "pkg": pkg})
+}

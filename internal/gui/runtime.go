@@ -5,8 +5,10 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -14,6 +16,8 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/YuanZhe-99/AndroFuse/internal/adb"
+	"github.com/YuanZhe-99/AndroFuse/internal/androidhost"
+	"github.com/YuanZhe-99/AndroFuse/internal/companion"
 	"github.com/YuanZhe-99/AndroFuse/internal/core"
 	"github.com/YuanZhe-99/AndroFuse/internal/dex"
 	"github.com/YuanZhe-99/AndroFuse/internal/lease"
@@ -66,12 +70,146 @@ type ActiveSessionSummary struct {
 }
 
 type guiRuntime struct {
-	coreMu     sync.Mutex
-	coreLib    *core.Lib
-	adbClient  *adb.Client
-	leaseStore *lease.Store
-	vmMgr      *vm.Manager
-	recoverRan bool
+	coreMu      sync.Mutex
+	coreLib     *core.Lib
+	adbClient   *adb.Client
+	leaseStore  *lease.Store
+	vmMgr       *vm.Manager
+	androidHost *androidhost.Host
+	compClient  *companion.Client
+	recoverRan  bool
+}
+
+func (a *App) ensureAndroidHost() *androidhost.Host {
+	a.rt.coreMu.Lock()
+	if a.rt.androidHost == nil {
+		a.rt.androidHost = androidhost.New(a.stateDir, func() {
+			a.update(func() {})
+		})
+	}
+	h := a.rt.androidHost
+	a.rt.coreMu.Unlock()
+	return h
+}
+
+// ConnectCompanion establishes an authenticated TLS 1.3 connection to an optional Android Companion APK.
+func (a *App) ConnectCompanion(addr, token string) {
+	addr = strings.TrimSpace(addr)
+	token = strings.TrimSpace(token)
+	a.update(func() { a.compNotice = "" })
+	if addr == "" || token == "" {
+		a.update(func() { a.compNotice = L.CompanionCardDesc() })
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		client, err := companion.Dial(ctx, addr, token, "")
+		if err != nil {
+			a.update(func() { a.compNotice = err.Error() })
+			return
+		}
+		st, _ := client.GetStatus(ctx)
+
+		a.rt.coreMu.Lock()
+		old := a.rt.compClient
+		a.rt.compClient = client
+		a.rt.coreMu.Unlock()
+		if old != nil {
+			_ = old.Close()
+		}
+		a.update(func() {
+			a.compConnected = true
+			a.compStatus = st
+			a.compNotice = ""
+		})
+	}()
+}
+
+// DisconnectCompanion closes any active TLS 1.3 connection to the Android Companion APK.
+func (a *App) DisconnectCompanion() {
+	go func() {
+		a.rt.coreMu.Lock()
+		c := a.rt.compClient
+		a.rt.compClient = nil
+		a.rt.coreMu.Unlock()
+		if c != nil {
+			_ = c.Close()
+		}
+		a.update(func() {
+			a.compConnected = false
+			a.compStatus = companion.DeviceStatus{}
+			a.compNotice = ""
+		})
+	}()
+}
+
+// ContinueCompanionApp asks Companion for the active foreground app and launches it in an Independent App Window.
+func (a *App) ContinueCompanionApp() {
+	a.rt.coreMu.Lock()
+	c := a.rt.compClient
+	a.rt.coreMu.Unlock()
+	if c == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		res, err := c.RequestContinuity(ctx, "handoff_to_pc", "")
+		cancel()
+		if err != nil {
+			a.update(func() { a.compNotice = err.Error() })
+			return
+		}
+		if res.Package == "" {
+			return
+		}
+		a.mu.Lock()
+		var target *DiscoveredDevice
+		if len(a.devices) > 0 && a.devices[0].Target.State == "device" {
+			cp := a.devices[0]
+			target = &cp
+		}
+		a.mu.Unlock()
+		if target != nil {
+			a.LaunchAppWindow(*target, adb.AppEntry{Package: res.Package, Label: res.Package, Resizeable: true})
+		}
+	}()
+}
+
+// ConnectCompanionBeaconADB connects to the TLS wireless ADB port advertised by Companion over VPN/LAN.
+func (a *App) ConnectCompanionBeaconADB() {
+	a.mu.Lock()
+	addr := strings.TrimSpace(a.compAddr)
+	port := a.compStatus.WirelessADBPort
+	a.mu.Unlock()
+	if addr == "" || port <= 0 {
+		return
+	}
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil || host == "" {
+		return
+	}
+	a.ConnectWirelessTLS(net.JoinHostPort(host, strconv.Itoa(port)))
+}
+
+// RunCompanionDisplayGuard invokes orphan display cleanup on the connected Companion APK (`INV-03`).
+func (a *App) RunCompanionDisplayGuard() {
+	a.rt.coreMu.Lock()
+	c := a.rt.compClient
+	a.rt.coreMu.Unlock()
+	if c == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		res, err := c.RunDisplayGuard(ctx)
+		cancel()
+		if err != nil {
+			a.update(func() { a.compNotice = err.Error() })
+			return
+		}
+		a.update(func() { a.compNotice = res.Message })
+	}()
 }
 
 func (a *App) ensureVMManager() *vm.Manager {
@@ -944,7 +1082,16 @@ func (a *App) CloseAllSessions() {
 		a.rt.coreLib = nil
 	}
 	vmMgr := a.rt.vmMgr
+	compClient := a.rt.compClient
+	a.rt.compClient = nil
+	aHost := a.rt.androidHost
 	a.rt.coreMu.Unlock()
+	if compClient != nil {
+		_ = compClient.Close()
+	}
+	if aHost != nil {
+		_ = aHost.StopServer()
+	}
 	if vmMgr != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 		_ = vmMgr.Stop(ctx)

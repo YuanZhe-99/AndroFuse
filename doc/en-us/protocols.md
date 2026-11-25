@@ -42,3 +42,8 @@ AndroFuse implements direct wire-protocol engines in Rust (`core/androfuse-core`
 
 - Offline tests replay sanitized 64×48 H.264 packets (`internal/scrcpy/testdata/fold8_scrcpy_session.json`) over loopback TCP through Media Foundation NV12 → `ui.Bitmap.UpdateYUV` (`ui.NewTester`), containing zero phone screen imagery or serials.
 - Live device validation (`Spikes S1, S2, S4`) is guarded behind `$env:ANDROFUSE_LIVE_DEVICE = "1"` in `internal/scrcpy` and `internal/dex` and verifies clean display/forward teardown automatically.
+
+## 6. Optional Android Companion TLS 1.3 Protocol (`internal/companion`)
+
+- **Authenticated Transport (`INV-07`)**: `internal/androidhost` hosts an optional ECDSA P-256 TLS 1.3 server on port `27189` whose SHA-256 certificate fingerprint is pinned by callers; every connection must authenticate its first `auth` frame via constant-time pairing token check (`subtle.ConstantTimeCompare`).
+- **Graded Opt-In Permissions & Cross-Network ADB Beacon (`INV-09`, `INV-11`)**: `status.get`, `clipboard.set`, `notification.reply`, `app.continuity`, `file.push` (traversal-rejected + SHA-256 verified), `display.guard`, and dynamic `_adb-tls-connect._tcp` port advertisement are gated individually on user switches inside Android Companion, while base USB/Wi-Fi mirroring and DeX remain 100% functional without any APK installed.
