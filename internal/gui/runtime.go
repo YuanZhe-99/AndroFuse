@@ -22,16 +22,36 @@ import (
 	L "github.com/YuanZhe-99/AndroFuse/locales"
 )
 
-// DiscoveredDevice holds inspected metadata, DeX capabilities, and user-0 launchable apps
-// for one online ADB transport (USB wired, TLS Wi-Fi wireless, or Android Emulator).
+// DiscoveredDevice holds inspected metadata, collapsed transports (INV-02),
+// DeX routing capabilities (INV-06), and user-0 launchable apps for one physical device.
 type DiscoveredDevice struct {
-	Target   adb.Device
-	Profile  adb.DeviceProfile
-	DexProbe dex.ProbeReport
-	TruthDeX dex.TruthVerdict
-	Apps     []adb.AppEntry
-	Probed   bool
-	ProbeErr string
+	HardwareHash string
+	Target       adb.Device
+	Transports   []adb.Device
+	Profile      adb.DeviceProfile
+	DexProbe     dex.ProbeReport
+	TruthDeX     dex.TruthVerdict
+	Route        dex.RoutePlan
+	Apps         []adb.AppEntry
+	Probed       bool
+	ProbeErr     string
+}
+
+// EncoderHeadroom computes hardware encoder stream usage vs probed limit (`INV-01`).
+//
+// Notes: Defaults to 4 concurrent streams when a device XML omits `concurrent-instances`.
+func EncoderHeadroom(prof adb.DeviceProfile, activeStreams int) (used, limit int, atLimit, nearLimit bool) {
+	limit = prof.AVCEncoderMax
+	if limit <= 0 {
+		limit = 4
+	}
+	if activeStreams < 0 {
+		activeStreams = 0
+	}
+	used = activeStreams
+	atLimit = used >= limit
+	nearLimit = !atLimit && used >= limit-1
+	return used, limit, atLimit, nearLimit
 }
 
 // ActiveSessionSummary describes an open SessionWindow for the dashboard strip.
@@ -123,7 +143,125 @@ func (a *App) recoverStaleLeases(ctx context.Context, client *adb.Client, store 
 	}
 }
 
-// RefreshDevices scans wired USB, TLS Wi-Fi ADB, Emulator, and mDNS Wireless Debugging services.
+func (a *App) dexRoutePref(hwHash string) dex.RoutePreference {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.dexRoutes != nil {
+		if pref, ok := a.dexRoutes[hwHash]; ok && pref != "" {
+			return pref
+		}
+	}
+	return dex.RouteAuto
+}
+
+func (a *App) setDexRoutePref(hwHash string, pref dex.RoutePreference) {
+	if hwHash == "" {
+		return
+	}
+	a.mu.Lock()
+	if a.dexRoutes == nil {
+		a.dexRoutes = make(map[string]dex.RoutePreference)
+	}
+	a.dexRoutes[hwHash] = pref
+	for i := range a.devices {
+		if a.devices[i].HardwareHash == hwHash {
+			d := &a.devices[i]
+			d.Route = dex.SelectRoute(d.Profile, d.DexProbe, d.Target.Transport, pref)
+		}
+	}
+	w := a.window
+	a.mu.Unlock()
+	if w != nil {
+		w.Update(func() {})
+	}
+}
+
+func (a *App) activeStreamCountFor(hwHash string) int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if hwHash == "" {
+		return len(a.sessions)
+	}
+	n := 0
+	for _, sw := range a.sessions {
+		sw.mu.Lock()
+		match := sw.spec.DeviceKey == hwHash
+		sw.mu.Unlock()
+		if match {
+			n++
+		}
+	}
+	return n
+}
+
+// findLiveTransportFor finds an online ADB transport matching hardwareHash,
+// preferring an alternate transport whose Serial differs from excludeSerial (`INV-02`).
+func (a *App) findLiveTransportFor(ctx context.Context, client *adb.Client, hardwareHash, excludeSerial string) (adb.Device, bool) {
+	if client == nil || hardwareHash == "" {
+		return adb.Device{}, false
+	}
+	devs, err := client.Devices(ctx)
+	if err != nil {
+		return adb.Device{}, false
+	}
+
+	known := make(map[string]string)
+	a.mu.Lock()
+	for _, dev := range a.devices {
+		for _, tr := range dev.Transports {
+			known[tr.Serial] = dev.HardwareHash
+		}
+		if dev.Target.Serial != "" {
+			known[dev.Target.Serial] = dev.HardwareHash
+		}
+	}
+	a.mu.Unlock()
+
+	var altCands []adb.Device
+	var sameCands []adb.Device
+	for _, d := range devs {
+		if d.State != "device" {
+			continue
+		}
+		match := d.DeviceHash == hardwareHash
+		if !match {
+			if hw, ok := known[d.Serial]; ok {
+				match = hw == hardwareHash
+			} else {
+				pCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
+				prof, pErr := client.ProbeDevice(pCtx, d.Serial)
+				cancel()
+				if pErr == nil && (prof.HardwareHash == hardwareHash || prof.DeviceHash == hardwareHash) {
+					match = true
+				}
+			}
+		}
+		if !match {
+			continue
+		}
+		if d.Serial != excludeSerial {
+			altCands = append(altCands, d)
+		} else {
+			sameCands = append(sameCands, d)
+		}
+	}
+	if len(altCands) > 0 {
+		best := altCands[0]
+		for _, c := range altCands[1:] {
+			if adb.TransportPriority(c.Transport) < adb.TransportPriority(best.Transport) {
+				best = c
+			}
+		}
+		return best, true
+	}
+	if len(sameCands) > 0 {
+		return sameCands[0], true
+	}
+	return adb.Device{}, false
+}
+
+// RefreshDevices scans wired USB, TLS Wi-Fi ADB, Emulator, and mDNS Wireless Debugging services,
+// deduplicating multi-transport entries for the same physical device (`INV-02`).
 func (a *App) RefreshDevices() {
 	a.mu.Lock()
 	if a.scanningDevices {
@@ -156,47 +294,67 @@ func (a *App) RefreshDevices() {
 		}
 		a.rt.coreMu.Unlock()
 
-		var inspected []DiscoveredDevice
-		decodedIcons := make(map[string]*ui.Bitmap)
+		profiles := make(map[string]adb.DeviceProfile, len(devs))
+		probeErrs := make(map[string]string, len(devs))
 		for _, d := range devs {
-			item := DiscoveredDevice{
-				Target: d,
+			if d.State != "device" {
+				continue
 			}
-			if d.State == "device" {
-				prof, pErr := client.ProbeDevice(ctx, d.Serial)
-				if pErr != nil {
-					item.ProbeErr = pErr.Error()
-				} else {
-					item.Profile = prof
-					item.Probed = true
-					if strings.EqualFold(prof.Manufacturer, "samsung") && d.Transport != adb.TransportEmulator {
-						if rep, rErr := dex.PushAndProbe(ctx, client, d.Serial); rErr == nil {
-							item.DexProbe = rep
-							item.TruthDeX = dex.EvaluateTruth(prof, rep, "AndroFuseDeX", dex.BackendADBLoopback)
-						} else {
-							item.TruthDeX = dex.EvaluateTruth(prof, dex.ProbeReport{}, "", dex.BackendVirtualFallback)
-						}
+			prof, pErr := client.ProbeDevice(ctx, d.Serial)
+			if pErr != nil {
+				probeErrs[d.Serial] = pErr.Error()
+			} else {
+				profiles[d.Serial] = prof
+			}
+		}
+
+		unified := adb.MergeDevices(devs, profiles)
+		inspected := make([]DiscoveredDevice, 0, len(unified))
+		decodedIcons := make(map[string]*ui.Bitmap)
+		for _, u := range unified {
+			d := u.Primary
+			item := DiscoveredDevice{
+				HardwareHash: u.HardwareHash,
+				Target:       d,
+				Transports:   u.Transports,
+				Profile:      u.Profile,
+				Probed:       u.Probed,
+				ProbeErr:     probeErrs[d.Serial],
+			}
+			if d.State == "device" && item.Probed {
+				if strings.EqualFold(item.Profile.Manufacturer, "samsung") && d.Transport != adb.TransportEmulator {
+					if rep, rErr := dex.PushAndProbe(ctx, client, d.Serial); rErr == nil {
+						item.DexProbe = rep
+						item.TruthDeX = dex.EvaluateTruth(item.Profile, rep, "AndroFuseDeX", dex.BackendADBLoopback)
 					} else {
-						item.TruthDeX = dex.EvaluateTruth(prof, dex.ProbeReport{}, "", dex.BackendVirtualFallback)
+						item.TruthDeX = dex.EvaluateTruth(item.Profile, dex.ProbeReport{}, "", dex.BackendVirtualFallback)
 					}
-					iconDir := filepath.Join(a.stateDir, "icon-cache", d.DeviceHash)
-					if a.stateDir == "" {
-						iconDir = filepath.Join(os.TempDir(), "androfuse-icon-cache", d.DeviceHash)
-					}
-					apps, aErr := dex.ListAppsWithIcons(ctx, client, d.Serial, iconDir)
-					if aErr != nil {
-						apps, aErr = client.ListLaunchableApps(ctx, d.Serial)
-					}
-					if aErr == nil {
-						item.Apps = apps
-						for _, ap := range apps {
-							if ap.IconPath == "" || decodedIcons[ap.IconPath] != nil {
-								continue
-							}
-							if raw, rErr := os.ReadFile(ap.IconPath); rErr == nil {
-								if bmp, bErr := ui.DecodeBitmap(raw); bErr == nil {
-									decodedIcons[ap.IconPath] = bmp
-								}
+				} else {
+					item.TruthDeX = dex.EvaluateTruth(item.Profile, dex.ProbeReport{}, "", dex.BackendVirtualFallback)
+				}
+				item.Route = dex.SelectRoute(item.Profile, item.DexProbe, d.Transport, a.dexRoutePref(u.HardwareHash))
+
+				iconKey := u.HardwareHash
+				if iconKey == "" {
+					iconKey = d.DeviceHash
+				}
+				iconDir := filepath.Join(a.stateDir, "icon-cache", iconKey)
+				if a.stateDir == "" {
+					iconDir = filepath.Join(os.TempDir(), "androfuse-icon-cache", iconKey)
+				}
+				apps, aErr := dex.ListAppsWithIcons(ctx, client, d.Serial, iconDir)
+				if aErr != nil {
+					apps, aErr = client.ListLaunchableApps(ctx, d.Serial)
+				}
+				if aErr == nil {
+					item.Apps = apps
+					for _, ap := range apps {
+						if ap.IconPath == "" || decodedIcons[ap.IconPath] != nil {
+							continue
+						}
+						if raw, rErr := os.ReadFile(ap.IconPath); rErr == nil {
+							if bmp, bErr := ui.DecodeBitmap(raw); bErr == nil {
+								decodedIcons[ap.IconPath] = bmp
 							}
 						}
 					}
@@ -282,6 +440,18 @@ func (a *App) DisconnectWireless(serial string) {
 
 // LaunchDeX opens an interactive native Samsung DeX window (or virtual desktop fallback if requested/non-Samsung).
 func (a *App) LaunchDeX(d DiscoveredDevice, forceFallback bool) {
+	devKey := d.HardwareHash
+	if devKey == "" {
+		devKey = d.Target.DeviceHash
+	}
+	if used, limit, atLimit, _ := EncoderHeadroom(d.Profile, a.activeStreamCountFor(devKey)); atLimit {
+		a.update(func() { a.deviceNotice = L.EncoderLimitReached(used, limit) })
+		return
+	}
+	pref := a.dexRoutePref(devKey)
+	route := dex.SelectRoute(d.Profile, d.DexProbe, d.Target.Transport, pref)
+	useNative := !forceFallback && route.Backend == dex.BackendADBLoopback && route.IsGenuineDeX
+
 	a.update(func() { a.deviceNotice = "" })
 	go func() {
 		a.rt.coreMu.Lock()
@@ -301,8 +471,8 @@ func (a *App) LaunchDeX(d DiscoveredDevice, forceFallback bool) {
 		defer cancel()
 
 		tLabel := transportLabel(d.Target.Transport)
-		if !forceFallback && d.TruthDeX.IsGenuineDeX && d.Target.Transport != adb.TransportEmulator {
-			dexSess, err := dex.StartNativeLoopback(ctx, client, store, d.Target.Serial, 1920, 1080, 160, 15)
+		if useNative {
+			dexSess, err := dex.StartNativeLoopback(ctx, client, store, d.Target.Serial, 1920, 1080, 160, 30)
 			if err != nil {
 				a.update(func() { a.deviceNotice = err.Error() })
 				return
@@ -311,10 +481,12 @@ func (a *App) LaunchDeX(d DiscoveredDevice, forceFallback bool) {
 			sid := newSessionID("dex")
 			sw := newSessionWindow(a, SessionSpec{
 				ID:           sid,
+				DeviceKey:    devKey,
+				Serial:       d.Target.Serial,
 				Title:        fmt.Sprintf("%s · Samsung DeX (%s)", d.Profile.Model, tLabel),
 				Mode:         SessionModeDeX,
 				Transport:    tLabel,
-				BackendLabel: d.TruthDeX.Label,
+				BackendLabel: route.Label,
 				TargetSpec:   "1920×1080 @ 60 fps",
 				IsDeX:        true,
 				AllowResize:  true,
@@ -361,6 +533,8 @@ func (a *App) LaunchDeX(d DiscoveredDevice, forceFallback bool) {
 		fallbackVerdict := dex.EvaluateTruth(d.Profile, d.DexProbe, "", dex.BackendVirtualFallback)
 		sw := newSessionWindow(a, SessionSpec{
 			ID:           sid,
+			DeviceKey:    devKey,
+			Serial:       d.Target.Serial,
 			Title:        fmt.Sprintf("%s · %s (%s)", d.Profile.Model, fallbackVerdict.Label, tLabel),
 			Mode:         SessionModeDeXFallback,
 			Transport:    tLabel,
@@ -408,6 +582,14 @@ func (a *App) LaunchDeX(d DiscoveredDevice, forceFallback bool) {
 
 // LaunchMirror opens an interactive Phone Mirror window for Display 0.
 func (a *App) LaunchMirror(d DiscoveredDevice) {
+	devKey := d.HardwareHash
+	if devKey == "" {
+		devKey = d.Target.DeviceHash
+	}
+	if used, limit, atLimit, _ := EncoderHeadroom(d.Profile, a.activeStreamCountFor(devKey)); atLimit {
+		a.update(func() { a.deviceNotice = L.EncoderLimitReached(used, limit) })
+		return
+	}
 	a.update(func() { a.deviceNotice = "" })
 	go func() {
 		a.rt.coreMu.Lock()
@@ -430,6 +612,8 @@ func (a *App) LaunchMirror(d DiscoveredDevice) {
 		sid := newSessionID("mirror")
 		sw := newSessionWindow(a, SessionSpec{
 			ID:           sid,
+			DeviceKey:    devKey,
+			Serial:       d.Target.Serial,
 			Title:        fmt.Sprintf("%s · %s (%s)", d.Profile.Model, L.ModeMirrorTitle(), tLabel),
 			Mode:         SessionModeMirror,
 			Transport:    tLabel,
@@ -480,6 +664,14 @@ func (a *App) LaunchAppWindow(d DiscoveredDevice, app adb.AppEntry) {
 	if pkg == "" {
 		return
 	}
+	devKey := d.HardwareHash
+	if devKey == "" {
+		devKey = d.Target.DeviceHash
+	}
+	if used, limit, atLimit, _ := EncoderHeadroom(d.Profile, a.activeStreamCountFor(devKey)); atLimit {
+		a.update(func() { a.deviceNotice = L.EncoderLimitReached(used, limit) })
+		return
+	}
 	label := strings.TrimSpace(app.Label)
 	if label == "" {
 		label = pkg
@@ -511,6 +703,8 @@ func (a *App) LaunchAppWindow(d DiscoveredDevice, app adb.AppEntry) {
 		sid := newSessionID("app")
 		sw := newSessionWindow(a, SessionSpec{
 			ID:           sid,
+			DeviceKey:    devKey,
+			Serial:       d.Target.Serial,
 			Title:        label,
 			Mode:         SessionModeApp,
 			Transport:    tLabel,

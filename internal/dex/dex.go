@@ -71,7 +71,28 @@ type TruthVerdict struct {
 	Reason       string  `json:"reason"`
 }
 
-// ReadyInfo captures live display metadata emitted by `Main serve`.
+// RoutePreference records the user's explicit DeX vs fallback routing choice (`INV-06`).
+type RoutePreference string
+
+const (
+	RouteAuto            RoutePreference = "auto"
+	RouteNativeDeX       RoutePreference = "native_dex"
+	RouteVirtualFallback RoutePreference = "virtual_fallback"
+)
+
+// RoutePlan describes the selected DeX/desktop transport backend, capability verdict,
+// and user-facing reason for the current device (`INV-06`).
+type RoutePlan struct {
+	Preference      RoutePreference `json:"preference"`
+	Backend         Backend         `json:"backend"`
+	IsGenuineDeX    bool            `json:"is_genuine_dex"`
+	CanUseNativeDeX bool            `json:"can_use_native_dex"`
+	OneUIDisplay    string          `json:"oneui_display,omitempty"`
+	Label           string          `json:"label"`
+	Reason          string          `json:"reason"`
+}
+
+// ReadyInfo captures live display and control-socket metadata emitted by `Main serve`.
 type ReadyInfo struct {
 	DisplayID int
 	Width     int
@@ -80,6 +101,7 @@ type ReadyInfo struct {
 	Type      int
 	Flags     int
 	RemotePID int
+	CtrlPort  int
 }
 
 // LoopbackSession supervises a running `androfuse-dex-helper.jar serve` process on the device.
@@ -87,6 +109,7 @@ type LoopbackSession struct {
 	sessionID string
 	serial    string
 	token     string
+	graceSec  int
 	adb       *adb.Client
 	leases    *lease.Store
 	cmd       *exec.Cmd
@@ -189,6 +212,77 @@ func EvaluateTruth(prof adb.DeviceProfile, probe ProbeReport, activeDisplayName 
 		IsGenuineDeX: false,
 		Label:        "Unverified Display Mode",
 		Reason:       "DeX display verification incomplete",
+	}
+}
+
+// FormatOneUIVersion formats Samsung's integer `ro.build.version.oneui` value
+// (e.g. "90000" -> "9.0", "80500" -> "8.5", "60101" -> "6.1.1").
+func FormatOneUIVersion(raw string) string {
+	s := strings.TrimSpace(raw)
+	n, err := strconv.Atoi(s)
+	if err != nil || n <= 0 {
+		return s
+	}
+	major := n / 10000
+	minor := (n / 100) % 100
+	patch := n % 100
+	if patch > 0 {
+		return fmt.Sprintf("%d.%d.%d", major, minor, patch)
+	}
+	return fmt.Sprintf("%d.%d", major, minor)
+}
+
+// SelectRoute chooses Native DeX loopback vs Virtual Display Compatibility Mode for a device
+// according to hardware/firmware support and user preference while keeping labeling honest (`INV-06`).
+func SelectRoute(prof adb.DeviceProfile, probe ProbeReport, transport adb.Transport, pref RoutePreference) RoutePlan {
+	if pref == "" {
+		pref = RouteAuto
+	}
+	oneui := FormatOneUIVersion(prof.OneUIVersion)
+	canNative := strings.EqualFold(prof.Manufacturer, "samsung") &&
+		transport != adb.TransportEmulator &&
+		probe.HasSemBuilder &&
+		probe.HasConnectWithConfig
+
+	if pref == RouteVirtualFallback {
+		v := EvaluateTruth(prof, probe, "", BackendVirtualFallback)
+		return RoutePlan{
+			Preference:      pref,
+			Backend:         v.Backend,
+			IsGenuineDeX:    false,
+			CanUseNativeDeX: canNative,
+			OneUIDisplay:    oneui,
+			Label:           v.Label,
+			Reason:          "Manual Virtual Display Compatibility Mode selected",
+		}
+	}
+	if canNative {
+		v := EvaluateTruth(prof, probe, "AndroFuseDeX", BackendADBLoopback)
+		return RoutePlan{
+			Preference:      pref,
+			Backend:         v.Backend,
+			IsGenuineDeX:    v.IsGenuineDeX,
+			CanUseNativeDeX: true,
+			OneUIDisplay:    oneui,
+			Label:           v.Label,
+			Reason:          v.Reason,
+		}
+	}
+	reason := "Samsung SemWifiDisplayConfig API unavailable; using Virtual Display Fallback"
+	if !strings.EqualFold(prof.Manufacturer, "samsung") {
+		reason = fmt.Sprintf("Non-Samsung device (%s); using Virtual Display Fallback", prof.Manufacturer)
+	} else if transport == adb.TransportEmulator {
+		reason = "Android Emulator uses Virtual Display Fallback instead of Samsung DeX loopback"
+	}
+	v := EvaluateTruth(prof, probe, "", BackendVirtualFallback)
+	return RoutePlan{
+		Preference:      pref,
+		Backend:         BackendVirtualFallback,
+		IsGenuineDeX:    false,
+		CanUseNativeDeX: false,
+		OneUIDisplay:    oneui,
+		Label:           v.Label,
+		Reason:          reason,
 	}
 }
 
@@ -308,6 +402,7 @@ func StartNativeLoopback(
 		sessionID: sessionID,
 		serial:    serial,
 		token:     token,
+		graceSec:  graceSec,
 		adb:       client,
 		leases:    store,
 		cmd:       cmd,
@@ -367,7 +462,7 @@ func StartNativeLoopback(
 	}
 }
 
-// ParseReadyPayload parses `<displayId>|<w>|<h>|<dpi>|<type>|<flags>|<pid>`.
+// ParseReadyPayload parses `<displayId>|<w>|<h>|<dpi>|<type>|<flags>|<pid>[|<ctrlPort>]`.
 func ParseReadyPayload(payload string) (ReadyInfo, error) {
 	parts := strings.Split(strings.TrimSpace(payload), "|")
 	if len(parts) < 7 {
@@ -381,6 +476,14 @@ func ParseReadyPayload(payload string) (ReadyInfo, error) {
 		}
 		nums[i] = v
 	}
+	var ctrlPort int
+	if len(parts) >= 8 && strings.TrimSpace(parts[7]) != "" {
+		cp, err := strconv.Atoi(strings.TrimSpace(parts[7]))
+		if err != nil {
+			return ReadyInfo{}, fmt.Errorf("invalid ctrlPort in READY payload %q: %w", payload, err)
+		}
+		ctrlPort = cp
+	}
 	return ReadyInfo{
 		DisplayID: nums[0],
 		Width:     nums[1],
@@ -389,12 +492,196 @@ func ParseReadyPayload(payload string) (ReadyInfo, error) {
 		Type:      nums[4],
 		Flags:     nums[5],
 		RemotePID: nums[6],
+		CtrlPort:  ctrlPort,
 	}, nil
 }
 
 // Ready returns the active Samsung DeX display metadata.
 func (s *LoopbackSession) Ready() ReadyInfo {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.ready
+}
+
+// Serial returns the ADB transport serial currently supervising this DeX loopback.
+func (s *LoopbackSession) Serial() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.serial
+}
+
+// GraceSec returns the configured helper reconnect grace window in seconds.
+func (s *LoopbackSession) GraceSec() int {
+	return s.graceSec
+}
+
+// Done returns a channel closed when the current ADB helper control pipe exits.
+func (s *LoopbackSession) Done() <-chan struct{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.doneCh
+}
+
+// Reattach connects to the still-running helper's loopback control socket (`127.0.0.1:<CtrlPort>`)
+// over newSerial after USB disconnect / TLS Wi-Fi hot handoff within the grace window (`INV-02`).
+//
+// Inputs: bounded context and the new online ADB serial for the same physical device.
+// Returns: current ReadyInfo synced from `REATTACHED|<id>|<w>|<h>|<dpi>`.
+func (s *LoopbackSession) Reattach(ctx context.Context, newSerial string) (ReadyInfo, error) {
+	newSerial = strings.TrimSpace(newSerial)
+	if newSerial == "" {
+		return ReadyInfo{}, errors.New("reattach requires a non-empty ADB serial")
+	}
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return ReadyInfo{}, errors.New("dex session closed")
+	}
+	ctrlPort := s.ready.CtrlPort
+	token := s.token
+	prevType := s.ready.Type
+	prevFlags := s.ready.Flags
+	prevPID := s.ready.RemotePID
+	adbClient := s.adb
+	stores := s.leases
+	sessionID := s.sessionID
+	oldStdin := s.stdin
+	oldCmd := s.cmd
+	s.mu.Unlock()
+
+	if ctrlPort <= 0 {
+		return ReadyInfo{}, errors.New("dex helper did not advertise a control port")
+	}
+	if adbClient == nil {
+		return ReadyInfo{}, errors.New("adb client is required")
+	}
+
+	shellCmd := fmt.Sprintf("CLASSPATH=%s app_process / com.androfuse.dexhelper.Main attach %s %d",
+		RemoteHelperPath, token, ctrlPort)
+	cmd := exec.Command(adbClient.Path, "-s", newSerial, "shell", shellCmd)
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return ReadyInfo{}, err
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		_ = stdin.Close()
+		return ReadyInfo{}, err
+	}
+	var stderrBuf strings.Builder
+	cmd.Stderr = &stderrBuf
+
+	if err := cmd.Start(); err != nil {
+		return ReadyInfo{}, fmt.Errorf("start dex attach: %w", err)
+	}
+
+	doneCh := make(chan struct{})
+	lineCh := make(chan string, 32)
+	go func() {
+		defer close(doneCh)
+		sc := bufio.NewScanner(stdout)
+		for sc.Scan() {
+			lineCh <- strings.TrimSpace(sc.Text())
+		}
+		close(lineCh)
+	}()
+
+	reattachPrefix := "AFDEX1|" + token + "|REATTACHED|"
+	waitCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+
+	var updated ReadyInfo
+	for {
+		select {
+		case <-waitCtx.Done():
+			_ = stdin.Close()
+			if cmd.Process != nil {
+				_ = cmd.Process.Kill()
+			}
+			_ = cmd.Wait()
+			return ReadyInfo{}, fmt.Errorf("timed out waiting for DeX REATTACHED (%w, stderr=%s)", waitCtx.Err(), strings.TrimSpace(stderrBuf.String()))
+		case line, ok := <-lineCh:
+			if !ok {
+				_ = cmd.Wait()
+				return ReadyInfo{}, fmt.Errorf("dex attach exited before REATTACHED (stderr=%s)", strings.TrimSpace(stderrBuf.String()))
+			}
+			if payload, isErr := strings.CutPrefix(line, "AFDEX1|ERR|"); isErr {
+				_ = stdin.Close()
+				if cmd.Process != nil {
+					_ = cmd.Process.Kill()
+				}
+				_ = cmd.Wait()
+				return ReadyInfo{}, fmt.Errorf("dex attach error: %s", payload)
+			}
+			if payload, matched := strings.CutPrefix(line, reattachPrefix); matched {
+				parts := strings.Split(strings.TrimSpace(payload), "|")
+				if len(parts) < 4 {
+					_ = stdin.Close()
+					_ = cmd.Process.Kill()
+					_ = cmd.Wait()
+					return ReadyInfo{}, fmt.Errorf("malformed REATTACHED payload %q", payload)
+				}
+				id, err0 := strconv.Atoi(parts[0])
+				w, err1 := strconv.Atoi(parts[1])
+				h, err2 := strconv.Atoi(parts[2])
+				d, err3 := strconv.Atoi(parts[3])
+				if err0 != nil || err1 != nil || err2 != nil || err3 != nil {
+					_ = stdin.Close()
+					_ = cmd.Process.Kill()
+					_ = cmd.Wait()
+					return ReadyInfo{}, fmt.Errorf("invalid REATTACHED payload %q", payload)
+				}
+				updated = ReadyInfo{
+					DisplayID: id,
+					Width:     w,
+					Height:    h,
+					DPI:       d,
+					Type:      prevType,
+					Flags:     prevFlags,
+					RemotePID: prevPID,
+					CtrlPort:  ctrlPort,
+				}
+				goto attached
+			}
+		}
+	}
+
+attached:
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		_ = stdin.Close()
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		_ = cmd.Wait()
+		return ReadyInfo{}, errors.New("dex session closed during reattach")
+	}
+	s.serial = newSerial
+	s.cmd = cmd
+	s.stdin = stdin
+	s.lineCh = lineCh
+	s.doneCh = doneCh
+	s.ready = updated
+	s.mu.Unlock()
+
+	if oldStdin != nil {
+		_ = oldStdin.Close()
+	}
+	if oldCmd != nil && oldCmd.Process != nil {
+		_ = oldCmd.Process.Kill()
+		_ = oldCmd.Wait()
+	}
+	if stores != nil {
+		_ = stores.Acquire(lease.Lease{
+			SessionID:  sessionID,
+			DeviceHash: adb.DeviceHash(newSerial),
+			Kind:       lease.KindNativeDeX,
+			Token:      token,
+			DisplayID:  updated.DisplayID,
+		})
+	}
+	return updated, nil
 }
 
 // Ping verifies live presence of the active DeX display.

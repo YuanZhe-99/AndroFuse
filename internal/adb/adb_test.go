@@ -111,3 +111,50 @@ package:com.example.demo
 		t.Fatalf("expected 4 apps, got %d (%+v)", len(apps), apps)
 	}
 }
+
+func TestMergeDevicesMultiTransport(t *testing.T) {
+	raw := `List of devices attached
+192.168.1.50:41235     device product:q2q model:SM_F971U1 device:q2q transport_id:2
+R3CW1234567            device product:q2q model:SM_F971U1 device:q2q transport_id:1
+R5CT9999999            unauthorized transport_id:3
+emulator-5554          device product:sdk_gphone64_arm64 model:Pixel_9a device:emu64a transport_id:4
+`
+	devs := ParseDevicesOutput(raw)
+	foldUSB := ParseDeviceProbe("R3CW1234567", "HWSER=R3CW1234567\nMFR=samsung\nMOD=SM-F971U1\nONEUI=90000\nAVC=            <Limit name=\"concurrent-instances\" max=\"16\" />\n")
+	foldWiFi := ParseDeviceProbe("192.168.1.50:41235", "HWSER=R3CW1234567\nMFR=samsung\nMOD=SM-F971U1\nONEUI=90000\n")
+	emuProf := ParseDeviceProbe("emulator-5554", "HWSER=EMULATOR5554\nMFR=Google\nMOD=Pixel_9a\n")
+
+	if foldUSB.HardwareHash == "" || foldUSB.HardwareHash != foldWiFi.HardwareHash {
+		t.Fatalf("expected matching HardwareHash across USB and Wi-Fi: usb=%q wifi=%q", foldUSB.HardwareHash, foldWiFi.HardwareHash)
+	}
+
+	merged := MergeDevices(devs, map[string]DeviceProfile{
+		"R3CW1234567":        foldUSB,
+		"192.168.1.50:41235": foldWiFi,
+		"emulator-5554":      emuProf,
+	})
+	if len(merged) != 3 {
+		t.Fatalf("expected 3 unified devices (Fold merged, emulator, unauthorized), got %d: %+v", len(merged), merged)
+	}
+
+	var fold *UnifiedDevice
+	for i := range merged {
+		if merged[i].HardwareHash == foldUSB.HardwareHash {
+			fold = &merged[i]
+			break
+		}
+	}
+	if fold == nil {
+		t.Fatalf("merged Fold entry missing")
+	}
+	if fold.Primary.Transport != TransportUSB || len(fold.Transports) != 2 {
+		t.Fatalf("expected USB primary with 2 transports, got %+v", *fold)
+	}
+	if !fold.HasTransport(TransportUSB) || !fold.HasTransport(TransportTLSWiFi) {
+		t.Fatalf("expected both USB and TLS Wi-Fi transports on unified card: %+v", fold.Transports)
+	}
+	alt, ok := fold.AlternateTransport(fold.Primary.Serial)
+	if !ok || alt.Serial != "192.168.1.50:41235" {
+		t.Fatalf("expected AlternateTransport to return TLS Wi-Fi endpoint, got ok=%v alt=%+v", ok, alt)
+	}
+}

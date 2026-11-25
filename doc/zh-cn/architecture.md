@@ -16,14 +16,14 @@
 | `cmd/androfuse-svc` | 无头引擎命令行（`version`、`check [--json]`、`probe [--json]`、`run [--socket <path>]`） |
 | `internal/version` | 全局唯一产品版本号（`Version`），测试强制与 `mygo.json` 一致 |
 | `internal/core` | `androfuse_core` C ABI v4 加载器、`NV12Ring` 零分配帧环与 `AudioPlayer` |
-| `internal/localapi` | 用户级 AF_UNIX NDJSON 服务（`SIO_AF_UNIX_GETPEERPID` + Windows SID 同用户校验） |
-| `internal/adb` | 无 Shell 参数向量 `adb` 客户端、mDNS TLS 无线连接配对、`MaskSerial`/`MaskEndpoint` 脱敏、`emulator-*` 分类与 `--user 0` 应用枚举 |
+| `internal/localapi` | 同用户 AF_UNIX NDJSON 服务（`SIO_AF_UNIX_GETPEERPID` + Windows SID 校验），返回含 `unified_devices` 的设备列表 |
+| `internal/adb` | 无 Shell 参数向量 `adb` 客户端、`MergeDevices`（USB 与 TLS 无线去重合并，`INV-02`）、mDNS TLS 无线连接配对、`MaskSerial`/`MaskEndpoint` 脱敏、`emulator-*` 分类与 `--user 0` 应用枚举 |
 | `internal/lease` | 原子 `leases.json` 账本，确保虚拟显示、DeX 回环与端口转发完整回收（`INV-03`） |
 | `internal/scrcpy` | `scrcpy-server v5.0.1` 线协议编解码、鼠标/触控/滚动/键盘与 `flex_display` 会话、原始 PCM 音频、`MP4Recorder` 与离线样本 |
-| `internal/dex` | Samsung Native DeX 调度器（`server/dexhelper` 回环）、真实应用名称与 96x96 PNG 图标缓存（`ListAppsWithIcons`）及 `EvaluateTruth` 校验（`INV-06`；Miracast 已隐藏） |
-| `internal/gui` | MyGo 原生 UI 外壳、应用启动器网格、无边框 `SessionModeApp` 与 `SessionWindow` 视频窗口、`SaveNV12AsPNG`、剪贴板/音频控制、托盘与主机诊断 |
+| `internal/dex` | Samsung Native DeX 调度器（`server/dexhelper` 回环 + 30 秒宽限 `Reattach`）、真实应用名称与 96x96 PNG 图标缓存（`ListAppsWithIcons`）、`SelectRoute` 及 `EvaluateTruth` 校验（`INV-06`；Miracast 已隐藏） |
+| `internal/gui` | MyGo 原生 UI 外壳、USB+Wi-Fi 热切换统一设备卡片与编码流余量检查（`INV-01`/`INV-02`）、DeX 路由选择器（`INV-06`）、应用启动器网格、无边框 `SessionModeApp` 与 `SessionWindow` 视频窗口、`SaveNV12AsPNG`、剪贴板/音频控制、托盘与主机诊断 |
 | `locales` | 英文（`en`）与简体中文（`zh-Hans`）ARB 词条目录及生成访问器 |
-| `server/dexhelper` | 洁净室 Java UID 2000 `app_process` 辅助器（`probe`、`apps`、`serve`、`recover`），驱动 `SemWifiDisplayConfig` 回环与图标提取 |
+| `server/dexhelper` | 洁净室 Java UID 2000 `app_process` 辅助器（`probe`、`apps`、`serve`、`attach`、`recover`），驱动 `SemWifiDisplayConfig` 回环、宽限期控制端重附着与图标提取 |
 | `tools/fetchdeps` | 从上游下载并校验 SHA-256 后缓存 Apache-2.0 `scrcpy-server-v5.0.1` 至 `.dev/cache/` |
 | `tools/builddex` | 编译并打包 `server/dexhelper` 为 `build/androfuse-dex-helper.jar` |
 | `tools/icon` | 从 `resources/icon.svg` 渲染桌面、UI、托盘与 Android 自适应图标 PNG |
@@ -32,7 +32,7 @@
 
 ## 规划中的运行时模块（M2–M4）
 
-1. **USB 拔线热切换与遥测复用（M2–M3）**：USB 断线 30 秒宽限期自动切换 TLS 无线 ADB 续接，并通过 `internal/localapi` 推送后台遥测快照。
+1. **USB 拔线热切换与遥测复用（M2 核心已落地；M3 补全遥测推送）**：通过 `ro.serialno` 哈希聚合 `UnifiedDevice`（`INV-02`），并在断线 30 秒宽限期内经由配对 TLS 无线 ADB 执行 `dexhelper attach` 回环重连；`internal/localapi` 后台遥测推流将在 M3 扩展。
 2. **Android Companion（M3 `internal/androidhost`）**：同仓构建的可选签名 APK，采用分级可关闭权限开关。
 3. **跨网络与 5G 远程传输（`M3–M4`）**：跨 Wi-Fi 子网借助用户 VPN 或用户态（`--no-tun`）EasyTier 组网，由 Companion 自动广播 `_adb-tls-connect._tcp` 动态端口以运行完整 `scrcpy`/DeX；纯 5G 蜂窝网络（原厂非 Root Android 禁止启用 `adbd` 无线调试）则由 Companion 通过加密隧道提供 `MediaProjection` H.264/HEVC 视频与可选 `AccessibilityService` 输入通道。
 

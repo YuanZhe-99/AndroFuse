@@ -35,8 +35,16 @@ AFDEX1|PROBE|{"manufacturer":"samsung","model":"SM-F971U1","sdk":37,"oneui":"900
 	if err != nil {
 		t.Fatalf("ParseReadyPayload: %v", err)
 	}
-	if ready.DisplayID != 7 || ready.Width != 1920 || ready.Height != 1080 || ready.DPI != 160 || ready.RemotePID != 41234 {
+	if ready.DisplayID != 7 || ready.Width != 1920 || ready.Height != 1080 || ready.DPI != 160 || ready.RemotePID != 41234 || ready.CtrlPort != 0 {
 		t.Fatalf("unexpected ReadyInfo: %+v", ready)
+	}
+
+	ready8, err := ParseReadyPayload("12|1920|1080|160|2|131072|5500|49152")
+	if err != nil {
+		t.Fatalf("ParseReadyPayload(8 fields): %v", err)
+	}
+	if ready8.CtrlPort != 49152 || ready8.DisplayID != 12 {
+		t.Fatalf("unexpected ReadyInfo CtrlPort: %+v", ready8)
 	}
 }
 
@@ -64,6 +72,44 @@ func TestEvaluateTruthOneUI9AndFallbacks(t *testing.T) {
 	nonSam := EvaluateTruth(adb.DeviceProfile{Manufacturer: "Google"}, probe, "AndroFuseDeX", BackendADBLoopback)
 	if nonSam.IsGenuineDeX {
 		t.Fatalf("non-Samsung device must never report genuine DeX: %+v", nonSam)
+	}
+}
+
+func TestFormatOneUIVersionAndSelectRoute(t *testing.T) {
+	cases := map[string]string{
+		"90000": "9.0",
+		"80500": "8.5",
+		"60101": "6.1.1",
+		"":      "",
+	}
+	for raw, want := range cases {
+		if got := FormatOneUIVersion(raw); got != want {
+			t.Fatalf("FormatOneUIVersion(%q) = %q, want %q", raw, got, want)
+		}
+	}
+
+	sam := adb.DeviceProfile{Manufacturer: "samsung", OneUIVersion: "90000"}
+	probeOK := ProbeReport{HasSemBuilder: true, HasConnectWithConfig: true}
+	probeNoSem := ProbeReport{HasSemBuilder: false, HasConnectWithConfig: false}
+
+	autoPlan := SelectRoute(sam, probeOK, adb.TransportTLSWiFi, RouteAuto)
+	if !autoPlan.IsGenuineDeX || autoPlan.Backend != BackendADBLoopback || autoPlan.OneUIDisplay != "9.0" || !autoPlan.CanUseNativeDeX {
+		t.Fatalf("unexpected Samsung Auto route plan: %+v", autoPlan)
+	}
+
+	manualFB := SelectRoute(sam, probeOK, adb.TransportUSB, RouteVirtualFallback)
+	if manualFB.IsGenuineDeX || manualFB.Backend != BackendVirtualFallback || !manualFB.CanUseNativeDeX {
+		t.Fatalf("manual fallback must use virtual display while preserving CanUseNativeDeX: %+v", manualFB)
+	}
+
+	noSemPlan := SelectRoute(sam, probeNoSem, adb.TransportUSB, RouteAuto)
+	if noSemPlan.IsGenuineDeX || noSemPlan.Backend != BackendVirtualFallback || noSemPlan.CanUseNativeDeX {
+		t.Fatalf("missing SemWifiDisplayConfig must downgrade to fallback: %+v", noSemPlan)
+	}
+
+	emuPlan := SelectRoute(sam, probeOK, adb.TransportEmulator, RouteAuto)
+	if emuPlan.IsGenuineDeX || emuPlan.Backend != BackendVirtualFallback {
+		t.Fatalf("emulator must never pretend genuine DeX: %+v", emuPlan)
 	}
 }
 

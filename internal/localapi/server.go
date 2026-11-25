@@ -214,8 +214,9 @@ func (s *Server) dispatch(ctx context.Context, req Request) Response {
 			ID: req.ID,
 			OK: true,
 			Result: map[string]any{
-				"devices": devs,
-				"mdns":    svcs,
+				"devices":         devs,
+				"unified_devices": adb.MergeDevices(devs, nil),
+				"mdns":            svcs,
 			},
 		}
 	case "leases.list":

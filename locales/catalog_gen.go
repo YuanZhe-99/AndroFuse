@@ -204,6 +204,26 @@ func (msgs Messages) ModeDexDesc() string {
 	return Catalog.Format(msgs.locale, "ModeDexDesc", nil)
 }
 
+// ModesLiveStatusTitle says "Connected Devices & Stream Coexistence"
+// in the language the app shows.
+func ModesLiveStatusTitle() string { return In(i18n.Locale()).ModesLiveStatusTitle() }
+
+// ModesLiveStatusTitle says "Connected Devices & Stream Coexistence"
+// in the language of msgs.
+func (msgs Messages) ModesLiveStatusTitle() string {
+	return Catalog.Format(msgs.locale, "ModesLiveStatusTitle", nil)
+}
+
+// ModesLiveStatusEmpty says "Connect a Samsung or Android device on the Devices page to inspect live encoder headroom and DeX routing."
+// in the language the app shows.
+func ModesLiveStatusEmpty() string { return In(i18n.Locale()).ModesLiveStatusEmpty() }
+
+// ModesLiveStatusEmpty says "Connect a Samsung or Android device on the Devices page to inspect live encoder headroom and DeX routing."
+// in the language of msgs.
+func (msgs Messages) ModesLiveStatusEmpty() string {
+	return Catalog.Format(msgs.locale, "ModesLiveStatusEmpty", nil)
+}
+
 // ModeMirrorTitle says "Android Phone Mirroring"
 // in the language the app shows.
 func ModeMirrorTitle() string { return In(i18n.Locale()).ModeMirrorTitle() }
@@ -482,6 +502,100 @@ func ActionLaunchApp() string { return In(i18n.Locale()).ActionLaunchApp() }
 // in the language of msgs.
 func (msgs Messages) ActionLaunchApp() string {
 	return Catalog.Format(msgs.locale, "ActionLaunchApp", nil)
+}
+
+// TransportHandoffReady says "USB + Wi-Fi Hot Handoff Ready"
+// in the language the app shows.
+func TransportHandoffReady() string { return In(i18n.Locale()).TransportHandoffReady() }
+
+// TransportHandoffReady says "USB + Wi-Fi Hot Handoff Ready"
+// in the language of msgs.
+func (msgs Messages) TransportHandoffReady() string {
+	return Catalog.Format(msgs.locale, "TransportHandoffReady", nil)
+}
+
+// EncoderStreamsBadge says "Streams {used}/{limit}"
+// in the language the app shows.
+func EncoderStreamsBadge(used int, limit int) string {
+	return In(i18n.Locale()).EncoderStreamsBadge(used, limit)
+}
+
+// EncoderStreamsBadge says "Streams {used}/{limit}"
+// in the language of msgs.
+func (msgs Messages) EncoderStreamsBadge(used int, limit int) string {
+	return Catalog.Format(msgs.locale, "EncoderStreamsBadge", map[string]any{"used": used, "limit": limit})
+}
+
+// EncoderLimitReached says "Hardware encoder stream limit reached ({used}/{limit}). Close an open window before launching another."
+// in the language the app shows.
+func EncoderLimitReached(used int, limit int) string {
+	return In(i18n.Locale()).EncoderLimitReached(used, limit)
+}
+
+// EncoderLimitReached says "Hardware encoder stream limit reached ({used}/{limit}). Close an open window before launching another."
+// in the language of msgs.
+func (msgs Messages) EncoderLimitReached(used int, limit int) string {
+	return Catalog.Format(msgs.locale, "EncoderLimitReached", map[string]any{"used": used, "limit": limit})
+}
+
+// DeXRouteLabel says "DeX Mode Route"
+// in the language the app shows.
+func DeXRouteLabel() string { return In(i18n.Locale()).DeXRouteLabel() }
+
+// DeXRouteLabel says "DeX Mode Route"
+// in the language of msgs.
+func (msgs Messages) DeXRouteLabel() string {
+	return Catalog.Format(msgs.locale, "DeXRouteLabel", nil)
+}
+
+// DeXRouteAuto says "Auto"
+// in the language the app shows.
+func DeXRouteAuto() string { return In(i18n.Locale()).DeXRouteAuto() }
+
+// DeXRouteAuto says "Auto"
+// in the language of msgs.
+func (msgs Messages) DeXRouteAuto() string {
+	return Catalog.Format(msgs.locale, "DeXRouteAuto", nil)
+}
+
+// DeXRouteNative says "Native DeX"
+// in the language the app shows.
+func DeXRouteNative() string { return In(i18n.Locale()).DeXRouteNative() }
+
+// DeXRouteNative says "Native DeX"
+// in the language of msgs.
+func (msgs Messages) DeXRouteNative() string {
+	return Catalog.Format(msgs.locale, "DeXRouteNative", nil)
+}
+
+// DeXRouteFallback says "Fallback"
+// in the language the app shows.
+func DeXRouteFallback() string { return In(i18n.Locale()).DeXRouteFallback() }
+
+// DeXRouteFallback says "Fallback"
+// in the language of msgs.
+func (msgs Messages) DeXRouteFallback() string {
+	return Catalog.Format(msgs.locale, "DeXRouteFallback", nil)
+}
+
+// DeXReconnecting says "Transport lost — waiting to hand off DeX ({seconds}s)..."
+// in the language the app shows.
+func DeXReconnecting(seconds int) string { return In(i18n.Locale()).DeXReconnecting(seconds) }
+
+// DeXReconnecting says "Transport lost — waiting to hand off DeX ({seconds}s)..."
+// in the language of msgs.
+func (msgs Messages) DeXReconnecting(seconds int) string {
+	return Catalog.Format(msgs.locale, "DeXReconnecting", map[string]any{"seconds": seconds})
+}
+
+// DeXReattached says "DeX handed off to {transport}"
+// in the language the app shows.
+func DeXReattached(transport string) string { return In(i18n.Locale()).DeXReattached(transport) }
+
+// DeXReattached says "DeX handed off to {transport}"
+// in the language of msgs.
+func (msgs Messages) DeXReattached(transport string) string {
+	return Catalog.Format(msgs.locale, "DeXReattached", map[string]any{"transport": transport})
 }
 
 // AppFilterHint says "Filter installed apps..."

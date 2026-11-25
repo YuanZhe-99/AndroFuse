@@ -54,6 +54,7 @@ func testApp(t *testing.T) *App {
 	}
 	a.devices = []DiscoveredDevice{
 		{
+			HardwareHash: "0123456789abcdef",
 			Target: adb.Device{
 				Serial:     "TESTUSB001",
 				MaskedID:   "TES****001",
@@ -62,18 +63,48 @@ func testApp(t *testing.T) *App {
 				Model:      "Galaxy Fold",
 				Transport:  adb.TransportUSB,
 			},
+			Transports: []adb.Device{
+				{
+					Serial:     "TESTUSB001",
+					MaskedID:   "TES****001",
+					DeviceHash: "0123456789abcdef",
+					State:      "device",
+					Model:      "Galaxy Fold",
+					Transport:  adb.TransportUSB,
+				},
+				{
+					Serial:     "192.168.1.40:41235",
+					MaskedID:   "192.*.*.*:41235",
+					DeviceHash: "wificonnhash0001",
+					State:      "device",
+					Model:      "Galaxy Fold",
+					Transport:  adb.TransportTLSWiFi,
+				},
+			},
 			Profile: adb.DeviceProfile{
+				HardwareHash:   "0123456789abcdef",
 				Manufacturer:   "samsung",
 				Model:          "Galaxy Fold",
 				AndroidRelease: "17",
 				SDKInt:         37,
 				OneUIVersion:   "90000",
+				AVCEncoderMax:  16,
+			},
+			DexProbe: dex.ProbeReport{
+				HasSemBuilder:        true,
+				HasConnectWithConfig: true,
 			},
 			TruthDeX: dex.TruthVerdict{
 				Backend:      dex.BackendADBLoopback,
 				IsGenuineDeX: true,
 				Label:        "Samsung Native DeX (ADB Loopback)",
 			},
+			Route: dex.SelectRoute(
+				adb.DeviceProfile{Manufacturer: "samsung", OneUIVersion: "90000"},
+				dex.ProbeReport{HasSemBuilder: true, HasConnectWithConfig: true},
+				adb.TransportUSB,
+				dex.RouteAuto,
+			),
 			Apps: []adb.AppEntry{
 				{Package: "com.android.settings", Label: "Settings", System: true, Resizeable: true},
 				{Package: "com.android.calculator2", Label: "Calculator", System: false, Resizeable: true},
@@ -81,6 +112,7 @@ func testApp(t *testing.T) *App {
 			Probed: true,
 		},
 		{
+			HardwareHash: "fedcba9876543210",
 			Target: adb.Device{
 				Serial:     "emulator-5554",
 				MaskedID:   "emu****554",
@@ -89,7 +121,18 @@ func testApp(t *testing.T) *App {
 				Model:      "Pixel_9a_API_36",
 				Transport:  adb.TransportEmulator,
 			},
+			Transports: []adb.Device{
+				{
+					Serial:     "emulator-5554",
+					MaskedID:   "emu****554",
+					DeviceHash: "fedcba9876543210",
+					State:      "device",
+					Model:      "Pixel_9a_API_36",
+					Transport:  adb.TransportEmulator,
+				},
+			},
 			Profile: adb.DeviceProfile{
+				HardwareHash:   "fedcba9876543210",
 				Manufacturer:   "Google",
 				Model:          "Pixel_9a_API_36",
 				AndroidRelease: "16",
@@ -100,6 +143,12 @@ func testApp(t *testing.T) *App {
 				IsGenuineDeX: false,
 				Label:        "Virtual Desktop Fallback (Non-Samsung)",
 			},
+			Route: dex.SelectRoute(
+				adb.DeviceProfile{Manufacturer: "Google"},
+				dex.ProbeReport{},
+				adb.TransportEmulator,
+				dex.RouteAuto,
+			),
 			Apps: []adb.AppEntry{
 				{Package: "com.android.settings", Label: "Settings", System: true, Resizeable: true},
 				{Package: "com.google.android.deskclock", Label: "Clock", System: true, Resizeable: false},
@@ -108,6 +157,17 @@ func testApp(t *testing.T) *App {
 		},
 	}
 	return a
+}
+
+func TestEncoderHeadroom(t *testing.T) {
+	used, limit, atLimit, nearLimit := EncoderHeadroom(adb.DeviceProfile{AVCEncoderMax: 4}, 3)
+	if used != 3 || limit != 4 || atLimit || !nearLimit {
+		t.Fatalf("unexpected near-limit headroom: used=%d limit=%d at=%v near=%v", used, limit, atLimit, nearLimit)
+	}
+	used, limit, atLimit, nearLimit = EncoderHeadroom(adb.DeviceProfile{}, 4)
+	if used != 4 || limit != 4 || !atLimit || nearLimit {
+		t.Fatalf("unexpected default at-limit headroom: used=%d limit=%d at=%v near=%v", used, limit, atLimit, nearLimit)
+	}
 }
 
 func TestViewsRender(t *testing.T) {

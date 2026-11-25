@@ -28,6 +28,8 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.io.OutputStreamWriter;
+import java.io.PrintWriter;
 import java.io.RandomAccessFile;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
@@ -36,8 +38,10 @@ import java.lang.reflect.Proxy;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.SocketTimeoutException;
 import java.nio.channels.FileLock;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -55,7 +59,9 @@ import java.util.regex.Pattern;
  *
  * Subcommands:
  *   probe
+ *   apps [--no-icons]
  *   serve <token> <width> <height> <dpi> <grace_sec>
+ *   attach <token> <ctrl_port>
  *   recover
  */
 public final class Main {
@@ -72,7 +78,7 @@ public final class Main {
 
     public static void main(String[] args) {
         if (args.length < 1) {
-            System.err.println("usage: Main <probe|apps [--no-icons]|serve <token> <w> <h> <dpi> <grace_sec>|recover>");
+            System.err.println("usage: Main <probe|apps [--no-icons]|serve <token> <w> <h> <dpi> <grace_sec>|attach <token> <ctrl_port>|recover>");
             System.exit(2);
         }
         try {
@@ -80,6 +86,15 @@ public final class Main {
             if ("apps".equals(args[0])) {
                 boolean includeIcons = !(args.length >= 2 && "--no-icons".equals(args[1]));
                 runApps(includeIcons);
+                return;
+            }
+            if ("attach".equals(args[0])) {
+                if (args.length != 3) {
+                    throw new IllegalArgumentException("attach expects <token> <ctrl_port>");
+                }
+                String token = validateToken(args[1]);
+                int ctrlPort = Integer.parseInt(args[2]);
+                runAttach(token, ctrlPort);
                 return;
             }
             bootstrapWorkarounds();
@@ -381,6 +396,11 @@ public final class Main {
         System.out.flush();
     }
 
+    private static void emitTo(PrintWriter out, String token, String kind, String payload) {
+        out.println("AFDEX1|" + token + "|" + kind + "|" + payload);
+        out.flush();
+    }
+
     private static void runServe(String token, int width, int height, int dpi, int graceSec) throws Exception {
         if (width < 320 || height < 320 || width > 7680 || height > 4320 || dpi < 72 || dpi > 640) {
             throw new IllegalArgumentException("unsupported DeX metrics: " + width + "x" + height + "@" + dpi);
@@ -398,6 +418,7 @@ public final class Main {
 
         DisplayService svc = new DisplayService();
         LoopbackRtsp rtsp = null;
+        ServerSocket ctrlServer = null;
         AtomicBoolean cleaned = new AtomicBoolean(false);
         int activeDisplayId = -1;
 
@@ -405,6 +426,9 @@ public final class Main {
             svc.disconnectWifiDisplayQuiet();
             waitForDisplayGone(DISPLAY_NAME, 5000);
             waitForPortFree(RTSP_PORT, 5000);
+
+            ctrlServer = new ServerSocket(0, 4, InetAddress.getByName("127.0.0.1"));
+            int ctrlPort = ctrlServer.getLocalPort();
 
             rtsp = new LoopbackRtsp(svc);
             rtsp.start();
@@ -418,7 +442,7 @@ public final class Main {
             DisplaySnapshot settled = applyMetrics(activeDisplayId, width, height, dpi);
             emit(token, "READY",
                 settled.id + "|" + settled.width + "|" + settled.height + "|" + settled.dpi + "|" +
-                settled.type + "|" + settled.flags + "|" + android.os.Process.myPid());
+                settled.type + "|" + settled.flags + "|" + android.os.Process.myPid() + "|" + ctrlPort);
 
             final LoopbackRtsp finalRtsp = rtsp;
             final int cleanupDisplayId = activeDisplayId;
@@ -429,35 +453,58 @@ public final class Main {
             }, "AndroFuse-DeX-Shutdown"));
 
             BufferedReader stdin = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.US_ASCII));
-            String cmdLine;
-            while ((cmdLine = stdin.readLine()) != null) {
-                cmdLine = cmdLine.trim();
-                if (cmdLine.isEmpty()) continue;
-                if ("STOP".equals(cmdLine)) {
-                    break;
-                } else if ("PING".equals(cmdLine)) {
-                    DisplaySnapshot cur = findDisplayById(activeDisplayId);
-                    if (cur == null) {
-                        emit(token, "LOST", String.valueOf(activeDisplayId));
+            PrintWriter stdout = new PrintWriter(new OutputStreamWriter(System.out, StandardCharsets.UTF_8), true);
+            boolean explicitStop = handleControlStream(stdin, stdout, token, activeDisplayId);
+
+            if (!explicitStop && graceSec > 0) {
+                emit(token, "GRACE", String.valueOf(graceSec));
+                long deadline = System.currentTimeMillis() + (graceSec * 1000L);
+                while (true) {
+                    long remaining = deadline - System.currentTimeMillis();
+                    if (remaining <= 0) {
                         break;
                     }
-                    emit(token, "PONG", cur.id + "|" + cur.width + "|" + cur.height + "|" + cur.dpi);
-                } else if (cmdLine.startsWith("RESIZE ")) {
-                    String[] parts = cmdLine.split("\\s+");
-                    if (parts.length == 4) {
-                        int rw = Integer.parseInt(parts[1]);
-                        int rh = Integer.parseInt(parts[2]);
-                        int rd = Integer.parseInt(parts[3]);
-                        DisplaySnapshot cur = applyMetrics(activeDisplayId, rw, rh, rd);
-                        emit(token, "RESIZED", cur.id + "|" + cur.width + "|" + cur.height + "|" + cur.dpi);
+                    ctrlServer.setSoTimeout((int) Math.min(Integer.MAX_VALUE, remaining));
+                    Socket client;
+                    try {
+                        client = ctrlServer.accept();
+                    } catch (SocketTimeoutException timeout) {
+                        break;
+                    }
+                    boolean handledClient = false;
+                    boolean clientStopped = false;
+                    try {
+                        client.setSoTimeout(5000);
+                        BufferedReader cin = new BufferedReader(new InputStreamReader(client.getInputStream(), StandardCharsets.US_ASCII));
+                        PrintWriter cout = new PrintWriter(new OutputStreamWriter(client.getOutputStream(), StandardCharsets.UTF_8), true);
+                        String authLine = cin.readLine();
+                        if (("AUTH " + token).equals(authLine != null ? authLine.trim() : "")) {
+                            handledClient = true;
+                            client.setSoTimeout(0);
+                            DisplaySnapshot cur = findDisplayById(activeDisplayId);
+                            if (cur == null) {
+                                cur = settled;
+                            }
+                            emitTo(cout, token, "REATTACHED", cur.id + "|" + cur.width + "|" + cur.height + "|" + cur.dpi);
+                            clientStopped = handleControlStream(cin, cout, token, activeDisplayId);
+                        }
+                    } catch (IOException ignored) {
+                    } finally {
+                        try { client.close(); } catch (IOException ignored) {}
+                    }
+                    if (clientStopped) {
+                        break;
+                    }
+                    if (handledClient) {
+                        deadline = System.currentTimeMillis() + (graceSec * 1000L);
+                        emit(token, "GRACE", String.valueOf(graceSec));
                     }
                 }
             }
-            if (cmdLine == null && graceSec > 0) {
-                emit(token, "GRACE", String.valueOf(graceSec));
-                Thread.sleep(graceSec * 1000L);
-            }
         } finally {
+            if (ctrlServer != null) {
+                try { ctrlServer.close(); } catch (Throwable ignored) {}
+            }
             if (cleaned.compareAndSet(false, true)) {
                 cleanupLoopback(svc, rtsp, activeDisplayId);
             }
@@ -466,6 +513,72 @@ public final class Main {
             new File(LOCK_PATH).delete();
         }
         emit(token, "STOPPED", "1");
+    }
+
+    private static boolean handleControlStream(BufferedReader in, PrintWriter out, String token, int activeDisplayId)
+            throws Exception {
+        String cmdLine;
+        while ((cmdLine = in.readLine()) != null) {
+            cmdLine = cmdLine.trim();
+            if (cmdLine.isEmpty()) continue;
+            if ("STOP".equals(cmdLine)) {
+                return true;
+            } else if ("PING".equals(cmdLine)) {
+                DisplaySnapshot cur = findDisplayById(activeDisplayId);
+                if (cur == null) {
+                    emitTo(out, token, "LOST", String.valueOf(activeDisplayId));
+                    return true;
+                }
+                emitTo(out, token, "PONG", cur.id + "|" + cur.width + "|" + cur.height + "|" + cur.dpi);
+            } else if (cmdLine.startsWith("RESIZE ")) {
+                String[] parts = cmdLine.split("\\s+");
+                if (parts.length == 4) {
+                    int rw = Integer.parseInt(parts[1]);
+                    int rh = Integer.parseInt(parts[2]);
+                    int rd = Integer.parseInt(parts[3]);
+                    DisplaySnapshot cur = applyMetrics(activeDisplayId, rw, rh, rd);
+                    emitTo(out, token, "RESIZED", cur.id + "|" + cur.width + "|" + cur.height + "|" + cur.dpi);
+                }
+            }
+        }
+        return false;
+    }
+
+    private static void runAttach(String token, int ctrlPort) throws Exception {
+        if (ctrlPort <= 0 || ctrlPort > 65535) {
+            throw new IllegalArgumentException("invalid ctrl_port: " + ctrlPort);
+        }
+        try (Socket sock = new Socket()) {
+            sock.connect(new InetSocketAddress("127.0.0.1", ctrlPort), 5000);
+            BufferedReader sin = new BufferedReader(new InputStreamReader(sock.getInputStream(), StandardCharsets.US_ASCII));
+            PrintWriter sout = new PrintWriter(new OutputStreamWriter(sock.getOutputStream(), StandardCharsets.UTF_8), true);
+            sout.println("AUTH " + token);
+            sout.flush();
+
+            Thread reader = new Thread(() -> {
+                try {
+                    String line;
+                    while ((line = sin.readLine()) != null) {
+                        System.out.println(line);
+                        System.out.flush();
+                    }
+                } catch (IOException ignored) {
+                }
+            }, "AndroFuse-DeX-AttachReader");
+            reader.setDaemon(true);
+            reader.start();
+
+            BufferedReader stdin = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.US_ASCII));
+            String cmd;
+            while ((cmd = stdin.readLine()) != null) {
+                sout.println(cmd);
+                sout.flush();
+                if ("STOP".equals(cmd.trim())) {
+                    reader.join(4000);
+                    break;
+                }
+            }
+        }
     }
 
     private static void cleanupLoopback(DisplayService svc, LoopbackRtsp rtsp, int displayId) {

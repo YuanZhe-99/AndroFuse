@@ -21,8 +21,9 @@ AndroFuse 在 Rust（`core/androfuse-core`）与 Go（`internal/adb`、`internal
 
 - **`probe`**：初始化 `Looper` 与 `ActivityThread`（`com.android.shell`）兼容壳，反射检测 `SemWifiDisplayConfig$Builder` 与 `IDisplayManager.connectWifiDisplayWithConfig`，输出 `AFDEX1|PROBE|{json}`。
 - **`apps [--no-icons]`**：通过 `ActivityThread.systemMain()` 获取系统上下文，调用 `PackageManager` 查询 `ACTION_MAIN` / `CATEGORY_LAUNCHER`，过滤 WebAPK/十六进制哈希噪声包名，提取本地化应用名与 `resizeMode` 并渲染 `96x96` ARGB_8888 PNG 图标，逐行输出 `AFDEX1|APP|{json}` 与 `AFDEX1|APPS_DONE|<count>`。
-- **`serve <token> <w> <h> <dpi> <grace_sec>`**：先通过 `KEYCODE_WAKEUP` 唤醒息屏设备，持有 `/data/local/tmp/androfuse-dex.lock` 后调用 `disconnectWifiDisplay()`，绑定本地 UDP 排空端口并调用 `connectWifiDisplayWithConfig`（`127.0.0.1:7236`、`"AndroFuseDeX"`、`mode=2`），完成 WFD RTSP 状态机并遵循**初始 DPI ≥ 160 引导规则**；支持运行期 `RESIZE <w> <h> <dpi>`（实测自动触发 `scrcpy-server` 会话重协商），并在收到 `STOP` 或 stdin 断开宽限到期后完整清理。
-- **`EvaluateTruth`（`INV-06`）**：One UI 9.0（`SDK 37`）将 DeX 合并进 SystemUI/Launcher（无独立 `com.sec.android.app.desktoplauncher` 包），因此 `internal/dex` 通过三星厂商身份、活跃 `SemWifiDisplayConfig` 与显示属性进行真伪判定，而非死板依赖旧包名。
+- **`serve <token> <w> <h> <dpi> <grace_sec>`**：先通过 `KEYCODE_WAKEUP` 唤醒息屏设备，持有 `/data/local/tmp/androfuse-dex.lock` 后调用 `disconnectWifiDisplay()`，绑定本地 UDP 排空端口与本地控制监听端口（`127.0.0.1:<ctrlPort>`，作为 `AFDEX1|<token>|READY|<id>|<w>|<h>|<dpi>|<type>|<flags>|<pid>|<ctrlPort>` 的第 8 字段返回），并调用 `connectWifiDisplayWithConfig`（`127.0.0.1:7236`、`"AndroFuseDeX"`、`mode=2`）完成 WFD RTSP 状态机并遵循**初始 DPI ≥ 160 引导规则**；支持运行期 `RESIZE <w> <h> <dpi>`，在 stdin 意外断开时进入 `grace_sec` 宽限保活窗口（输出 `AFDEX1|<token>|GRACE|<grace_sec>`），并在收到 `STOP` 或宽限到期后完整清理。
+- **`attach <token> <ctrl_port>`**：在 USB→TLS Wi-Fi 热切换期间（`INV-02`）连接仍在存活的 `127.0.0.1:<ctrl_port>`，发送 `AUTH <token>` 鉴权后接收 `AFDEX1|<token>|REATTACHED|<id>|<w>|<h>|<dpi>`，无缝接管后续 `PING` / `RESIZE` / `STOP` 指令。
+- **`SelectRoute` 与 `EvaluateTruth`（`INV-06`）**：One UI 9.0（`SDK 37`）将 DeX 合并进 SystemUI/Launcher（无独立 `com.sec.android.app.desktoplauncher` 包），因此 `internal/dex` 通过三星厂商身份、活跃 `SemWifiDisplayConfig` 与显示属性进行真伪判定与自动选路，并支持在“原生 DeX”与明确标注的“虚拟桌面兼容模式”间手动切换。
 
 ## 3. Miracast / Wi-Fi Direct 接收端（`core/androfuse-core/src/miracast.rs` — 已隐藏搁置）
 

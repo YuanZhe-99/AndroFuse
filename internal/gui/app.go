@@ -19,6 +19,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/YuanZhe-99/AndroFuse/internal/adb"
+	"github.com/YuanZhe-99/AndroFuse/internal/dex"
 	"github.com/YuanZhe-99/AndroFuse/internal/version"
 	L "github.com/YuanZhe-99/AndroFuse/locales"
 )
@@ -67,6 +68,7 @@ type App struct {
 	appFilter       string
 	showSystemApps  bool
 	appIcons        map[string]*ui.Bitmap
+	dexRoutes       map[string]dex.RoutePreference
 	sessions        map[string]*SessionWindow
 }
 
@@ -98,12 +100,13 @@ func ApplyTheme(theme string) {
 // New constructs an App state container and loads saved preferences.
 func New(profile, stateDir string) *App {
 	a := &App{
-		profile:  profile,
-		stateDir: stateDir,
-		prefs:    Prefs{Theme: "system"},
-		page:     string(pageDevices),
-		appIcons: make(map[string]*ui.Bitmap),
-		sessions: make(map[string]*SessionWindow),
+		profile:   profile,
+		stateDir:  stateDir,
+		prefs:     Prefs{Theme: "system"},
+		page:      string(pageDevices),
+		appIcons:  make(map[string]*ui.Bitmap),
+		dexRoutes: make(map[string]dex.RoutePreference),
+		sessions:  make(map[string]*SessionWindow),
 	}
 	a.loadPrefs()
 	a.syncControlIndices()
@@ -537,6 +540,7 @@ func (a *App) devicesPage(c *ui.Context, k tokens) {
 				for _, sw := range sessList {
 					sw.mu.Lock()
 					nw, nh, fps := sw.negotiatedW, sw.negotiatedH, sw.measuredFPS
+					sessTransport := sw.spec.Transport
 					sw.mu.Unlock()
 					res := "--"
 					if nw > 0 && nh > 0 {
@@ -544,7 +548,7 @@ func (a *App) devicesPage(c *ui.Context, k tokens) {
 					}
 					ui.Row(c.Key("sess-row-" + sw.spec.ID)).FillWidth().AlignItems(ui.Center).Gap(8).Children(func() {
 						ui.Row(c).Padding(badgePadV, badgePadH).Radius(pillRadius).Background(k.brandSoft).Children(func() {
-							ui.Text(c, sw.spec.Transport).FontSize(sizeSmall).TextColor(k.brand).Bold().SingleLine()
+							ui.Text(c, sessTransport).FontSize(sizeSmall).TextColor(k.brand).Bold().SingleLine()
 						})
 						ui.Text(c, sw.spec.Title).FontSize(sizeBody).Bold().Grow(1).SingleLine()
 						ui.Text(c, res).FontSize(sizeSmall).TextColor(k.muted).SingleLine()
@@ -612,7 +616,28 @@ func (a *App) devicesPage(c *ui.Context, k tokens) {
 
 		for _, dev := range devs {
 			d := dev
-			devKey := "dev-" + string(d.Target.Transport) + "-" + d.Target.DeviceHash
+			hwKey := d.HardwareHash
+			if hwKey == "" {
+				hwKey = d.Target.DeviceHash
+			}
+			devKey := "dev-" + hwKey
+			transports := d.Transports
+			if len(transports) == 0 {
+				transports = []adb.Device{d.Target}
+			}
+			usedStreams, limitStreams, atLimit, nearLimit := EncoderHeadroom(d.Profile, a.activeStreamCountFor(hwKey))
+			route := d.Route
+			if route.Label == "" {
+				route = dex.SelectRoute(d.Profile, d.DexProbe, d.Target.Transport, a.dexRoutePref(hwKey))
+			}
+			var wirelessSerial string
+			for _, tr := range transports {
+				if tr.State == "device" && (tr.Transport == adb.TransportTLSWiFi || tr.Transport == adb.TransportTCP) {
+					wirelessSerial = tr.Serial
+					break
+				}
+			}
+
 			card(c.Key(devKey)).Children(func() {
 				title := d.Target.Model
 				if title == "" {
@@ -625,13 +650,30 @@ func (a *App) devicesPage(c *ui.Context, k tokens) {
 				if d.Target.Transport == adb.TransportTLSWiFi || d.Target.Transport == adb.TransportTCP {
 					tIcon = iconWifi
 				}
-				ui.Row(c.Key(devKey + "-head")).FillWidth().AlignItems(ui.Center).Gap(8).Children(func() {
+				ui.Row(c.Key(devKey + "-head")).FillWidth().AlignItems(ui.Center).Gap(8).Wrap().Children(func() {
 					ui.Icon(c, tIcon).Size(18, 18).TextColor(k.brand)
 					ui.Text(c, title).Bold().FontSize(sizeHeading)
 					ui.Text(c, d.Target.MaskedID).FontSize(sizeSmall).TextColor(k.muted).Grow(1)
-					ui.Row(c).Padding(badgePadV, badgePadH).Radius(pillRadius).Background(k.brandSoft).Children(func() {
-						ui.Text(c, transportLabel(d.Target.Transport)).FontSize(sizeSmall).TextColor(k.brand).Bold().SingleLine()
-					})
+					for _, tr := range transports {
+						ui.Row(c.Key(devKey+"-tr-"+string(tr.Transport)+"-"+tr.DeviceHash)).
+							Padding(badgePadV, badgePadH).Radius(pillRadius).Background(k.brandSoft).Children(func() {
+							ui.Text(c, transportLabel(tr.Transport)).FontSize(sizeSmall).TextColor(k.brand).Bold().SingleLine()
+						})
+					}
+					if len(transports) > 1 {
+						ui.Row(c.Key(devKey+"-handoff")).Padding(badgePadV, badgePadH).Radius(pillRadius).Background(k.brandSoft).Children(func() {
+							ui.Text(c, L.TransportHandoffReady()).FontSize(sizeSmall).TextColor(k.good).Bold().SingleLine()
+						})
+					}
+					if d.Probed {
+						streamColor := k.muted
+						if nearLimit || atLimit {
+							streamColor = k.warn
+						}
+						ui.Row(c.Key(devKey+"-enc")).Padding(badgePadV, badgePadH).Radius(pillRadius).Background(k.brandSoft).Children(func() {
+							ui.Text(c, L.EncoderStreamsBadge(usedStreams, limitStreams)).FontSize(sizeSmall).TextColor(streamColor).Bold().SingleLine()
+						})
+					}
 				})
 
 				if d.Target.State != "device" {
@@ -640,17 +682,39 @@ func (a *App) devicesPage(c *ui.Context, k tokens) {
 				}
 				if d.Probed {
 					meta := fmt.Sprintf("%s · Android %s (SDK %d)", d.Profile.Manufacturer, d.Profile.AndroidRelease, d.Profile.SDKInt)
-					if d.Profile.OneUIVersion != "" {
-						meta += " · One UI " + d.Profile.OneUIVersion
+					if uiVer := dex.FormatOneUIVersion(d.Profile.OneUIVersion); uiVer != "" {
+						meta += " · One UI " + uiVer
 					}
-					meta += " · " + d.TruthDeX.Label
+					meta += " · " + route.Label
 					ui.Text(c, meta).FontSize(sizeSmall).TextColor(k.muted)
+					if route.Reason != "" {
+						ui.Text(c, route.Reason).FontSize(sizeSmall).TextColor(k.muted)
+					}
 				} else if d.ProbeErr != "" {
 					ui.Text(c, d.ProbeErr).FontSize(sizeSmall).TextColor(k.warn)
 				}
 
+				if d.Probed && route.CanUseNativeDeX && d.Target.Transport != adb.TransportEmulator {
+					pref := a.dexRoutePref(hwKey)
+					routeIdx := 0
+					switch pref {
+					case dex.RouteNativeDeX:
+						routeIdx = 1
+					case dex.RouteVirtualFallback:
+						routeIdx = 2
+					}
+					ui.Row(c.Key(devKey + "-route-row")).FillWidth().AlignItems(ui.Center).Gap(8).Children(func() {
+						ui.Text(c, L.DeXRouteLabel()).FontSize(sizeSmall).TextColor(k.muted)
+						rseg := ui.Segmented(c.Key(devKey+"-route-seg"), &routeIdx, L.DeXRouteAuto(), L.DeXRouteNative(), L.DeXRouteFallback())
+						if rseg.Changed() {
+							prefs := []dex.RoutePreference{dex.RouteAuto, dex.RouteNativeDeX, dex.RouteVirtualFallback}
+							a.setDexRoutePref(hwKey, prefs[routeIdx])
+						}
+					})
+				}
+
 				ui.Row(c.Key(devKey + "-modes")).Gap(8).Wrap().AlignItems(ui.Center).Children(func() {
-					if d.TruthDeX.IsGenuineDeX && d.Target.Transport != adb.TransportEmulator {
+					if route.Backend == dex.BackendADBLoopback && route.IsGenuineDeX && d.Target.Transport != adb.TransportEmulator {
 						if ui.Button(c.Key(devKey+"-dex"), L.ActionLaunchDeX()).Children(func() {
 							ui.Icon(c, iconDex).Size(14, 14)
 						}).Clicked() {
@@ -663,9 +727,9 @@ func (a *App) devicesPage(c *ui.Context, k tokens) {
 					if ui.Button(c.Key(devKey+"-mirror"), L.ActionLaunchMirror()).Clicked() {
 						a.LaunchMirror(d)
 					}
-					if d.Target.Transport == adb.TransportTLSWiFi || d.Target.Transport == adb.TransportTCP {
+					if wirelessSerial != "" {
 						if ui.Button(c.Key(devKey+"-disc"), L.ActionDisconnect()).Clicked() {
-							a.DisconnectWireless(d.Target.Serial)
+							a.DisconnectWireless(wirelessSerial)
 						}
 					}
 				})
@@ -795,6 +859,10 @@ func appInitial(label string) string {
 }
 
 func (a *App) modesPage(c *ui.Context, k tokens) {
+	a.mu.Lock()
+	devs := append([]DiscoveredDevice(nil), a.devices...)
+	a.mu.Unlock()
+
 	modes := []struct {
 		key, title, badge, desc string
 	}{
@@ -815,6 +883,42 @@ func (a *App) modesPage(c *ui.Context, k tokens) {
 				ui.Text(c, m.desc).FontSize(sizeBody).TextColor(k.muted)
 			})
 		}
+		card(c.Key("mode-live-coexist")).Children(func() {
+			ui.Text(c, L.ModesLiveStatusTitle()).Bold().FontSize(sizeHeading)
+			if len(devs) == 0 {
+				ui.Text(c, L.ModesLiveStatusEmpty()).FontSize(sizeBody).TextColor(k.muted)
+			} else {
+				for _, d := range devs {
+					hwKey := d.HardwareHash
+					if hwKey == "" {
+						hwKey = d.Target.DeviceHash
+					}
+					used, limit, atLimit, nearLimit := EncoderHeadroom(d.Profile, a.activeStreamCountFor(hwKey))
+					name := d.Profile.Model
+					if name == "" {
+						name = d.Target.Model
+					}
+					if name == "" {
+						name = d.Target.MaskedID
+					}
+					route := d.Route
+					if route.Label == "" {
+						route = dex.SelectRoute(d.Profile, d.DexProbe, d.Target.Transport, a.dexRoutePref(hwKey))
+					}
+					badgeColor := k.brand
+					if nearLimit || atLimit {
+						badgeColor = k.warn
+					}
+					ui.Row(c.Key("mode-dev-" + hwKey)).FillWidth().AlignItems(ui.Center).Gap(8).Children(func() {
+						ui.Text(c, name).Bold().FontSize(sizeBody)
+						ui.Text(c, route.Label).FontSize(sizeSmall).TextColor(k.muted).Grow(1).SingleLine()
+						ui.Row(c).Padding(badgePadV, badgePadH).Radius(pillRadius).Background(k.brandSoft).Children(func() {
+							ui.Text(c, L.EncoderStreamsBadge(used, limit)).FontSize(sizeSmall).TextColor(badgeColor).Bold().SingleLine()
+						})
+					})
+				}
+			}
+		})
 		card(c.Key("mode-coexist")).Children(func() {
 			ui.Text(c, L.ModeCoexistenceNote()).Bold().FontSize(sizeBody)
 			ui.Text(c, L.ModeCoexistenceDesc()).FontSize(sizeBody).TextColor(k.muted)

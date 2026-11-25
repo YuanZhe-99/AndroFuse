@@ -16,14 +16,14 @@
 | `cmd/androfuse-svc` | Headless engine CLI (`version`, `check [--json]`, `probe [--json]`, `run [--socket <path>]`) |
 | `internal/version` | Single product version (`Version`), verified against `mygo.json` |
 | `internal/core` | `LoadLibraryEx` / `purego` loader for `androfuse_core` C ABI v4, `NV12Ring` zero-alloc frames, and `AudioPlayer` |
-| `internal/localapi` | Per-user AF_UNIX NDJSON IPC server (`SIO_AF_UNIX_GETPEERPID` + Windows SID peer verification) |
-| `internal/adb` | Argument-vector ADB client, mDNS TLS wireless connect/pair, `MaskSerial`/`MaskEndpoint` scrubbing, `emulator-*` classification, `--user 0` probes & app list |
+| `internal/localapi` | Per-user AF_UNIX NDJSON IPC server (`SIO_AF_UNIX_GETPEERPID` + Windows SID peer verification) exposing `devices` (including `unified_devices`) |
+| `internal/adb` | Argument-vector ADB client, `MergeDevices` USB+TLS Wi-Fi deduplication (`INV-02`), mDNS TLS wireless connect/pair, `MaskSerial`/`MaskEndpoint` scrubbing, `emulator-*` classification, `--user 0` probes & app list |
 | `internal/lease` | Atomic `leases.json` ledger guaranteeing cleanup of virtual displays, DeX loopbacks, and port forwards (`INV-03`) |
 | `internal/scrcpy` | `scrcpy-server v5.0.1` wire framing, interactive touch/mouse/scroll/keyboard/flex-display sessions, raw PCM audio, `MP4Recorder`, and offline replay fixtures |
-| `internal/dex` | Samsung Native DeX orchestration (`server/dexhelper` loopback), real app label + 96x96 PNG icon cache (`ListAppsWithIcons`), and `EvaluateTruth` (`INV-06`; Miracast hidden) |
-| `internal/gui` | MyGo native UI shell, App Launcher Grid, chromeless `SessionModeApp` & `SessionWindow` NV12 video, `SaveNV12AsPNG`, clipboard/audio controls, tray, and diagnostics |
+| `internal/dex` | Samsung Native DeX orchestration (`server/dexhelper` loopback + 30s grace-period `Reattach`), real app label + 96x96 PNG icon cache (`ListAppsWithIcons`), `SelectRoute`, and `EvaluateTruth` (`INV-06`; Miracast hidden) |
+| `internal/gui` | MyGo native UI shell, unified device cards with USB+Wi-Fi hot-handoff & `EncoderHeadroom` (`INV-01`/`INV-02`), DeX route selector (`INV-06`), App Launcher Grid, chromeless `SessionModeApp` & `SessionWindow` NV12 video, `SaveNV12AsPNG`, clipboard/audio controls, tray, and diagnostics |
 | `locales` | English (`en`) and Simplified Chinese (`zh-Hans`) ARB catalogs + generated accessors |
-| `server/dexhelper` | Clean-room Java UID 2000 `app_process` helper (`probe`, `apps`, `serve`, `recover`) driving `SemWifiDisplayConfig` loopback and launcher icon extraction |
+| `server/dexhelper` | Clean-room Java UID 2000 `app_process` helper (`probe`, `apps`, `serve`, `attach`, `recover`) driving `SemWifiDisplayConfig` loopback, grace control re-attach, and launcher icon extraction |
 | `tools/fetchdeps` | Downloads and SHA-256 verifies official Apache-2.0 `scrcpy-server-v5.0.1` into `.dev/cache/` |
 | `tools/builddex` | Compiles and dexes `server/dexhelper` into `build/androfuse-dex-helper.jar` |
 | `tools/icon` | Renders `resources/icon.svg` into desktop, UI, tray, and Android adaptive icon PNGs |
@@ -32,7 +32,7 @@
 
 ## Planned Runtime Modules (M2–M4)
 
-1. **USB-to-TLS Hot Handoff & Telemetry Multiplexing (M2–M3)**: Automatic 30s grace-period handoff when unplugging USB and background telemetry streaming over `internal/localapi`.
+1. **USB-to-TLS Hot Handoff & Telemetry Multiplexing (M2 core landed; M3 telemetry push)**: `UnifiedDevice` deduplicates transports via `ro.serialno` hash (`INV-02`) and `SessionWindow` performs a 30s grace-period `dexhelper attach` loopback re-attach over paired TLS Wi-Fi ADB; background telemetry streaming over `internal/localapi` expands in M3.
 2. **Android Companion (`internal/androidhost` in M3)**: Optional signed APK built from this repository with graded, toggleable permissions.
 3. **Cross-Network / 5G Remote Transport (`M3–M4`)**: Across different Wi-Fi subnets over BYO-VPN or embedded userspace (`--no-tun`) EasyTier mesh, the Companion beacons `_adb-tls-connect._tcp` dynamic port changes for full `scrcpy`/DeX; over pure 5G cellular (where stock non-root Android blocks `adbd` wireless debugging), Companion uses native `MediaProjection` H.264/HEVC + optional `AccessibilityService` input over the encrypted overlay.
 

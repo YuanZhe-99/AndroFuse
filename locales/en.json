@@ -17,6 +17,8 @@
   "ModeDexTitle": "Samsung DeX Desktop",
   "ModeDexBadge": "Wired & TLS Wi-Fi",
   "ModeDexDesc": "Runs genuine Samsung DeX over wired USB ADB or encrypted TLS Wireless ADB (`SemWifiDisplayConfig` loopback), with verified multi-window, taskbar, Recents, desktop mouse behavior, and honest virtual fallback.",
+  "ModesLiveStatusTitle": "Connected Devices & Stream Coexistence",
+  "ModesLiveStatusEmpty": "Connect a Samsung or Android device on the Devices page to inspect live encoder headroom and DeX routing.",
   "ModeMirrorTitle": "Android Phone Mirroring",
   "ModeMirrorBadge": "Active M1",
   "ModeMirrorDesc": "Low-latency screen mirroring with keyboard/mouse, audio, clipboard, portrait/landscape rotation, borderless fullscreen, screenshots, recording, and screen-on or screen-off display modes.",
@@ -55,6 +57,37 @@
   "ActionLaunchFallback": "Virtual Desktop Fallback",
   "ActionLaunchMirror": "Phone Mirror",
   "ActionLaunchApp": "Open App Window",
+  "TransportHandoffReady": "USB + Wi-Fi Hot Handoff Ready",
+  "EncoderStreamsBadge": "Streams {used}/{limit}",
+  "@EncoderStreamsBadge": {
+    "placeholders": {
+      "used": { "type": "int" },
+      "limit": { "type": "int" }
+    }
+  },
+  "EncoderLimitReached": "Hardware encoder stream limit reached ({used}/{limit}). Close an open window before launching another.",
+  "@EncoderLimitReached": {
+    "placeholders": {
+      "used": { "type": "int" },
+      "limit": { "type": "int" }
+    }
+  },
+  "DeXRouteLabel": "DeX Mode Route",
+  "DeXRouteAuto": "Auto",
+  "DeXRouteNative": "Native DeX",
+  "DeXRouteFallback": "Fallback",
+  "DeXReconnecting": "Transport lost — waiting to hand off DeX ({seconds}s)...",
+  "@DeXReconnecting": {
+    "placeholders": {
+      "seconds": { "type": "int" }
+    }
+  },
+  "DeXReattached": "DeX handed off to {transport}",
+  "@DeXReattached": {
+    "placeholders": {
+      "transport": { "type": "String" }
+    }
+  },
   "AppFilterHint": "Filter installed apps...",
   "AppLauncherTitle": "Independent App Launcher",
   "AppShowSystem": "Show System",

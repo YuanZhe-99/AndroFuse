@@ -49,6 +49,8 @@ type Device struct {
 type DeviceProfile struct {
 	MaskedID         string `json:"masked_id"`
 	DeviceHash       string `json:"device_hash"`
+	HardwareSerial   string `json:"-"`
+	HardwareHash     string `json:"hardware_hash,omitempty"`
 	Manufacturer     string `json:"manufacturer"`
 	Model            string `json:"model"`
 	AndroidRelease   string `json:"android_release"`
@@ -471,6 +473,7 @@ func (c *Client) ProbeDevice(ctx context.Context, serial string) (DeviceProfile,
 	defer cancel()
 
 	script := strings.Join([]string{
+		`echo "HWSER=$(getprop ro.serialno)"`,
 		`echo "MFR=$(getprop ro.product.manufacturer)"`,
 		`echo "MOD=$(getprop ro.product.model)"`,
 		`echo "REL=$(getprop ro.build.version.release)"`,
@@ -497,12 +500,18 @@ func ParseDeviceProbe(serial, raw string) DeviceProfile {
 	prof := DeviceProfile{
 		MaskedID:         MaskSerial(serial),
 		DeviceHash:       DeviceHash(serial),
+		HardwareHash:     DeviceHash(serial),
 		WifiDisplayState: -1,
 	}
 	seenDisp := map[int]bool{}
 	for _, line := range strings.Split(raw, "\n") {
 		line = strings.TrimSpace(line)
 		switch {
+		case strings.HasPrefix(line, "HWSER="):
+			prof.HardwareSerial = strings.TrimSpace(strings.TrimPrefix(line, "HWSER="))
+			if prof.HardwareSerial != "" && !strings.EqualFold(prof.HardwareSerial, "unknown") {
+				prof.HardwareHash = DeviceHash(prof.HardwareSerial)
+			}
 		case strings.HasPrefix(line, "MFR="):
 			prof.Manufacturer = strings.TrimPrefix(line, "MFR=")
 		case strings.HasPrefix(line, "MOD="):

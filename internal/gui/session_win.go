@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"context"
 	"fmt"
 	"image"
 	"os"
@@ -33,6 +34,8 @@ const (
 // SessionSpec configures a live interactive desktop stream window.
 type SessionSpec struct {
 	ID           string
+	DeviceKey    string // Unified HardwareHash for stream accounting & handoff (INV-02)
+	Serial       string
 	Title        string
 	Mode         SessionMode
 	Transport    string
@@ -186,9 +189,144 @@ func (sw *SessionWindow) attachMiracast(m *dex.MiracastSession) {
 	}
 }
 
+func (sw *SessionWindow) swapScrcpy(newSess *scrcpy.Session, newTransport, newSerial string) {
+	sw.mu.Lock()
+	if sw.closing {
+		sw.mu.Unlock()
+		if newSess != nil {
+			newSess.Close()
+		}
+		return
+	}
+	sw.scrcpySess = newSess
+	sw.spec.Transport = newTransport
+	sw.spec.Serial = newSerial
+	if newSess != nil {
+		st := newSess.Stats()
+		sw.codecLabel = codecName(st.CodecID)
+		if st.NegotiatedWidth > 0 && st.NegotiatedHeight > 0 {
+			sw.negotiatedW = int(st.NegotiatedWidth)
+			sw.negotiatedH = int(st.NegotiatedHeight)
+		}
+	}
+	win := sw.win
+	sw.mu.Unlock()
+	if win != nil {
+		win.Update(func() {})
+	}
+	if newSess != nil {
+		go sw.watchScrcpyEnd(newSess)
+	}
+}
+
 func (sw *SessionWindow) watchScrcpyEnd(s *scrcpy.Session) {
 	<-s.Done()
+	sw.mu.Lock()
+	closing := sw.closing
+	isCurrent := sw.scrcpySess == s
+	canHandoff := sw.spec.Mode == SessionModeDeX &&
+		sw.dexSess != nil &&
+		sw.dexSess.Ready().CtrlPort > 0 &&
+		sw.app != nil
+	sw.mu.Unlock()
+	if closing || !isCurrent {
+		return
+	}
+	if canHandoff {
+		sw.attemptDeXGraceHandoff(s)
+		return
+	}
 	if err := s.Err(); err != nil {
+		sw.setStatusNote(err.Error())
+		return
+	}
+	sw.setStatusNote(L.SessionEnded())
+}
+
+func (sw *SessionWindow) attemptDeXGraceHandoff(failedSess *scrcpy.Session) {
+	app := sw.app
+	client, store, err := app.ensureADBAndLeases()
+	if err != nil {
+		sw.setStatusNote(L.SessionEnded())
+		return
+	}
+	app.rt.coreMu.Lock()
+	lib, lErr := app.ensureCoreLocked()
+	app.rt.coreMu.Unlock()
+	if lErr != nil {
+		sw.setStatusNote(L.SessionEnded())
+		return
+	}
+
+	sw.mu.Lock()
+	dSess := sw.dexSess
+	devKey := sw.spec.DeviceKey
+	prevSerial := sw.spec.Serial
+	sw.mu.Unlock()
+	if dSess == nil {
+		sw.setStatusNote(L.SessionEnded())
+		return
+	}
+
+	graceSec := dSess.GraceSec()
+	if graceSec <= 0 {
+		graceSec = 30
+	}
+	deadline := time.Now().Add(time.Duration(graceSec) * time.Second)
+	for time.Now().Before(deadline) {
+		sw.mu.Lock()
+		stillSame := !sw.closing && sw.scrcpySess == failedSess
+		sw.mu.Unlock()
+		if !stillSame {
+			return
+		}
+		rem := max(int(time.Until(deadline).Seconds())+1, 1)
+		sw.setStatusNote(L.DeXReconnecting(rem))
+
+		qCtx, qCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		cand, ok := app.findLiveTransportFor(qCtx, client, devKey, prevSerial)
+		qCancel()
+		if ok {
+			rCtx, rCancel := context.WithTimeout(context.Background(), 12*time.Second)
+			ready, rErr := dSess.Reattach(rCtx, cand.Serial)
+			if rErr == nil {
+				var newSess *scrcpy.Session
+				newSess, vErr := scrcpy.StartADB(rCtx, client, lib, store, scrcpy.LaunchConfig{
+					SessionID:     sw.spec.ID + "-vid",
+					Serial:        cand.Serial,
+					DisplayID:     ready.DisplayID,
+					MaxFPS:        60,
+					VideoBitRate:  12_000_000,
+					EnableControl: true,
+					Audio:         true,
+					InitialWidth:  uint32(ready.Width),
+					InitialHeight: uint32(ready.Height),
+					OnFrame: func(f core.NV12Frame) {
+						if newSess != nil {
+							st := newSess.Stats()
+							sw.PushNV12(f, st.MeasuredFPS, st.AvgDecodeUs)
+						} else {
+							sw.PushNV12(f, 0, int64(f.DecodeUs))
+						}
+					},
+					OnClipboard: sw.OnDeviceClipboard,
+					OnAudioPCM:  sw.PushAudioPCM,
+				})
+				rCancel()
+				if vErr == nil {
+					tLbl := transportLabel(cand.Transport)
+					sw.swapScrcpy(newSess, tLbl, cand.Serial)
+					sw.flashNote(L.DeXReattached(tLbl))
+					app.RefreshDevices()
+					return
+				}
+			} else {
+				rCancel()
+			}
+		}
+		time.Sleep(1500 * time.Millisecond)
+	}
+	if err := failedSess.Err(); err != nil {
 		sw.setStatusNote(err.Error())
 		return
 	}
@@ -543,6 +681,9 @@ func (sw *SessionWindow) view(c *ui.Context) {
 	recording := sw.recording
 	win := sw.win
 	s := sw.scrcpySess
+	specTransport := sw.spec.Transport
+	specBackend := sw.spec.BackendLabel
+	specTarget := sw.spec.TargetSpec
 	sw.mu.Unlock()
 
 	if codec == "" {
@@ -557,7 +698,7 @@ func (sw *SessionWindow) view(c *ui.Context) {
 		resText = fmt.Sprintf("%d×%d", negW, negH)
 	}
 	telem := fmt.Sprintf("%s · %s · %.1f fps · %s [%s] · %.1f ms",
-		sw.spec.BackendLabel, resText, fps, codec, hwTag, float64(decUs)/1000.0)
+		specBackend, resText, fps, codec, hwTag, float64(decUs)/1000.0)
 
 	ui.Column(c.Key("session-root")).Fill().AlignItems(ui.Stretch).Children(func() {
 		if sw.spec.Mode == SessionModeApp {
@@ -568,10 +709,10 @@ func (sw *SessionWindow) view(c *ui.Context) {
 				Background(ui.Hex(hudBgDark)).Padding(6, 12).Gap(8).AlignItems(ui.Center).Children(func() {
 				ui.Row(c.Key("hud-transport-pill")).Padding(badgePadV, badgePadH).Radius(pillRadius).
 					Background(k.brandSoft).Children(func() {
-					ui.Text(c, sw.spec.Transport).FontSize(sizeSmall).TextColor(k.brand).Bold().SingleLine()
+					ui.Text(c, specTransport).FontSize(sizeSmall).TextColor(k.brand).Bold().SingleLine()
 				})
 				ui.Text(c, telem).FontSize(sizeSmall).TextColor(ui.Hex("#E6EEF2")).Grow(1).SingleLine().
-					Tooltip(L.TelemetryTargetPrefix(sw.spec.TargetSpec))
+					Tooltip(L.TelemetryTargetPrefix(specTarget))
 
 				if s != nil {
 					modeLbl := L.InputModeMouse()

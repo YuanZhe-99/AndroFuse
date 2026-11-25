@@ -243,12 +243,12 @@ flowchart TB
   4. **`androfuse-svc run` + `internal/localapi`**：Windows AF_UNIX NDJSON 守护服务，内置 `SIO_AF_UNIX_GETPEERPID` + Windows SID 同用户校验与启动期 `leases.json` 自动恢复；
   5. **音视频与输入完善**：Rust `wasapi_audio.rs` 共享模式 WASAPI PCM 播放器（C ABI v4）+ `scrcpy` `audio_codec=raw` 音频透传（不支持音频时安全降级）、双向剪贴板同步（设备→PC 与 `Ctrl+V`/按钮 PC→设备）、`SaveNV12AsPNG` 截图与 `MP4Recorder` 零重编码分片 MP4 录屏。
 
-### M2：Samsung DeX 完整体验完善与多设备稳态（`0.2.0`）
-- **交付范围**：
-  1. 深化 **ADB Native DeX**（有线 USB & 加密 TLS Wi-Fi ADB，`SemWifiDisplayConfig` 回环；Miracast 方案因依赖未公开接口保持隐藏）与会话中途断线宽限续接；
-  2. 按设备型号与 One UI 版本自动选路、支持用户手动切换至安全回退虚拟显示，界面明确展示当前实际方案（`INV-06`）；
-  3. 验证 DeX 多窗口、任务栏、最近任务、右键/滚轮/悬停完整度；支持模式一、模式二、模式三在硬件允许下按并存矩阵协同运行。
-- **Done When**：至少一台支持 DeX 的三星真机完成有线 USB 与加密 TLS Wi-Fi 双通道完整 DeX 验收，非 DeX 机器正确拒绝或走提示后的回退流程。
+### M2：Samsung DeX 完整体验完善与多设备稳态（`0.2.0` — 🚧 代码已就绪，待接 Fold 8 真机复验 USB→Wi-Fi 热切换）
+- **已落地（核心实现与离线/界面回归已通过）**：
+  1. **单设备多传输去重聚合（`INV-02`）**：`internal/adb` 通过 `getprop ro.serialno` 硬件哈希将同一台手机的有线 USB 与加密 TLS 无线 ADB 合并为一张统一设备卡片（`MergeDevices`/`UnifiedDevice`，`localapi` 同步返回 `unified_devices`），保留全部传输徽标并提示热切换就绪；
+  2. **30 秒断线宽限保活与热切换续接**：`server/dexhelper` 新增本地控制回环监听端口与 `attach <token> <ctrl_port>` 子命令；`LoopbackSession.Reattach` 与 `SessionWindow.attemptDeXGraceHandoff` 在 USB 意外拔线时保持 `AndroFuseDeX` 桌面状态，30 秒内自动切换至同设备在线 TLS 无线 ADB 无缝重连视频与控制；
+  3. **路由策略选择器与编码器并发余量保护（`INV-01`、`INV-06`）**：新增 `FormatOneUIVersion` + `SelectRoute` 与卡片路由分段选择器（自动选路 / 原生 DeX / 虚拟兼容模式），并在“设备”与“工作模式”页实时展示硬件编码流并发计数与上限拦截，防止静默黑屏。
+- **待真机实测收口**：接上物理三星 Fold 8 后执行有线 USB 拔线热切换至加密 TLS Wi-Fi DeX 的真机端到端验收；非 DeX 机型在 `Pixel_9a_API_36` 与离线回归测试中均已校验诚实回退标注。
 
 ### M3：Android Companion APK 与跨端协同（`0.3.0`）
 - **交付范围**：
