@@ -92,6 +92,9 @@ type App struct {
 	langIndex  int
 	quitting   bool
 	toastMsg   string
+	cardWork   map[string]cardWork // per phone card: what runs, or why it failed (setCardWork)
+	// compInstalled is what the last check found of each phone's Companion (syncCompanion).
+	compInstalled map[string]compInstall
 
 	rt              guiRuntime
 	scanningDevices bool
@@ -120,6 +123,7 @@ type App struct {
 	micUplinkActive bool
 	micUplinkNotice string
 	customAPK       string // a Companion installer the user chose (ChooseCompanionAPK)
+	errs            errLog // recent failures in full, for Save logs
 
 	sessions    map[string]*SessionWindow
 	remembered  []RememberedDevice // devices.json
@@ -223,6 +227,8 @@ func (a *App) Start() {
 		on := mygo.App.OpenAtLogin()
 		a.update(func() { a.openAtLogin = on })
 	}()
+	host, _ := os.Hostname()
+	companion.SetClient(a.deviceID(), host)
 	a.RefreshDiagnostics()
 	a.RefreshDevices()
 	a.RefreshVMStatus()
@@ -276,11 +282,10 @@ func (a *App) RefreshDiagnostics() {
 		return
 	}
 	a.probing = true
-	stateDir, profile := a.stateDir, a.profile
 	a.mu.Unlock()
 
 	go func() {
-		res := RunDiagnostics(stateDir, profile)
+		res := a.hostDiagnostics()
 		a.update(func() {
 			a.diag = res
 			a.diagReady = true

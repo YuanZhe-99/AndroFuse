@@ -14,6 +14,19 @@ import (
 	L "github.com/YuanZhe-99/AndroFuse/locales"
 )
 
+var errMeshNeedsCompanion = errors.New("mesh needs companion")
+
+// connectFailure formats a connection error into plain interface wording (`INV-08`).
+func (a *App) connectFailure(err error) string {
+	if err == nil {
+		return ""
+	}
+	if errors.Is(err, errMeshNeedsCompanion) {
+		return L.ConnectMeshNeedsCompanion()
+	}
+	return a.failed(L.FailConnect(), err)
+}
+
 // connectPhase is where Home's "Connect a phone" stands.
 type connectPhase int
 
@@ -133,11 +146,7 @@ func (a *App) ConnectByAddress() {
 		case needPair:
 			a.update(func() { a.connect.Phase = connectNeedPair })
 		default:
-			msg := ""
-			if err != nil {
-				msg = err.Error()
-			}
-			a.update(func() { a.connect.Phase, a.connect.Notice = connectNoAnswer, msg })
+			a.update(func() { a.connect.Phase, a.connect.Notice = connectNoAnswer, a.connectFailure(err) })
 		}
 	}()
 }
@@ -189,7 +198,7 @@ func (a *App) findAndConnect(ctx context.Context, host string, port int) (string
 	}
 	// 3. The usual Wireless debugging range, on addresses this computer can route to.
 	if a.isMeshAddress(host) {
-		return "", false, errors.New(L.ConnectMeshNeedsCompanion())
+		return "", false, errMeshNeedsCompanion
 	}
 	found := adb.FindWirelessPort(ctx, host, func(p float64) {
 		a.update(func() { a.connect.Progress = p })
@@ -230,7 +239,7 @@ func (a *App) PairAndConnect() {
 			pcancel()
 		}
 		if err != nil {
-			a.update(func() { a.connect.Phase, a.connect.Notice = connectNeedPair, err.Error() })
+			a.update(func() { a.connect.Phase, a.connect.Notice = connectNeedPair, a.failed(L.FailPair(), err) })
 			return
 		}
 		serial, needPair, err := a.findAndConnect(ctx, f.Host, f.Port)
@@ -240,11 +249,7 @@ func (a *App) PairAndConnect() {
 		case needPair:
 			a.update(func() { a.connect.Phase = connectNeedPair })
 		default:
-			msg := ""
-			if err != nil {
-				msg = err.Error()
-			}
-			a.update(func() { a.connect.Phase, a.connect.Notice = connectNoAnswer, msg })
+			a.update(func() { a.connect.Phase, a.connect.Notice = connectNoAnswer, a.connectFailure(err) })
 		}
 	}()
 }
@@ -269,11 +274,7 @@ func (a *App) ConnectManualPort() {
 		case needPair:
 			a.update(func() { a.connect.Phase = connectNeedPair })
 		default:
-			msg := ""
-			if err != nil {
-				msg = err.Error()
-			}
-			a.update(func() { a.connect.Phase, a.connect.Notice = connectNoAnswer, msg })
+			a.update(func() { a.connect.Phase, a.connect.Notice = connectNoAnswer, a.connectFailure(err) })
 		}
 	}()
 }
@@ -419,10 +420,8 @@ func (a *App) isMeshAddress(host string) bool {
 // its Companion (on adb, the LAN or a network).
 func (a *App) connectRemembered(r RememberedDevice, openAs int) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
-	a.update(func() {
-		a.connect.cancel = cancel
-		a.connect.Phase, a.connect.Progress, a.connect.Notice = connectLooking, 0, ""
-	})
+	a.update(func() { a.connect.cancel = cancel })
+	a.setCardWork(r.HardwareHash, cardWork{Busy: L.CardConnecting(r.displayName())})
 	go func() {
 		defer cancel()
 		client, _, err := a.ensureADBAndLeases()
@@ -431,6 +430,7 @@ func (a *App) connectRemembered(r RememberedDevice, openAs int) {
 			_, err = client.ConnectTLS(cctx, r.Endpoint, false)
 			ccancel()
 			if err == nil {
+				a.setCardWork(r.HardwareHash, cardWork{})
 				a.afterConnect(r.Endpoint, openAs)
 				return
 			}
@@ -438,15 +438,19 @@ func (a *App) connectRemembered(r RememberedDevice, openAs int) {
 		if r.Companion != nil {
 			var serial string
 			if serial, err = a.adbOverCompanion(ctx, r.HardwareHash); err == nil {
+				a.setCardWork(r.HardwareHash, cardWork{})
 				a.afterConnect(serial, openAs)
 				return
 			}
 		}
-		msg := L.ConnectOfflinePhone(r.displayName())
-		if err != nil {
-			msg = err.Error()
+		plain := L.CardCantReach(r.displayName())
+		if r.Companion != nil {
+			plain = L.CardCantReachShare(r.displayName())
 		}
-		a.update(func() { a.connect.Phase, a.connect.Notice = connectIdle, msg })
+		if err == nil {
+			err = errors.New("no Wireless debugging address and no Companion")
+		}
+		a.setCardWork(r.HardwareHash, cardWork{Note: a.failed(plain, err)})
 	}()
 }
 
@@ -467,23 +471,10 @@ func (a *App) adbOverCompanion(ctx context.Context, hash string) (string, error)
 	if err != nil {
 		return "", err
 	}
-	addr, err := a.companionRoute(ctx, hash, b)
+	c, addr, err := a.findCompanion(ctx, hash, b, string(tok))
 	if err != nil {
 		return "", err
 	}
-	var c *companion.Client
-	for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(time.Second) {
-		dctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		c, err = companion.Dial(dctx, addr, string(tok), b.Fingerprint)
-		cancel()
-		if err == nil || time.Now().After(deadline) || ctx.Err() != nil {
-			break
-		}
-	}
-	if err != nil {
-		return "", err
-	}
-	a.noteMeshHost(hash, c.PeerInfo().MeshHost)
 	st, err := c.GetStatus(ctx)
 	_ = c.Close()
 	if err != nil {
@@ -492,9 +483,38 @@ func (a *App) adbOverCompanion(ctx context.Context, hash string) (string, error)
 	if st.WirelessADBPort <= 0 {
 		return "", errors.New(L.ConnectWirelessOff(r.displayName()))
 	}
+	client, _, err := a.ensureADBAndLeases()
+	if err != nil {
+		return "", err
+	}
+	// The port changes each time Wireless debugging turns on, so the remembered address is often
+	// stale while the phone's Wi-Fi address may not be: when the phone is on Wi-Fi, try that
+	// address with the current port first. Another network can hold another device at the same
+	// private address, so the connection counts only when it is this phone (same hardware hash);
+	// otherwise it is closed and the Companion tunnel is used.
+	if host, _, err := net.SplitHostPort(r.Endpoint); err == nil && st.NetworkType == "wifi" {
+		direct := net.JoinHostPort(host, strconv.Itoa(st.WirelessADBPort))
+		dctx, dcancel := context.WithTimeout(ctx, 8*time.Second)
+		if _, err := client.ConnectTLS(dctx, direct, false); err == nil {
+			if prof, err := client.ProbeDevice(dctx, direct); err == nil && (prof.HardwareHash == hash || prof.DeviceHash == hash) {
+				dcancel()
+				return direct, nil
+			}
+			_ = client.Disconnect(dctx, direct)
+		}
+		dcancel()
+	}
 	a.rt.coreMu.Lock()
 	if stop := a.rt.tunnels[hash]; stop != nil {
 		stop()
+		// Close the replaced tunnel's adb connection too, or adb lists the phone twice.
+		if old := a.rt.tunnelAddrs[hash]; old != "" {
+			go func() {
+				dctx, dcancel := context.WithTimeout(context.Background(), 3*time.Second)
+				defer dcancel()
+				_ = client.Disconnect(dctx, old)
+			}()
+		}
 	}
 	tctx, stop := context.WithCancel(context.Background())
 	if a.rt.tunnels == nil {
@@ -507,10 +527,12 @@ func (a *App) adbOverCompanion(ctx context.Context, hash string) (string, error)
 		stop()
 		return "", err
 	}
-	client, _, err := a.ensureADBAndLeases()
-	if err != nil {
-		return "", err
+	a.rt.coreMu.Lock()
+	if a.rt.tunnelAddrs == nil {
+		a.rt.tunnelAddrs = map[string]string{}
 	}
+	a.rt.tunnelAddrs[hash] = local
+	a.rt.coreMu.Unlock()
 	cctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	if _, err := client.ConnectTLS(cctx, local, false); err != nil {

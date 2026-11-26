@@ -31,7 +31,7 @@ AndroFuse 文档（`doc/en-us/` → `doc/zh-cn/`）的权威英文→简体中�
 | Delay-Load | 延迟加载 | DLL 仅在首次调用其函数时才解析加载（如 `packet.dll`） |
 | Phone screen | 手机屏幕 | 界面中对手机镜像的叫法（V3） |
 | App window | 应用窗口 | 界面中对独立应用窗口的叫法（V3） |
-| Large-screen desktop (not Samsung DeX) | 大屏桌面（非三星 DeX） | 回退方案，绝不称作 DeX（`INV-06`） |
+| Android desktop mode | Android 桌面模式 | 回退方案（Android 自带的虚拟屏桌面模式），绝不称作 DeX（`INV-06`） |
 | Cross-network | 跨网络 | 界面中对 EasyTier 网络的叫法（代替「组网」） |
 | Companion screen sharing | 伴侣共享屏幕 | 移动网络下的 MediaProjection 屏幕共享 |
 | Local assistant | 本机助手 | 可选的本地 MCP 控制（代替「MCP」） |

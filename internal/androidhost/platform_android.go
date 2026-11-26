@@ -36,10 +36,17 @@ func deviceIdentity() (name, model, release string, sdk int) {
 	return identity.name, identity.model, identity.release, identity.sdk
 }
 
+// readDeviceTelemetry reads the battery from Android's BatteryManager, and from sysfs only on phones
+// that still let apps read it; the network type comes from the Host's network callback.
 func readDeviceTelemetry() companion.DeviceStatus {
-	st := companion.DeviceStatus{
-		BatteryPct:  -1,
-		NetworkType: "wifi/cellular",
+	st := companion.DeviceStatus{BatteryPct: -1}
+	if pct, charging, temp, ok := androidbridge.Battery(); pct >= 0 {
+		st.BatteryPct, st.Charging = pct, charging
+		if ok {
+			st.TempC = temp
+			st.ThermalWarning = temp >= 43.0
+		}
+		return st
 	}
 	if raw, err := os.ReadFile("/sys/class/power_supply/battery/capacity"); err == nil {
 		if v, err := strconv.Atoi(strings.TrimSpace(string(raw))); err == nil {

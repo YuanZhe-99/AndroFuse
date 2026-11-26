@@ -3,11 +3,13 @@ package androidhost
 import (
 	"fmt"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/egoist/mygo/ui"
 
 	"github.com/YuanZhe-99/AndroFuse/internal/androidbridge"
+	"github.com/YuanZhe-99/AndroFuse/internal/version"
 	L "github.com/YuanZhe-99/AndroFuse/locales"
 )
 
@@ -108,14 +110,21 @@ func (h *Host) pairPrompt(c *ui.Context) {
 	})
 }
 
-// homeTab shows the service switch, the pairing code and address, the mesh and standby, and,
-// unless the other tabs already show beside it (wide), links to them.
+// homeTab is the Companion's main page in sections: the app's name, Connection (the service and
+// Wireless debugging), Paired computers, Network, Settings (standby, language, notifications,
+// and, unless they show beside it on an unfolded phone, permissions and security) and More.
 func (h *Host) homeTab(c *ui.Context, wide bool) {
 	t := c.Theme()
 	h.mu.Lock()
 	running, cfg, lastErr := h.running, h.cfg, h.lastErr
 	h.mu.Unlock()
 
+	ui.Column(c.Key("comp-head")).FillWidth().Gap(4).Padding(8, 4, 4, 4).Children(func() {
+		ui.Text(c, "AndroFuse").Bold().FontSize(28)
+		ui.Text(c, L.PhoneTagline()).FontSize(14).TextColor(t.TextMuted)
+	})
+
+	sectionTitle(c, L.PhoneSectionConnection())
 	card(c.Key("comp-service-card")).Children(func() {
 		ui.Row(c.Key("comp-service-row")).FillWidth().Gap(10).AlignItems(ui.Center).Children(func() {
 			dot := t.TextMuted
@@ -130,7 +139,7 @@ func (h *Host) homeTab(c *ui.Context, wide bool) {
 			})
 			if running {
 				if ui.Button(c.Key("comp-btn-stop"), L.CompanionActionStop()).Clicked() {
-					go func() { _ = h.StopServer() }()
+					go h.StopByUser()
 				}
 			} else if ui.PrimaryButton(c.Key("comp-btn-start"), L.CompanionActionStart()).Clicked() {
 				go func() { _ = h.StartServer() }()
@@ -140,22 +149,30 @@ func (h *Host) homeTab(c *ui.Context, wide bool) {
 			ui.Text(c, lastErr).FontSize(12).TextColor(t.Danger)
 		}
 	})
-
 	h.adbCard(c)
 
-	on := 0
-	for _, v := range []bool{cfg.Permissions.Telemetry, cfg.Permissions.Clipboard, cfg.Permissions.Notifications, cfg.Permissions.FileTransfer,
-		cfg.Permissions.AppContinuity, cfg.Permissions.DisplayGuard, cfg.Permissions.ADBBeacon, cfg.Permissions.MediaBridge} {
-		if v {
-			on++
-		}
-	}
+	sectionTitle(c, L.PhoneComputersTitle())
+	h.computersCard(c)
+
+	sectionTitle(c, L.MeshPhoneTitle())
+	h.meshCard(c)
+
+	sectionTitle(c, L.PhoneSectionSettings())
+	h.settingsCard(c)
 	if !wide {
+		on := 0
+		for _, v := range []bool{cfg.Permissions.Telemetry, cfg.Permissions.Clipboard, cfg.Permissions.Notifications, cfg.Permissions.FileTransfer,
+			cfg.Permissions.AppContinuity, cfg.Permissions.DisplayGuard, cfg.Permissions.ADBBeacon, cfg.Permissions.MediaBridge} {
+			if v {
+				on++
+			}
+		}
 		h.linkRow(c, "home-perms", iconShield, L.PhonePermsSummary(), L.PhonePermsOn(on), tabPermissions)
 		h.linkRow(c, "home-security", iconLock, L.PhoneSecuritySummary(), L.PhoneSecuritySub(), tabSecurity)
 	}
-	h.meshCard(c)
-	h.standbyCard(c)
+
+	sectionTitle(c, L.PhoneSectionMore())
+	h.aboutCard(c)
 }
 
 // linkRow is a Home card that opens another tab (on unfolded foldables every tab already shows).
@@ -180,8 +197,8 @@ func (h *Host) linkRow(c *ui.Context, key string, icon *ui.SVG, title, sub, tab 
 	}
 }
 
-// meshCard shows the EasyTier network a paired computer handed over, its low-power switch and
-// Leave.
+// meshCard shows the phone's EasyTier network (handed over by a paired computer or typed here),
+// Edit, its low-power switch and Leave.
 func (h *Host) meshCard(c *ui.Context) {
 	t := c.Theme()
 	name, running, errMsg := h.MeshState()
@@ -189,7 +206,11 @@ func (h *Host) meshCard(c *ui.Context) {
 		ui.Row(c.Key("comp-mesh-head")).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
 			tile(c, iconGlobe)
 			ui.Column(c.Key("comp-mesh-text")).Grow(1).MinWidth(0).Gap(2).Children(func() {
-				ui.Text(c, L.MeshPhoneTitle()).Bold().FontSize(14)
+				title := L.MeshPhoneNotJoined()
+				if name != "" {
+					title = name
+				}
+				ui.Text(c, title).Bold().FontSize(14).SingleLine()
 				switch {
 				case name == "":
 					ui.Text(c, L.MeshPhoneNone()).FontSize(12).TextColor(t.TextMuted)
@@ -199,10 +220,23 @@ func (h *Host) meshCard(c *ui.Context) {
 					ui.Text(c, L.MeshPhoneConnecting()).FontSize(12).TextColor(t.TextMuted)
 				}
 			})
+			h.mu.Lock()
+			editing := h.meshForm != nil
+			h.mu.Unlock()
+			if !editing {
+				label := L.MeshPhoneJoinOwn()
+				if name != "" {
+					label = L.ActionEdit()
+				}
+				if ui.Button(c.Key("comp-mesh-edit"), label).Clicked() {
+					h.editMesh()
+				}
+			}
 			if name != "" && ui.Button(c.Key("comp-mesh-leave"), L.MeshPhoneLeave()).Clicked() {
 				go h.LeaveMesh()
 			}
 		})
+		h.meshEditor(c)
 		if name != "" {
 			saver := !h.MeshFullSpeed()
 			switchRow(c, "mesh-saver", L.MeshSaverTitle(), L.MeshSaverDesc(), &saver, func() { h.SetMeshFullSpeed(!saver) })
@@ -213,14 +247,74 @@ func (h *Host) meshCard(c *ui.Context) {
 	})
 }
 
-// standbyCard holds the background standby switch (PLAN §9.1-3).
-func (h *Host) standbyCard(c *ui.Context) {
+// settingsCard holds background standby (PLAN §9.1-3), the app's language and a way to Android's
+// notification settings for AndroFuse.
+func (h *Host) settingsCard(c *ui.Context) {
+	t := c.Theme()
 	h.mu.Lock()
 	standby := h.cfg.Standby
 	h.mu.Unlock()
-	card(c.Key("comp-standby-card")).Children(func() {
+	card(c.Key("comp-settings-card")).Children(func() {
 		switchRow(c, "standby", L.StandbyTitle(), L.StandbyDesc(), &standby, func() { go h.SetStandby(standby) })
+		ui.Box(c).FillWidth().Height(1).Background(t.Border)
+		ui.Column(c.Key("comp-lang")).FillWidth().Gap(8).Children(func() {
+			ui.Text(c, L.SettingsLanguage()).Bold().FontSize(14)
+			if h.langIndex < 0 {
+				h.langIndex = langIndexOf(h.language())
+			}
+			if ui.Segmented(c.Key("comp-lang-seg"), &h.langIndex, L.LangSystem(), L.LangZhHans(), L.LangEnglish()).FillWidth().Changed() {
+				h.setLanguage(phoneLangs[h.langIndex])
+			}
+		})
+		ui.Box(c).FillWidth().Height(1).Background(t.Border)
+		b := ui.ButtonBase(c.Key("comp-notif")).FillWidth().Label(L.PhoneNotifTitle())
+		b.Children(func() {
+			ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
+				ui.Column(c).Grow(1).MinWidth(0).Gap(2).Children(func() {
+					ui.Text(c, L.PhoneNotifTitle()).Bold().FontSize(14)
+					ui.Text(c, L.PhoneNotifSub()).FontSize(12).TextColor(t.TextMuted)
+				})
+				ui.Icon(c, iconChevron).Size(14, 14).TextColor(t.TextMuted)
+			})
+		})
+		if b.Clicked() {
+			go androidbridge.OpenNotificationSettings()
+		}
 	})
+}
+
+// phoneLangs are the language choices in Settings, in the segmented control's order: the
+// system's, Simplified Chinese, English.
+var phoneLangs = []string{"", "zh-Hans", "en"}
+
+func langIndexOf(lang string) int {
+	for i, l := range phoneLangs {
+		if l == lang {
+			return i
+		}
+	}
+	return 0
+}
+
+// language and setLanguage reach the app's saved language (SetLanguageHooks); without hooks the
+// choice is not kept.
+func (h *Host) language() string {
+	if h.getLang == nil {
+		return ""
+	}
+	return h.getLang()
+}
+
+func (h *Host) setLanguage(lang string) {
+	if h.setLang != nil {
+		h.setLang(lang)
+	}
+}
+
+// SetLanguageHooks connects the phone's language choice to the app's preferences: get returns the
+// saved one ("" for the system's) and set saves and applies a new one.
+func (h *Host) SetLanguageHooks(get func() string, set func(string)) {
+	h.getLang, h.setLang = get, set
 }
 
 // permissionsTab groups the graded opt-in permissions: everyday collaboration, then screen and
@@ -253,8 +347,8 @@ func (h *Host) permissionsTab(c *ui.Context) {
 		}},
 	}
 	for gi, g := range groups {
+		sectionTitle(c, g.title)
 		card(c.Key(fmt.Sprintf("perm-group-%d", gi))).Children(func() {
-			sectionTitle(c, g.title)
 			for _, pm := range g.perms {
 				on := pm.on
 				ui.Row(c.Key("perm-row-" + pm.key)).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
@@ -269,8 +363,7 @@ func (h *Host) permissionsTab(c *ui.Context) {
 	}
 }
 
-// securityTab holds the cross-network wireless debugging port, the certificate fingerprint and
-// the recent activity.
+// securityTab holds the certificate fingerprint and the recent activity.
 func (h *Host) securityTab(c *ui.Context) {
 	t := c.Theme()
 	h.mu.Lock()
@@ -278,8 +371,8 @@ func (h *Host) securityTab(c *ui.Context) {
 	audit := append([]string(nil), h.audit...)
 	h.mu.Unlock()
 
+	sectionTitle(c, L.CompanionFingerprintLabel())
 	card(c.Key("comp-fp-card")).Children(func() {
-		ui.Text(c, L.CompanionFingerprintLabel()).Bold().FontSize(14)
 		ui.Text(c, fp).FontSize(12).FontFeatures("tnum")
 		ui.Text(c, L.PhoneFingerprintSub()).FontSize(12).TextColor(t.TextMuted)
 		ui.Row(c.Key("comp-fp-actions")).Children(func() {
@@ -291,8 +384,8 @@ func (h *Host) securityTab(c *ui.Context) {
 	})
 
 	if len(audit) > 0 {
+		sectionTitle(c, L.CompanionAuditTitle())
 		card(c.Key("comp-audit-card")).Children(func() {
-			ui.Text(c, L.CompanionAuditTitle()).Bold().FontSize(14)
 			for i := len(audit) - 1; i >= 0; i-- {
 				ui.Text(c.Key(fmt.Sprintf("audit-%d", i)), audit[i]).FontSize(12).TextColor(t.TextMuted).FontFeatures("tnum")
 			}
@@ -445,5 +538,107 @@ func (h *Host) accessibilityRow(c *ui.Context) {
 		if !on && ui.Button(c.Key("perm-a11y-open"), L.PermA11yOpen()).Clicked() {
 			go androidbridge.OpenAccessibilitySettings()
 		}
+	})
+}
+
+// meshEditor is the network form under the network card while it is open: name, servers and
+// secret, as on the computer's Settings › Network.
+func (h *Host) meshEditor(c *ui.Context) {
+	h.mu.Lock()
+	f := h.meshForm
+	h.mu.Unlock()
+	if f == nil {
+		return
+	}
+	t := c.Theme()
+	ui.Column(c.Key("comp-mesh-form")).FillWidth().Gap(10).Padding(8, 0, 0, 0).Children(func() {
+		ui.Text(c, L.NetFormName()).FontSize(12).TextColor(t.TextMuted)
+		ui.TextInput(c.Key("comp-mesh-name"), &f.Name).FillWidth()
+		ui.Text(c, L.NetFormServers()).FontSize(12).TextColor(t.TextMuted)
+		ui.TextArea(c.Key("comp-mesh-servers"), &f.Servers).FillWidth().Lines(2, 5).Font("monospace")
+		ui.Text(c, L.NetFormServersHint()).FontSize(12).TextColor(t.TextMuted)
+		ui.Text(c, L.NetFormSecret()).FontSize(12).TextColor(t.TextMuted)
+		ui.TextInput(c.Key("comp-mesh-secret"), &f.Secret).FillWidth().Password()
+		if f.Err != "" {
+			ui.Text(c, f.Err).FontSize(12).TextColor(t.Danger)
+		}
+		ui.Row(c.Key("comp-mesh-btns")).FillWidth().Gap(8).Justify(ui.End).Children(func() {
+			if ui.Button(c.Key("comp-mesh-cancel"), L.ActionCancel()).Clicked() {
+				h.mu.Lock()
+				h.meshForm = nil
+				h.mu.Unlock()
+			}
+			ok := strings.TrimSpace(f.Name) != "" && f.Secret != ""
+			if ui.PrimaryButton(c.Key("comp-mesh-save"), L.ActionSave()).Disabled(!ok).Clicked() {
+				snapshot := *f
+				go h.saveMeshForm(snapshot)
+			}
+		})
+	})
+}
+
+// computersCard lists the computers paired with this phone, most recently connected first, each
+// with when it last connected, Rename (a name kept on this phone) and Forget.
+func (h *Host) computersCard(c *ui.Context) {
+	t := c.Theme()
+	list := h.Computers()
+	card(c.Key("comp-pcs-card")).Children(func() {
+		if len(list) == 0 {
+			ui.Text(c, L.PhoneComputersNone()).FontSize(12).TextColor(t.TextMuted)
+			return
+		}
+		for _, pc := range list {
+			key := "comp-pc-" + pc.ID
+			if h.renaming == pc.ID {
+				ui.Row(c.Key(key + "-edit")).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
+					ui.TextInput(c.Key(key+"-name"), &h.renameText).Grow(1).MinWidth(0)
+					if ui.Button(c.Key(key+"-cancel"), L.ActionCancel()).Clicked() {
+						h.renaming = ""
+					}
+					if ui.PrimaryButton(c.Key(key+"-save"), L.ActionSave()).Clicked() {
+						id, text := pc.ID, h.renameText
+						h.renaming = ""
+						go h.RenameComputer(id, text)
+					}
+				})
+				continue
+			}
+			ui.Row(c.Key(key)).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
+				tile(c, iconLaptop)
+				ui.Column(c.Key(key + "-text")).Grow(1).MinWidth(0).Gap(2).Children(func() {
+					ui.Text(c, pc.shownName()).Bold().FontSize(14).SingleLine()
+					when := "—"
+					if !pc.LastSeen.IsZero() {
+						when = pc.LastSeen.Local().Format("2006-01-02 15:04")
+					}
+					ui.Text(c, L.PhoneComputerLastSeen(when)).FontSize(12).TextColor(t.TextMuted).SingleLine()
+				})
+				more := ui.ButtonBase(c.Key(key+"-more")).Size(40, 40).Shrink(0).Radius(20).Center().Label(L.PhoneComputerMore())
+				more.Children(func() { ui.Icon(c, iconMore).Size(20, 20).TextColor(t.TextMuted) })
+				more.PopoverMenuButton(func(m *ui.Menu) {
+					if m.Item(L.ActionRename()).Chosen() {
+						h.renaming, h.renameText = pc.ID, pc.shownName()
+					}
+					if m.Item(L.PhoneComputerForget()).Danger().Chosen() {
+						go h.ForgetComputer(pc.ID)
+					}
+				})
+			})
+		}
+	})
+}
+
+// aboutCard shows the Companion's version and its certificate fingerprint, which a paired
+// computer pins.
+func (h *Host) aboutCard(c *ui.Context) {
+	t := c.Theme()
+	card(c.Key("comp-about-card")).Children(func() {
+		ui.Row(c.Key("comp-about-row")).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
+			tile(c, iconInfo)
+			ui.Column(c.Key("comp-about-text")).Grow(1).MinWidth(0).Gap(2).Children(func() {
+				ui.Text(c, L.PhoneAboutTitle()).Bold().FontSize(14)
+				ui.Text(c, L.PhoneVersion(version.Version)).FontSize(12).TextColor(t.TextMuted)
+			})
+		})
 	})
 }

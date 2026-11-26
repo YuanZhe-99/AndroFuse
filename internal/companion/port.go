@@ -2,10 +2,14 @@ package companion
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"math/big"
 	"net"
+	"slices"
+	"strconv"
 )
 
 // Listening ports (the phone's Companion server and the desktop's mesh listener) are drawn from
@@ -50,4 +54,33 @@ func portFree(port int) bool {
 	}
 	_ = pc.Close()
 	return true
+}
+
+// devicePortCount is how many ports DevicePorts gives.
+const devicePortCount = 4
+
+// DevicePorts are the ports a Companion listens on, in order of preference, for its device id
+// (the id in its mesh hostname): drawn from the id, so a desktop that knows the id finds the port
+// again after the phone had to move off its saved one, while different phones get different ports.
+func DevicePorts(id string) []int {
+	out := make([]int, 0, devicePortCount)
+	for i := 0; len(out) < devicePortCount; i++ {
+		sum := sha256.Sum256([]byte("androfuse-companion-port\x00" + id + "\x00" + strconv.Itoa(i)))
+		p := PortMin + int(binary.BigEndian.Uint32(sum[:4])%uint32(PortMax-PortMin+1))
+		if !slices.Contains(out, p) {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// PickDevicePort returns the first free one of DevicePorts(id), else a random free port, which a
+// desktop then only learns from the next adb connection.
+func PickDevicePort(id string) (int, error) {
+	for _, p := range DevicePorts(id) {
+		if portFree(p) {
+			return p, nil
+		}
+	}
+	return PickPort(0)
 }

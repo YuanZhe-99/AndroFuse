@@ -1,6 +1,12 @@
 package gui
 
-import "testing"
+import (
+	"os"
+	"strconv"
+	"testing"
+
+	"github.com/YuanZhe-99/AndroFuse/internal/mesh"
+)
 
 // TestAddressParsing checks how Home's "Connect a phone" reads what the user types.
 func TestAddressParsing(t *testing.T) {
@@ -54,5 +60,31 @@ func TestPhoneLogos(t *testing.T) {
 		if got := phoneLogoName(tc.fields...); got != tc.want {
 			t.Errorf("phoneLogoName(%q) = %q, want %q", tc.fields, got, tc.want)
 		}
+	}
+}
+
+// TestDiagnosticsLeaveNetworksRunning guards against the self-check stopping the core it shares
+// with the networks: the core's stop also stops every EasyTier network, which once left the
+// computer's network down seconds after every launch. Needs the built core (ANDROFUSE_CORE_LIB
+// or core/target).
+func TestDiagnosticsLeaveNetworksRunning(t *testing.T) {
+	if locateCoreLibrary() == "" {
+		t.Skip("needs the built core library")
+	}
+	a := New("diag-test", t.TempDir())
+	mgr, err := a.ensureMeshMgr()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := mesh.Config{Instance: "net-diag", Enabled: true, NetworkName: "androfuse-diag-" + strconv.Itoa(os.Getpid()), NetworkSecret: "diag", DeviceName: mesh.Hostname(mesh.KindPC, "d1a90001", "test")}
+	if err := mgr.Start(cfg); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = mgr.Stop("net-diag") })
+	if d := a.hostDiagnostics(); !d.CoreLoaded {
+		t.Fatalf("self-check did not use the core: %q", d.CoreError)
+	}
+	if !mgr.Status("net-diag").Running {
+		t.Fatal("the self-check stopped the running network")
 	}
 }

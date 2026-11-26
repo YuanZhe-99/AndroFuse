@@ -38,6 +38,11 @@ type meshRuntime struct {
 // whenever the Companion starts again.
 // Side effects: seals and persists the secret; opens outbound EasyTier connections.
 func (h *Host) JoinMesh(req companion.MeshJoinRequest) (companion.MeshJoinResponse, error) {
+	return h.joinMesh(req, "from paired computer")
+}
+
+// joinMesh is JoinMesh; from says who chose the network, for the audit log.
+func (h *Host) joinMesh(req companion.MeshJoinRequest, from string) (companion.MeshJoinResponse, error) {
 	name := strings.TrimSpace(req.NetworkName)
 	if name == "" {
 		return companion.MeshJoinResponse{}, errors.New("network name is required")
@@ -52,7 +57,7 @@ func (h *Host) JoinMesh(req companion.MeshJoinRequest) (companion.MeshJoinRespon
 	running, err := h.startMesh(name, req.NetworkSecret, req.Peers, full)
 	h.mu.Lock()
 	h.cfg.Mesh = &MeshSettings{NetworkName: name, Peers: req.Peers, SealedSecret: sealed, FullSpeed: full}
-	h.appendAuditLocked(fmt.Sprintf("joined mesh %q from paired computer", name))
+	h.appendAuditLocked(fmt.Sprintf("joined mesh %q %s", name, from))
 	h.saveConfigLocked()
 	h.mu.Unlock()
 	h.notify()
@@ -223,11 +228,61 @@ func (h *Host) MeshFullSpeed() bool {
 // Side effects: draws and saves MeshID the first time.
 func (h *Host) meshHost() string {
 	name, _, _, _ := deviceIdentity()
+	return mesh.Hostname(mesh.KindPhone, h.meshID(), name)
+}
+
+// meshID is the phone's kept random device id, in its mesh hostname and behind its Companion port
+// (companion.DevicePorts).
+// Side effects: draws and saves MeshID the first time.
+func (h *Host) meshID() string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.cfg.MeshID == "" {
 		h.cfg.MeshID = mesh.NewDeviceID()
 		h.saveConfigLocked()
 	}
-	return mesh.Hostname(mesh.KindPhone, h.cfg.MeshID, name)
+	return h.cfg.MeshID
+}
+
+// meshForm is what the phone's own network editor holds: the network name, its servers (one per
+// line) and secret, and why the last save failed.
+type meshForm struct {
+	Name, Servers, Secret, Err string
+}
+
+// editMesh opens the network editor with the remembered network's name and servers (the secret
+// is never shown again, so it must be typed).
+func (h *Host) editMesh() {
+	f := &meshForm{}
+	h.mu.Lock()
+	if s := h.cfg.Mesh; s != nil {
+		f.Name, f.Servers = s.NetworkName, strings.Join(s.Peers, "\n")
+	}
+	h.mu.Unlock()
+	h.meshForm = f
+}
+
+// saveMeshForm joins the network the phone's person typed, in place of the one a computer handed
+// over, and closes the editor; a failure stays in the editor.
+// Side effects: see JoinMesh; runs off the UI thread and redraws when done.
+func (h *Host) saveMeshForm(f meshForm) {
+	var servers []string
+	for _, s := range strings.Split(f.Servers, "\n") {
+		if s = strings.TrimSpace(s); s != "" {
+			servers = append(servers, s)
+		}
+	}
+	res, err := h.joinMesh(companion.MeshJoinRequest{NetworkName: f.Name, NetworkSecret: f.Secret, Peers: servers}, "on this phone")
+	if err == nil && res.Message != "" {
+		err = errors.New(res.Message)
+	}
+	h.mu.Lock()
+	if err != nil {
+		f.Err = err.Error()
+		h.meshForm = &f
+	} else {
+		h.meshForm = nil
+	}
+	h.mu.Unlock()
+	h.notify()
 }

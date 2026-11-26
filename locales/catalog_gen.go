@@ -790,11 +790,11 @@ func (msgs Messages) MeshPhoneConnecting() string {
 	return Catalog.Format(msgs.locale, "MeshPhoneConnecting", nil)
 }
 
-// MeshPhoneNone says "Not joined. Your computer can add this phone when you pair them."
+// MeshPhoneNone says "Not joined. Pair this phone with your computer, or join a network yourself."
 // in the language the app shows.
 func MeshPhoneNone() string { return In(i18n.Locale()).MeshPhoneNone() }
 
-// MeshPhoneNone says "Not joined. Your computer can add this phone when you pair them."
+// MeshPhoneNone says "Not joined. Pair this phone with your computer, or join a network yourself."
 // in the language of msgs.
 func (msgs Messages) MeshPhoneNone() string {
 	return Catalog.Format(msgs.locale, "MeshPhoneNone", nil)
@@ -2170,21 +2170,21 @@ func (msgs Messages) KindDeX() string {
 	return Catalog.Format(msgs.locale, "KindDeX", nil)
 }
 
-// KindDeXFallback says "Large-screen desktop (not Samsung DeX)"
+// KindDeXFallback says "Android desktop mode"
 // in the language the app shows.
 func KindDeXFallback() string { return In(i18n.Locale()).KindDeXFallback() }
 
-// KindDeXFallback says "Large-screen desktop (not Samsung DeX)"
+// KindDeXFallback says "Android desktop mode"
 // in the language of msgs.
 func (msgs Messages) KindDeXFallback() string {
 	return Catalog.Format(msgs.locale, "KindDeXFallback", nil)
 }
 
-// KindDeXFallbackShort says "Large-screen desktop"
+// KindDeXFallbackShort says "Android desktop mode"
 // in the language the app shows.
 func KindDeXFallbackShort() string { return In(i18n.Locale()).KindDeXFallbackShort() }
 
-// KindDeXFallbackShort says "Large-screen desktop"
+// KindDeXFallbackShort says "Android desktop mode"
 // in the language of msgs.
 func (msgs Messages) KindDeXFallbackShort() string {
 	return Catalog.Format(msgs.locale, "KindDeXFallbackShort", nil)
@@ -4484,11 +4484,11 @@ func (msgs Messages) PhoneADBNoWifi() string {
 	return Catalog.Format(msgs.locale, "PhoneADBNoWifi", nil)
 }
 
-// PhoneADBNoWifiSub says "On Wi-Fi the Companion finds the new port and tells the computer"
+// PhoneADBNoWifiSub says "On mobile data, the computer can still show this phone with Share screen while both are in the same network"
 // in the language the app shows.
 func PhoneADBNoWifiSub() string { return In(i18n.Locale()).PhoneADBNoWifiSub() }
 
-// PhoneADBNoWifiSub says "On Wi-Fi the Companion finds the new port and tells the computer"
+// PhoneADBNoWifiSub says "On mobile data, the computer can still show this phone with Share screen while both are in the same network"
 // in the language of msgs.
 func (msgs Messages) PhoneADBNoWifiSub() string {
 	return Catalog.Format(msgs.locale, "PhoneADBNoWifiSub", nil)
@@ -4602,4 +4602,504 @@ func ShareScreen() string { return In(i18n.Locale()).ShareScreen() }
 // in the language of msgs.
 func (msgs Messages) ShareScreen() string {
 	return Catalog.Format(msgs.locale, "ShareScreen", nil)
+}
+
+// FailSeeLogs says "Settings › About and updates › Save logs has the details."
+// in the language the app shows.
+func FailSeeLogs() string { return In(i18n.Locale()).FailSeeLogs() }
+
+// FailSeeLogs says "Settings › About and updates › Save logs has the details."
+// in the language of msgs.
+func (msgs Messages) FailSeeLogs() string {
+	return Catalog.Format(msgs.locale, "FailSeeLogs", nil)
+}
+
+// FailCamera says "Couldn't open the phone's camera. If another app is using it, close that app and try again."
+// in the language the app shows.
+func FailCamera() string { return In(i18n.Locale()).FailCamera() }
+
+// FailCamera says "Couldn't open the phone's camera. If another app is using it, close that app and try again."
+// in the language of msgs.
+func (msgs Messages) FailCamera() string {
+	return Catalog.Format(msgs.locale, "FailCamera", nil)
+}
+
+// FailScreen says "Couldn't show the phone's screen. Check that it's still connected and try again."
+// in the language the app shows.
+func FailScreen() string { return In(i18n.Locale()).FailScreen() }
+
+// FailScreen says "Couldn't show the phone's screen. Check that it's still connected and try again."
+// in the language of msgs.
+func (msgs Messages) FailScreen() string {
+	return Catalog.Format(msgs.locale, "FailScreen", nil)
+}
+
+// FailDeX says "Couldn't start Samsung DeX. Check that the phone is still connected and try again."
+// in the language the app shows.
+func FailDeX() string { return In(i18n.Locale()).FailDeX() }
+
+// FailDeX says "Couldn't start Samsung DeX. Check that the phone is still connected and try again."
+// in the language of msgs.
+func (msgs Messages) FailDeX() string {
+	return Catalog.Format(msgs.locale, "FailDeX", nil)
+}
+
+// FailApp says "Couldn't open the app window. Check that the phone is still connected and try again."
+// in the language the app shows.
+func FailApp() string { return In(i18n.Locale()).FailApp() }
+
+// FailApp says "Couldn't open the app window. Check that the phone is still connected and try again."
+// in the language of msgs.
+func (msgs Messages) FailApp() string {
+	return Catalog.Format(msgs.locale, "FailApp", nil)
+}
+
+// FailVM says "Android on this PC ran into a problem."
+// in the language the app shows.
+func FailVM() string { return In(i18n.Locale()).FailVM() }
+
+// FailVM says "Android on this PC ran into a problem."
+// in the language of msgs.
+func (msgs Messages) FailVM() string {
+	return Catalog.Format(msgs.locale, "FailVM", nil)
+}
+
+// FailEngine says "AndroFuse couldn't start one of its parts. Restarting AndroFuse may help."
+// in the language the app shows.
+func FailEngine() string { return In(i18n.Locale()).FailEngine() }
+
+// FailEngine says "AndroFuse couldn't start one of its parts. Restarting AndroFuse may help."
+// in the language of msgs.
+func (msgs Messages) FailEngine() string {
+	return Catalog.Format(msgs.locale, "FailEngine", nil)
+}
+
+// FailCompanion says "Couldn't reach AndroFuse on the phone."
+// in the language the app shows.
+func FailCompanion() string { return In(i18n.Locale()).FailCompanion() }
+
+// FailCompanion says "Couldn't reach AndroFuse on the phone."
+// in the language of msgs.
+func (msgs Messages) FailCompanion() string {
+	return Catalog.Format(msgs.locale, "FailCompanion", nil)
+}
+
+// FailMic says "Couldn't send this computer's microphone to the phone."
+// in the language the app shows.
+func FailMic() string { return In(i18n.Locale()).FailMic() }
+
+// FailMic says "Couldn't send this computer's microphone to the phone."
+// in the language of msgs.
+func (msgs Messages) FailMic() string {
+	return Catalog.Format(msgs.locale, "FailMic", nil)
+}
+
+// FailDevices says "Couldn't look for phones."
+// in the language the app shows.
+func FailDevices() string { return In(i18n.Locale()).FailDevices() }
+
+// FailDevices says "Couldn't look for phones."
+// in the language of msgs.
+func (msgs Messages) FailDevices() string {
+	return Catalog.Format(msgs.locale, "FailDevices", nil)
+}
+
+// StateAllowDebugging says "Allow debugging on the phone's screen"
+// in the language the app shows.
+func StateAllowDebugging() string { return In(i18n.Locale()).StateAllowDebugging() }
+
+// StateAllowDebugging says "Allow debugging on the phone's screen"
+// in the language of msgs.
+func (msgs Messages) StateAllowDebugging() string {
+	return Catalog.Format(msgs.locale, "StateAllowDebugging", nil)
+}
+
+// StateNotResponding says "Not responding"
+// in the language the app shows.
+func StateNotResponding() string { return In(i18n.Locale()).StateNotResponding() }
+
+// StateNotResponding says "Not responding"
+// in the language of msgs.
+func (msgs Messages) StateNotResponding() string {
+	return Catalog.Format(msgs.locale, "StateNotResponding", nil)
+}
+
+// CompanionUpdated says "Updated AndroFuse on {name}"
+// in the language the app shows.
+func CompanionUpdated(name string) string { return In(i18n.Locale()).CompanionUpdated(name) }
+
+// CompanionUpdated says "Updated AndroFuse on {name}"
+// in the language of msgs.
+func (msgs Messages) CompanionUpdated(name string) string {
+	return Catalog.Format(msgs.locale, "CompanionUpdated", map[string]any{"name": name})
+}
+
+// CompanionUpdateFailed says "Couldn't update AndroFuse on {name}."
+// in the language the app shows.
+func CompanionUpdateFailed(name string) string { return In(i18n.Locale()).CompanionUpdateFailed(name) }
+
+// CompanionUpdateFailed says "Couldn't update AndroFuse on {name}."
+// in the language of msgs.
+func (msgs Messages) CompanionUpdateFailed(name string) string {
+	return Catalog.Format(msgs.locale, "CompanionUpdateFailed", map[string]any{"name": name})
+}
+
+// MeshPhoneJoinOwn says "Join a network"
+// in the language the app shows.
+func MeshPhoneJoinOwn() string { return In(i18n.Locale()).MeshPhoneJoinOwn() }
+
+// MeshPhoneJoinOwn says "Join a network"
+// in the language of msgs.
+func (msgs Messages) MeshPhoneJoinOwn() string {
+	return Catalog.Format(msgs.locale, "MeshPhoneJoinOwn", nil)
+}
+
+// CardConnecting says "Connecting to {name}…"
+// in the language the app shows.
+func CardConnecting(name string) string { return In(i18n.Locale()).CardConnecting(name) }
+
+// CardConnecting says "Connecting to {name}…"
+// in the language of msgs.
+func (msgs Messages) CardConnecting(name string) string {
+	return Catalog.Format(msgs.locale, "CardConnecting", map[string]any{"name": name})
+}
+
+// CardReaching says "Reaching {name} through your network…"
+// in the language the app shows.
+func CardReaching(name string) string { return In(i18n.Locale()).CardReaching(name) }
+
+// CardReaching says "Reaching {name} through your network…"
+// in the language of msgs.
+func (msgs Messages) CardReaching(name string) string {
+	return Catalog.Format(msgs.locale, "CardReaching", map[string]any{"name": name})
+}
+
+// CardCantReach says "Couldn't reach {name}. Connect it to Wi-Fi with Wireless debugging on, or plug it in with USB."
+// in the language the app shows.
+func CardCantReach(name string) string { return In(i18n.Locale()).CardCantReach(name) }
+
+// CardCantReach says "Couldn't reach {name}. Connect it to Wi-Fi with Wireless debugging on, or plug it in with USB."
+// in the language of msgs.
+func (msgs Messages) CardCantReach(name string) string {
+	return Catalog.Format(msgs.locale, "CardCantReach", map[string]any{"name": name})
+}
+
+// CardCantReachShare says "Couldn't reach {name}'s Wireless debugging. Check that it is on; if the phone uses mobile data, use Share screen thro…"
+// in the language the app shows.
+func CardCantReachShare(name string) string { return In(i18n.Locale()).CardCantReachShare(name) }
+
+// CardCantReachShare says "Couldn't reach {name}'s Wireless debugging. Check that it is on; if the phone uses mobile data, use Share screen thro…"
+// in the language of msgs.
+func (msgs Messages) CardCantReachShare(name string) string {
+	return Catalog.Format(msgs.locale, "CardCantReachShare", map[string]any{"name": name})
+}
+
+// CardShareFailed says "Couldn't share {name}'s screen. Make sure AndroFuse is running on the phone and both are in the same network."
+// in the language the app shows.
+func CardShareFailed(name string) string { return In(i18n.Locale()).CardShareFailed(name) }
+
+// CardShareFailed says "Couldn't share {name}'s screen. Make sure AndroFuse is running on the phone and both are in the same network."
+// in the language of msgs.
+func (msgs Messages) CardShareFailed(name string) string {
+	return Catalog.Format(msgs.locale, "CardShareFailed", map[string]any{"name": name})
+}
+
+// FigCharging says "charging"
+// in the language the app shows.
+func FigCharging() string { return In(i18n.Locale()).FigCharging() }
+
+// FigCharging says "charging"
+// in the language of msgs.
+func (msgs Messages) FigCharging() string {
+	return Catalog.Format(msgs.locale, "FigCharging", nil)
+}
+
+// StateInNetwork says "In network"
+// in the language the app shows.
+func StateInNetwork() string { return In(i18n.Locale()).StateInNetwork() }
+
+// StateInNetwork says "In network"
+// in the language of msgs.
+func (msgs Messages) StateInNetwork() string {
+	return Catalog.Format(msgs.locale, "StateInNetwork", nil)
+}
+
+// RouteInNetwork says "In {name}"
+// in the language the app shows.
+func RouteInNetwork(name string) string { return In(i18n.Locale()).RouteInNetwork(name) }
+
+// RouteInNetwork says "In {name}"
+// in the language of msgs.
+func (msgs Messages) RouteInNetwork(name string) string {
+	return Catalog.Format(msgs.locale, "RouteInNetwork", map[string]any{"name": name})
+}
+
+// PhoneComputersTitle says "Paired computers"
+// in the language the app shows.
+func PhoneComputersTitle() string { return In(i18n.Locale()).PhoneComputersTitle() }
+
+// PhoneComputersTitle says "Paired computers"
+// in the language of msgs.
+func (msgs Messages) PhoneComputersTitle() string {
+	return Catalog.Format(msgs.locale, "PhoneComputersTitle", nil)
+}
+
+// PhoneComputersNone says "No computer yet. Pair this phone from AndroFuse on your computer."
+// in the language the app shows.
+func PhoneComputersNone() string { return In(i18n.Locale()).PhoneComputersNone() }
+
+// PhoneComputersNone says "No computer yet. Pair this phone from AndroFuse on your computer."
+// in the language of msgs.
+func (msgs Messages) PhoneComputersNone() string {
+	return Catalog.Format(msgs.locale, "PhoneComputersNone", nil)
+}
+
+// PhoneComputerLastSeen says "Last connected · {when}"
+// in the language the app shows.
+func PhoneComputerLastSeen(when string) string { return In(i18n.Locale()).PhoneComputerLastSeen(when) }
+
+// PhoneComputerLastSeen says "Last connected · {when}"
+// in the language of msgs.
+func (msgs Messages) PhoneComputerLastSeen(when string) string {
+	return Catalog.Format(msgs.locale, "PhoneComputerLastSeen", map[string]any{"when": when})
+}
+
+// PhoneComputerMore says "More"
+// in the language the app shows.
+func PhoneComputerMore() string { return In(i18n.Locale()).PhoneComputerMore() }
+
+// PhoneComputerMore says "More"
+// in the language of msgs.
+func (msgs Messages) PhoneComputerMore() string {
+	return Catalog.Format(msgs.locale, "PhoneComputerMore", nil)
+}
+
+// PhoneComputerForget says "Forget this computer"
+// in the language the app shows.
+func PhoneComputerForget() string { return In(i18n.Locale()).PhoneComputerForget() }
+
+// PhoneComputerForget says "Forget this computer"
+// in the language of msgs.
+func (msgs Messages) PhoneComputerForget() string {
+	return Catalog.Format(msgs.locale, "PhoneComputerForget", nil)
+}
+
+// PhoneAboutTitle says "About"
+// in the language the app shows.
+func PhoneAboutTitle() string { return In(i18n.Locale()).PhoneAboutTitle() }
+
+// PhoneAboutTitle says "About"
+// in the language of msgs.
+func (msgs Messages) PhoneAboutTitle() string {
+	return Catalog.Format(msgs.locale, "PhoneAboutTitle", nil)
+}
+
+// PhoneVersion says "Version {v}"
+// in the language the app shows.
+func PhoneVersion(v string) string { return In(i18n.Locale()).PhoneVersion(v) }
+
+// PhoneVersion says "Version {v}"
+// in the language of msgs.
+func (msgs Messages) PhoneVersion(v string) string {
+	return Catalog.Format(msgs.locale, "PhoneVersion", map[string]any{"v": v})
+}
+
+// ActionUpdateCompanion says "Update AndroFuse Companion"
+// in the language the app shows.
+func ActionUpdateCompanion() string { return In(i18n.Locale()).ActionUpdateCompanion() }
+
+// ActionUpdateCompanion says "Update AndroFuse Companion"
+// in the language of msgs.
+func (msgs Messages) ActionUpdateCompanion() string {
+	return Catalog.Format(msgs.locale, "ActionUpdateCompanion", nil)
+}
+
+// ActionRepairCompanion says "Pair AndroFuse Companion again"
+// in the language the app shows.
+func ActionRepairCompanion() string { return In(i18n.Locale()).ActionRepairCompanion() }
+
+// ActionRepairCompanion says "Pair AndroFuse Companion again"
+// in the language of msgs.
+func (msgs Messages) ActionRepairCompanion() string {
+	return Catalog.Format(msgs.locale, "ActionRepairCompanion", nil)
+}
+
+// ActionPairOnlyCompanion says "Pair AndroFuse Companion"
+// in the language the app shows.
+func ActionPairOnlyCompanion() string { return In(i18n.Locale()).ActionPairOnlyCompanion() }
+
+// ActionPairOnlyCompanion says "Pair AndroFuse Companion"
+// in the language of msgs.
+func (msgs Messages) ActionPairOnlyCompanion() string {
+	return Catalog.Format(msgs.locale, "ActionPairOnlyCompanion", nil)
+}
+
+// CompanionUpdating says "Updating AndroFuse on {name}…"
+// in the language the app shows.
+func CompanionUpdating(name string) string { return In(i18n.Locale()).CompanionUpdating(name) }
+
+// CompanionUpdating says "Updating AndroFuse on {name}…"
+// in the language of msgs.
+func (msgs Messages) CompanionUpdating(name string) string {
+	return Catalog.Format(msgs.locale, "CompanionUpdating", map[string]any{"name": name})
+}
+
+// CameraSwitching says "Switching to the {camera}…"
+// in the language the app shows.
+func CameraSwitching(camera string) string { return In(i18n.Locale()).CameraSwitching(camera) }
+
+// CameraSwitching says "Switching to the {camera}…"
+// in the language of msgs.
+func (msgs Messages) CameraSwitching(camera string) string {
+	return Catalog.Format(msgs.locale, "CameraSwitching", map[string]any{"camera": camera})
+}
+
+// StateStarting says "Starting"
+// in the language the app shows.
+func StateStarting() string { return In(i18n.Locale()).StateStarting() }
+
+// StateStarting says "Starting"
+// in the language of msgs.
+func (msgs Messages) StateStarting() string {
+	return Catalog.Format(msgs.locale, "StateStarting", nil)
+}
+
+// VMBootingAndroid says "Android is starting…"
+// in the language the app shows.
+func VMBootingAndroid() string { return In(i18n.Locale()).VMBootingAndroid() }
+
+// VMBootingAndroid says "Android is starting…"
+// in the language of msgs.
+func (msgs Messages) VMBootingAndroid() string {
+	return Catalog.Format(msgs.locale, "VMBootingAndroid", nil)
+}
+
+// ShareNotifTitle says "AndroFuse is sharing this screen"
+// in the language the app shows.
+func ShareNotifTitle() string { return In(i18n.Locale()).ShareNotifTitle() }
+
+// ShareNotifTitle says "AndroFuse is sharing this screen"
+// in the language of msgs.
+func (msgs Messages) ShareNotifTitle() string {
+	return Catalog.Format(msgs.locale, "ShareNotifTitle", nil)
+}
+
+// ShareNotifText says "Your computer can see this screen. Tap to open AndroFuse."
+// in the language the app shows.
+func ShareNotifText() string { return In(i18n.Locale()).ShareNotifText() }
+
+// ShareNotifText says "Your computer can see this screen. Tap to open AndroFuse."
+// in the language of msgs.
+func (msgs Messages) ShareNotifText() string {
+	return Catalog.Format(msgs.locale, "ShareNotifText", nil)
+}
+
+// ShareNotifStop says "Stop"
+// in the language the app shows.
+func ShareNotifStop() string { return In(i18n.Locale()).ShareNotifStop() }
+
+// ShareNotifStop says "Stop"
+// in the language of msgs.
+func (msgs Messages) ShareNotifStop() string {
+	return Catalog.Format(msgs.locale, "ShareNotifStop", nil)
+}
+
+// PhoneTagline says "Use this phone with AndroFuse on your Windows PC"
+// in the language the app shows.
+func PhoneTagline() string { return In(i18n.Locale()).PhoneTagline() }
+
+// PhoneTagline says "Use this phone with AndroFuse on your Windows PC"
+// in the language of msgs.
+func (msgs Messages) PhoneTagline() string {
+	return Catalog.Format(msgs.locale, "PhoneTagline", nil)
+}
+
+// PhoneSectionConnection says "Connection"
+// in the language the app shows.
+func PhoneSectionConnection() string { return In(i18n.Locale()).PhoneSectionConnection() }
+
+// PhoneSectionConnection says "Connection"
+// in the language of msgs.
+func (msgs Messages) PhoneSectionConnection() string {
+	return Catalog.Format(msgs.locale, "PhoneSectionConnection", nil)
+}
+
+// PhoneSectionSettings says "Settings"
+// in the language the app shows.
+func PhoneSectionSettings() string { return In(i18n.Locale()).PhoneSectionSettings() }
+
+// PhoneSectionSettings says "Settings"
+// in the language of msgs.
+func (msgs Messages) PhoneSectionSettings() string {
+	return Catalog.Format(msgs.locale, "PhoneSectionSettings", nil)
+}
+
+// PhoneSectionMore says "More"
+// in the language the app shows.
+func PhoneSectionMore() string { return In(i18n.Locale()).PhoneSectionMore() }
+
+// PhoneSectionMore says "More"
+// in the language of msgs.
+func (msgs Messages) PhoneSectionMore() string {
+	return Catalog.Format(msgs.locale, "PhoneSectionMore", nil)
+}
+
+// PhoneNotifTitle says "Notifications"
+// in the language the app shows.
+func PhoneNotifTitle() string { return In(i18n.Locale()).PhoneNotifTitle() }
+
+// PhoneNotifTitle says "Notifications"
+// in the language of msgs.
+func (msgs Messages) PhoneNotifTitle() string {
+	return Catalog.Format(msgs.locale, "PhoneNotifTitle", nil)
+}
+
+// PhoneNotifSub says "Manage AndroFuse's notifications in Android settings"
+// in the language the app shows.
+func PhoneNotifSub() string { return In(i18n.Locale()).PhoneNotifSub() }
+
+// PhoneNotifSub says "Manage AndroFuse's notifications in Android settings"
+// in the language of msgs.
+func (msgs Messages) PhoneNotifSub() string {
+	return Catalog.Format(msgs.locale, "PhoneNotifSub", nil)
+}
+
+// MeshPhoneNotJoined says "Not in a network"
+// in the language the app shows.
+func MeshPhoneNotJoined() string { return In(i18n.Locale()).MeshPhoneNotJoined() }
+
+// MeshPhoneNotJoined says "Not in a network"
+// in the language of msgs.
+func (msgs Messages) MeshPhoneNotJoined() string {
+	return Catalog.Format(msgs.locale, "MeshPhoneNotJoined", nil)
+}
+
+// FailConnect says "Couldn't connect to the phone."
+// in the language the app shows.
+func FailConnect() string { return In(i18n.Locale()).FailConnect() }
+
+// FailConnect says "Couldn't connect to the phone."
+// in the language of msgs.
+func (msgs Messages) FailConnect() string {
+	return Catalog.Format(msgs.locale, "FailConnect", nil)
+}
+
+// FailPair says "Pairing didn't go through."
+// in the language the app shows.
+func FailPair() string { return In(i18n.Locale()).FailPair() }
+
+// FailPair says "Pairing didn't go through."
+// in the language of msgs.
+func (msgs Messages) FailPair() string {
+	return Catalog.Format(msgs.locale, "FailPair", nil)
+}
+
+// FailAssistant says "Couldn't change the local assistant."
+// in the language the app shows.
+func FailAssistant() string { return In(i18n.Locale()).FailAssistant() }
+
+// FailAssistant says "Couldn't change the local assistant."
+// in the language of msgs.
+func (msgs Messages) FailAssistant() string {
+	return Catalog.Format(msgs.locale, "FailAssistant", nil)
 }

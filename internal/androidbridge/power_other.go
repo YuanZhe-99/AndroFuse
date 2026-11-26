@@ -23,7 +23,9 @@ func WatchNetwork(func(kind string)) (stop func()) { return func() {} }
 func WatchWirelessDebugging(func(port int)) (stop func()) { return func() {} }
 
 // StartShare is unavailable outside Android.
-func StartShare(int, int) error { return errors.New("screen sharing runs on Android only") }
+func StartShare(int, int, string, string, string) error {
+	return errors.New("screen sharing runs on Android only")
+}
 
 // StopShare is a no-op outside Android.
 func StopShare() {}
@@ -39,3 +41,9 @@ func OpenAccessibilitySettings() {}
 
 // Identity is empty outside Android.
 func Identity() (name, model, release string, sdk int) { return "", "", "", 0 }
+
+// Battery is unknown outside Android.
+func Battery() (pct int, charging bool, tempC float64, ok bool) { return -1, false, 0, false }
+
+// OpenNotificationSettings is a no-op outside Android.
+func OpenNotificationSettings() {}

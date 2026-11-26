@@ -39,7 +39,7 @@ func (a *App) homePane(c *ui.Context, k tokens) {
 				if narrow {
 					dir = ui.Column
 				}
-				dir(c.Key("home-top")).FillWidth().Gap(16).AlignItems(ui.Stretch).Children(func() {
+				dir(c.Key("home-top")).FillWidth().Gap(homeGap).AlignItems(ui.Stretch).Children(func() {
 					a.thisComputerCard(c, k, narrow)
 					a.connectCard(c, k, narrow)
 				})
@@ -76,8 +76,9 @@ func (a *App) thisComputerCard(c *ui.Context, k tokens, narrow bool) {
 	a.mu.Lock()
 	ready, d, vmSt := a.diagReady, a.diag, a.vmStatus
 	a.mu.Unlock()
+	vmSt = a.vmLive(vmSt)
 	dot, netWords := a.networkSummary(k)
-	homeCard(c, "home-pc", 5, narrow).Children(func() {
+	homeCard(c, "home-pc", 1, narrow).Children(func() {
 		cardTitle(c, k, "pc-title", iconDex, L.HomeThisComputer(), func() {
 			switch {
 			case !ready:
@@ -122,6 +123,26 @@ func (a *App) thisComputerCard(c *ui.Context, k tokens, narrow bool) {
 }
 
 // vmStateWords is the managed VM's state in words.
+// vmLive corrects the VM's state with what adb sees now: an emulator adb lists but that is still
+// booting is starting, an online one is running (also one started outside AndroFuse), so this
+// card agrees with the emulator's phone card.
+func (a *App) vmLive(st vm.Status) vm.Status {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, d := range a.devices {
+		if d.Target.Transport != adb.TransportEmulator {
+			continue
+		}
+		switch {
+		case d.Target.State == "device":
+			st.State, st.RunningSerial = vm.StateRunning, d.Target.Serial
+		case st.State != vm.StateRunning:
+			st.State = vm.StateStarting
+		}
+	}
+	return st
+}
+
 func vmStateWords(st vm.Status) string {
 	switch st.State {
 	case vm.StateDownloading:
@@ -164,7 +185,7 @@ func (a *App) connectCard(c *ui.Context, k tokens, narrow bool) {
 	a.mu.Lock()
 	f := a.connect
 	a.mu.Unlock()
-	homeCard(c, "home-connect", 7, narrow).Children(func() {
+	homeCard(c, "home-connect", 1, narrow).Children(func() {
 		cardTitle(c, k, "conn-title", iconLink, L.ConnectPhone(), nil)
 		ui.Row(c.Key("conn-row")).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
 			in := ui.TextInput(c.Key("conn-input"), &a.connect.Input).Placeholder(L.ConnectPlaceholder()).Grow(1).MinWidth(0)
@@ -304,8 +325,17 @@ func (a *App) phonesSection(c *ui.Context, k tokens) {
 			ui.Text(c, L.DevicesEmptyLine()).FontSize(sizeBody).TextColor(k.text2)
 		})
 	}
+	// Two columns under the two top cards, edge to edge with them; four (each top card's width split
+	// in two, so the edges still line up) when there is room; one on a narrow window.
 	w, _ := c.Size()
-	cols := max(1, min(3, int((w-sidebarW-80)/(devCardMinW+12))))
+	inner := min(w-sidebarW, homeMaxW) - 56
+	cols := 2
+	switch {
+	case inner < 2*devCardMinW+homeGap:
+		cols = 1
+	case w >= 1000 && inner >= 4*devCardMinW+3*homeGap:
+		cols = 4
+	}
 	cards := make([]func(), 0, count+4)
 	for _, d := range devs {
 		cards = append(cards, func() { a.phoneCard(c, k, d) })
@@ -321,7 +351,7 @@ func (a *App) phonesSection(c *ui.Context, k tokens) {
 		}
 	}
 	for row := 0; row*cols < len(cards); row++ {
-		ui.Row(c.Key("phones-row-" + strconv.Itoa(row))).FillWidth().Gap(12).AlignItems(ui.Stretch).Children(func() {
+		ui.Row(c.Key("phones-row-" + strconv.Itoa(row))).FillWidth().Gap(homeGap).AlignItems(ui.Stretch).Children(func() {
 			for i := row * cols; i < row*cols+cols; i++ {
 				if i < len(cards) {
 					cards[i]()
@@ -400,7 +430,20 @@ func (a *App) routeLine(d DiscoveredDevice) (string, bool) {
 	case wifi:
 		return L.RouteWiFi(), false
 	}
-	return d.Target.State, true
+	return adbStateWords(d.Target.State), true
+}
+
+// adbStateWords says what adb's state for a phone means for the person, never the raw word.
+func adbStateWords(state string) string {
+	switch state {
+	case "unauthorized":
+		return L.StateAllowDebugging()
+	case "authorizing", "connecting":
+		return L.NetSummaryConnecting()
+	case "offline":
+		return L.StateNotResponding()
+	}
+	return L.StateUnavailable()
 }
 
 // hasWirelessMemory reports whether hash has a remembered Wireless debugging address.
@@ -428,15 +471,24 @@ func (a *App) phoneCard(c *ui.Context, k tokens, d DiscoveredDevice) {
 			}
 			phoneAvatar(c, avatarSize, deviceLogo(d), glyph, name)
 		}, name, phoneDetail(name, deviceModel(d), d.Profile.AndroidRelease), func() {
-			if online {
+			switch {
+			case online:
 				pill(c, key+"-state", L.StateConnected(), k.good.Alpha(0.14), k.goodText)
-			} else {
+			case isEmulator(d):
+				pill(c, key+"-state", L.StateStarting(), k.warn.Alpha(0.16), k.warnText)
+			default:
 				pill(c, key+"-state", L.StateUnavailable(), k.warn.Alpha(0.16), k.warnText)
 			}
 		}, func() { a.phoneMenu(c, key+"-more", d) })
 
 		route, warn := a.routeLine(d)
 		ui.Row(c.Key(key + "-route")).FillWidth().Gap(6).AlignItems(ui.Center).Children(func() {
+			if isEmulator(d) && !online {
+				// Booting: adb lists it, Android is not up yet.
+				ui.Spinner(c).Size(12, 12)
+				ui.Text(c, L.VMBootingAndroid()).FontSize(sizeSmall).TextColor(k.text2).SingleLine().MinWidth(0)
+				return
+			}
 			col := k.good
 			if warn {
 				col = k.warn
@@ -444,8 +496,8 @@ func (a *App) phoneCard(c *ui.Context, k tokens, d DiscoveredDevice) {
 			statusDot(c, col)
 			ui.Text(c, route).FontSize(sizeSmall).TextColor(k.text2).SingleLine().MinWidth(0)
 		})
+		a.cardWorkLine(c, k, key, hash)
 		if !online {
-			ui.Text(c, d.Target.State).FontSize(sizeSmall).TextColor(k.warnText)
 			return
 		}
 		a.phoneFigures(c, k, key, hash)
@@ -462,23 +514,38 @@ func (a *App) phoneFigures(c *ui.Context, k tokens, key, hash string) {
 	if !ok {
 		return
 	}
+	// fig is one figure; frac < 0 draws no bar (unknown values, and words such as the network).
 	fig := func(fkey, label, value string, frac float32, col ui.Color) {
 		ui.Column(c.Key(fkey)).Grow(1).Basis(0).MinWidth(0).Gap(2).Children(func() {
 			ui.Text(c, label).FontSize(sizeSmall).TextColor(k.text3).SingleLine()
 			ui.Text(c, value).Bold().FontSize(sizeBody).FontFeatures("tnum").SingleLine()
-			ui.Box(c).FillWidth().Height(3).Radius(2).Background(k.hairline).Children(func() {
-				ui.Box(c).WidthPercent(max(0, min(100, frac*100))).FillHeight().Radius(2).Background(col)
-			})
+			if frac >= 0 {
+				ui.Box(c).FillWidth().Height(3).Radius(2).Background(k.hairline).Children(func() {
+					ui.Box(c).WidthPercent(min(100, frac*100)).FillHeight().Radius(2).Background(col)
+				})
+			}
 		})
 	}
-	ui.Row(c.Key(key + "-figs")).FillWidth().Gap(10).Children(func() {
-		batt := k.good
-		if st.BatteryPct <= 15 && !st.Charging {
-			batt = k.warn
+	ui.Row(c.Key(key + "-figs")).FillWidth().Gap(10).AlignItems(ui.Start).Children(func() {
+		batt, battWord, battFrac := k.good, "—", float32(-1)
+		if st.BatteryPct >= 0 {
+			battWord, battFrac = fmt.Sprintf("%d%%", st.BatteryPct), float32(st.BatteryPct)/100
+			if st.Charging {
+				battWord += " · " + L.FigCharging()
+			} else if st.BatteryPct <= 15 {
+				batt = k.warn
+			}
 		}
-		fig(key+"-batt", L.FigBattery(), fmt.Sprintf("%d%%", st.BatteryPct), float32(st.BatteryPct)/100, batt)
-		fig(key+"-temp", L.FigTemperature(), fmt.Sprintf("%.0f°C", st.TempC), float32(st.TempC)/60, ui.Hex("#E8833A"))
-		fig(key+"-net", L.FigNetwork(), networkWord(st.NetworkType), 1, ui.Hex("#0E9F9F"))
+		fig(key+"-batt", L.FigBattery(), battWord, battFrac, batt)
+		tempWord, tempFrac, tempCol := "—", float32(-1), ui.Hex("#E8833A")
+		if st.TempC > 0 {
+			tempWord, tempFrac = fmt.Sprintf("%.0f°C", st.TempC), float32(st.TempC)/60
+			if st.ThermalWarning {
+				tempCol = k.warn
+			}
+		}
+		fig(key+"-temp", L.FigTemperature(), tempWord, tempFrac, tempCol)
+		fig(key+"-net", L.FigNetwork(), networkWord(st.NetworkType), -1, k.good)
 	})
 }
 
@@ -557,8 +624,25 @@ func (a *App) phoneMenu(c *ui.Context, key string, d DiscoveredDevice) {
 			if m.Item(L.ActionSendFileMenu()).Chosen() {
 				a.SendFileToPhone()
 			}
-		} else if remembered && !isEmulator(d) && m.Item(L.ActionPairCompanion()).Chosen() {
-			a.PairCompanionOverADB(d.Target.Serial, a.phoneName(d), a.pairNetworkName() != "")
+		}
+		if remembered && !isEmulator(d) {
+			a.mu.Lock()
+			inst := a.compInstalled[hash]
+			a.mu.Unlock()
+			r, _ := a.RememberedFor(hash)
+			pair := L.ActionPairCompanion() // install and pair
+			switch {
+			case inst.Installed && r.Companion != nil:
+				pair = L.ActionRepairCompanion()
+			case inst.Installed:
+				pair = L.ActionPairOnlyCompanion()
+			}
+			if inst.Installed && !inst.Current && m.Item(L.ActionUpdateCompanion()).Chosen() {
+				a.UpdateCompanion(d)
+			}
+			if m.Item(pair).Chosen() {
+				a.PairCompanionOverADB(d.Target.Serial, a.phoneName(d), a.pairNetworkName() != "")
+			}
 		}
 		m.Separator()
 		if remembered && m.Item(L.ActionRename()).Chosen() {
@@ -605,11 +689,16 @@ func (a *App) phoneMenu(c *ui.Context, key string, d DiscoveredDevice) {
 func (a *App) offlineCard(c *ui.Context, k tokens, r RememberedDevice) {
 	key := "off-" + r.HardwareHash
 	name := r.displayName()
+	way, inNet := a.networkWay(r)
 	phoneShell(c, key, false).Children(func() {
 		phoneHeader(c, k, key+"-h", func() {
 			phoneAvatar(c, avatarSize, phoneLogo(r.Maker, r.Brand, r.Model, r.Name), nil, name)
 		}, name, phoneDetail(name, r.Name, r.Android), func() {
-			pill(c, key+"-state", L.StateOffline(), k.sunk, k.text2)
+			if inNet {
+				pill(c, key+"-state", L.StateInNetwork(), k.good.Alpha(0.14), k.goodText)
+			} else {
+				pill(c, key+"-state", L.StateOffline(), k.sunk, k.text2)
+			}
 		}, func() {
 			iconBtn(c, key+"-more", iconMore, L.PaneMore(), false).PopoverMenuButton(func(m *ui.Menu) {
 				if m.Item(L.ActionRename()).Chosen() {
@@ -627,21 +716,33 @@ func (a *App) offlineCard(c *ui.Context, k tokens, r RememberedDevice) {
 			})
 		})
 		ui.Row(c.Key(key + "-route")).FillWidth().Gap(6).AlignItems(ui.Center).Children(func() {
+			if inNet {
+				statusDot(c, k.good)
+				ui.Text(c, way).FontSize(sizeSmall).TextColor(k.text2).SingleLine().MinWidth(0)
+				return
+			}
 			ui.Box(c).Size(8, 8).Radius(4).Border(1.5, k.text3).Shrink(0)
 			ui.Text(c, L.LastConnected(lastSeenWords(r.LastSeen))).FontSize(sizeSmall).TextColor(k.text2).SingleLine().MinWidth(0)
 		})
-		if r.AutoReconnect {
+		if inNet {
+			a.phoneFigures(c, k, key, r.HardwareHash)
+		} else if r.AutoReconnect {
 			ui.Text(c, L.OfflineAutoHint()).FontSize(sizeSmall).TextColor(k.text3)
 		}
+		busy := a.cardWorkLine(c, k, key, r.HardwareHash)
 		ui.Box(c).Grow(1)
 		ui.Row(c.Key(key + "-acts")).Gap(8).Wrap().Children(func() {
-			if ui.Button(c.Key(key+"-connect"), L.ConnectGo()).Clicked() {
+			// In a network without adb (mobile data), sharing the screen is what works.
+			if inNet && r.Companion != nil && ui.PrimaryButton(c.Key(key+"-share-main"), L.ShareScreen()).Disabled(busy).Clicked() {
+				a.LaunchShare(r.HardwareHash, OpenDefault)
+			}
+			if ui.Button(c.Key(key+"-connect"), L.ConnectGo()).Disabled(busy).Clicked() {
 				a.mu.Lock()
 				openAs := a.connect.OpenAs
 				a.mu.Unlock()
 				a.connectRemembered(r, openAs)
 			}
-			if r.Companion != nil && ui.Button(c.Key(key+"-share"), L.ShareScreen()).Clicked() {
+			if !inNet && r.Companion != nil && ui.Button(c.Key(key+"-share"), L.ShareScreen()).Disabled(busy).Clicked() {
 				a.LaunchShare(r.HardwareHash, OpenDefault)
 			}
 		})
@@ -840,3 +941,67 @@ func (a *App) cameraFacing() string {
 }
 
 var _ = companion.LocalSocket
+
+// cardWork is what a phone card shows about the last thing started from it: Busy while it runs
+// (the card's buttons wait), then Note when it failed, in plain words.
+type cardWork struct {
+	Busy, Note string
+}
+
+// setCardWork sets what hash's card shows; an empty cardWork clears it.
+func (a *App) setCardWork(hash string, w cardWork) {
+	a.update(func() {
+		if a.cardWork == nil {
+			a.cardWork = map[string]cardWork{}
+		}
+		if w == (cardWork{}) {
+			delete(a.cardWork, hash)
+			return
+		}
+		a.cardWork[hash] = w
+	})
+}
+
+// cardWorkLine draws hash's card progress (a spinner and what it is doing) or its last failure.
+// Returns: true while something runs, so the card's buttons wait.
+func (a *App) cardWorkLine(c *ui.Context, k tokens, key, hash string) bool {
+	a.mu.Lock()
+	w := a.cardWork[hash]
+	a.mu.Unlock()
+	switch {
+	case w.Busy != "":
+		ui.Row(c.Key(key + "-work")).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
+			ui.Spinner(c).Size(14, 14)
+			ui.Text(c, w.Busy).FontSize(sizeSmall).TextColor(k.text2).MinWidth(0)
+		})
+		return true
+	case w.Note != "":
+		ui.Text(c.Key(key+"-note"), w.Note).FontSize(sizeSmall).TextColor(k.warnText)
+	}
+	return false
+}
+
+// networkWay reports whether remembered phone r is in a running network now (paired, and its
+// mesh hostname among that network's peers) and how it is reached there, in words.
+func (a *App) networkWay(r RememberedDevice) (string, bool) {
+	if r.Companion == nil || r.Companion.MeshHost == "" {
+		return "", false
+	}
+	names := map[string]string{}
+	for _, n := range a.networks() {
+		names[n.ID] = n.shownName()
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for id, v := range a.netViews {
+		if !v.Status.Running {
+			continue
+		}
+		for _, p := range v.Info.Peers {
+			if mesh.SameDevice(p.Hostname, r.Companion.MeshHost) {
+				return L.RouteInNetwork(names[id]) + " · " + wayWords(p.Direct, p.Latency), true
+			}
+		}
+	}
+	return "", false
+}

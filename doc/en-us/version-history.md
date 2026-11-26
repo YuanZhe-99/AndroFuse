@@ -1,9 +1,12 @@
 # Version History
 
-## Unreleased (`0.1.0` M0 Baseline)
+## v0.1.0 (2026-11-26)
 
-- Initialized unified Go + MyGo (`v0.10.0`) + Rust (`core/androfuse-core`, ABI v1) project structure under `GPL-3.0-only`.
-- Integrated `resources/icon.svg` and deterministic PNG rendering pipeline (`tools/icon`) for desktop, UI, tray, and Android adaptive icon foreground.
-- Implemented passive host self-check diagnostics (`diagnostics.self_check`): Windows native vs WOW64 emulation detection, Media Foundation H.264/HEVC decoder enumeration, Wi-Fi Direct / Miracast symbol probing, and ADB path detection.
-- Completed code, license, and behavior audit of MyGo, Kyokai, scrcpy, DeXDesk, ScrcpyDeX, DX-Manager, MyDeX, DeXter, and AndroMeld UX; consolidated full product plan in `PLAN.md`.
-- Checked upstreams: Go `1.27.4` / MyGo `v0.10.0` / Rust `1.99.1` / scrcpy `v5.0.1` / Kyokai `v0.8.1` (checked `2026-11-23`).
+- **Native Desktop & Core (`windows/arm64` & `windows/amd64`)**: Unified Go (`1.27`), MyGo (`v0.10.0`), and Rust 2024 (`core/androfuse-core`, C ABI v6) application under `GPL-3.0-only`, with Ed25519 helper bundle signing (`tools/sign`), MyGo signed updater configuration, and native PE verification (`tools/checkpe`).
+- **Media Foundation DXVA & Audio**: Zero-allocation DXVA/D3D11 H.264/HEVC NV12 video pipeline into `ui.Bitmap.UpdateYUV`, shared-mode WASAPI PCM playback and mic capture (`androfuse_mic_*`), PNG screenshots, and zero-reencode fragmented MP4 recording.
+- **Samsung Native DeX, Mirroring, App Windows & Camera**: `SemWifiDisplayConfig` loopback Native DeX (`server/dexhelper`, interactive UHID mouse/keyboard/scroll, resize, detached `serve` with grace-period `Reattach`), concurrent Android screen mirroring, chromeless independent app windows with real icons (resuming across One UI live-icon aborts), and phone camera streaming with in-place front/rear lens switching.
+- **Kyokai-Style V3 Desktop UI**: Docked main-window panes, split view, pop-out/dock without reconnecting, address-only connect with port discovery, `+` picker, `Ctrl K` search, remembered phones (`devices.json`), multi-network EasyTier settings (up to 8 networks), tray per-phone submenus, and plain-language error messages backed by scrubbed logs (`Save logs…`).
+- **Embedded EasyTier v2.7.1 Mesh & Companion (`arm64-v8a`)**: User-space `--no-tun` mesh embedded in both desktop and Android cores with compact `AF-<p|c>-<id>` peer filtering and low-power mobile mode; optional ECDSA P-256 TLS 1.3 Android Companion APK (`AndroFuse-0.1.0-android-arm64.apk`) with Keystore-sealed identity, per-computer pairing, background standby service, Wireless debugging discovery/tunneling, and mobile-data screen sharing (`MediaProjection`).
+- **Built-In Headless Android VM & Opt-In Local MCP**: On-demand downloadable native Android 16 AVD runner (`internal/vm`) and default-disabled `127.0.0.1` local MCP server with per-tool approval cards.
+- **Known Scope Boundaries**: Miracast sink remains hidden/disabled due to undocumented Windows APIs triggering `qcwlan8280.sys` kernel BSODs; real-hardware Windows 11 `x64` / Windows 10 verification, physical USB unplug re-test, and post-reboot 5G ADB alternatives are tracked for subsequent releases.
+- **Checked Upstreams**: Go `1.27.4` / MyGo `v0.10.0` / Rust `1.99.1` / scrcpy `v5.0.1` / EasyTier `v2.7.1` / Kyokai `v0.8.1` (checked `2026-11-26`).

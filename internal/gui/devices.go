@@ -3,6 +3,7 @@ package gui
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"os"
 	"path/filepath"
 	"slices"
@@ -114,7 +115,7 @@ func (a *App) rememberDevices(devs []DiscoveredDevice, now time.Time) {
 			a.remembered = append(a.remembered, RememberedDevice{HardwareHash: d.HardwareHash, AutoReconnect: true})
 			i = len(a.remembered) - 1
 			changed = true
-			if d.Target.Transport == adb.TransportUSB && !a.prefs.NoCompanionOffer && a.firstConnect == nil {
+			if !a.prefs.NoCompanionOffer && a.firstConnect == nil {
 				a.firstConnect = &firstConnect{Hash: d.HardwareHash, Serial: d.Target.Serial, Name: name, Install: true, Join: true}
 			}
 		}
@@ -334,7 +335,7 @@ func isEmulator(d DiscoveredDevice) bool {
 // else its model; never an emulator's AVD name or a serial.
 func ownName(d DiscoveredDevice) string {
 	p := d.Profile
-	for _, s := range []string{p.DeviceName, p.MarketName, p.Model, d.Target.Model} {
+	for _, s := range []string{p.DeviceName, p.MarketName, p.Model, d.RememberedName, d.Target.Model} {
 		if s = strings.TrimSpace(s); s != "" {
 			return s
 		}
@@ -399,16 +400,58 @@ func deviceLogo(d DiscoveredDevice) *ui.SVG {
 }
 
 // tunnelDue reports whether automatic reconnection may try hash's Companion tunnel now, and
-// records the try (at most every two minutes per phone, since a mesh route may restart a network).
+// records the try (at most every 30 s per phone: a new mesh route restarts that network once).
 func (a *App) tunnelDue(hash string) bool {
 	a.rt.coreMu.Lock()
 	defer a.rt.coreMu.Unlock()
 	if a.rt.tunnelTried == nil {
 		a.rt.tunnelTried = map[string]time.Time{}
 	}
-	if time.Since(a.rt.tunnelTried[hash]) < 2*time.Minute {
+	if time.Since(a.rt.tunnelTried[hash]) < 30*time.Second {
 		return false
 	}
 	a.rt.tunnelTried[hash] = time.Now()
 	return true
+}
+
+// rememberedAt returns the hash and own name of the remembered phone last reached on serial's Wireless debugging address,
+// so a phone that could not be probed this time still shows as itself rather than a second card.
+func (a *App) rememberedAt(serial string) (hash, name string) {
+	host, _, err := net.SplitHostPort(serial)
+	if err != nil {
+		return "", ""
+	}
+	for _, r := range a.rememberedList() {
+		if h, _, err := net.SplitHostPort(r.Endpoint); err == nil && h == host {
+			return r.HardwareHash, r.Name
+		}
+	}
+	return "", ""
+}
+
+// dropDeadWireless disconnects the wireless adb connections adb still lists as offline (the
+// phone left that network or turned Wireless debugging off) and leaves them out, so they do not
+// show as phones of their own; adb keeps such entries until told to forget them.
+func dropDeadWireless(ctx context.Context, client *adb.Client, devs []adb.Device) []adb.Device {
+	out := devs[:0:0]
+	for _, d := range devs {
+		if d.State == "offline" && strings.Contains(d.Serial, ":") && d.Transport != adb.TransportEmulator {
+			_ = client.Disconnect(ctx, d.Serial)
+			continue
+		}
+		out = append(out, d)
+	}
+	return out
+}
+
+// noteCompanionPort saves the Companion port that answered for hash, after the phone moved to
+// another of its ports (companion.DevicePorts).
+// Side effects: saves devices.json.
+func (a *App) noteCompanionPort(hash string, port int) {
+	a.update(func() {
+		if i := a.rememberedIndexLocked(hash); i >= 0 && a.remembered[i].Companion != nil {
+			a.remembered[i].Companion.Port = port
+			a.saveDevicesLocked()
+		}
+	})
 }

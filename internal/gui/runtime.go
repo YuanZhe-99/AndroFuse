@@ -47,6 +47,8 @@ type DiscoveredDevice struct {
 	Apps         []adb.AppEntry
 	Probed       bool
 	ProbeErr     string
+	// RememberedName is the remembered phone's own name when it could not be probed this time.
+	RememberedName string
 }
 
 // EncoderHeadroom computes hardware encoder stream usage vs probed limit (`INV-01`).
@@ -89,6 +91,8 @@ type guiRuntime struct {
 	meshCfgs        map[string]mesh.Config        // the running networks by instance, with secrets and forwards, for handing one to a paired phone
 	tunnels         map[string]context.CancelFunc // Wireless debugging tunnels through each phone's Companion, by HardwareHash
 	tunnelTried     map[string]time.Time          // last automatic tunnel attempt per phone
+	tunnelAddrs     map[string]string             // each tunnel's loopback adb address, by HardwareHash
+	synced          map[string]bool               // phones whose Companion was checked since they came online (syncCompanions)
 	micUplink       *avbridge.UplinkBridge
 	micUplinkCancel context.CancelFunc
 	recoverRan      bool
@@ -100,6 +104,16 @@ func (a *App) ensureAndroidHost() *androidhost.Host {
 		a.rt.androidHost = androidhost.New(a.stateDir, func() {
 			a.update(func() {})
 		})
+		a.rt.androidHost.SetLanguageHooks(a.LanguagePref, func(lang string) {
+			a.mu.Lock()
+			a.prefs.Language = lang
+			a.savePrefs()
+			a.mu.Unlock()
+			mygo.App.SetLocale(lang)
+		})
+		if runtime.GOOS == "android" {
+			go a.rt.androidHost.AutoStart()
+		}
 	}
 	h := a.rt.androidHost
 	a.rt.coreMu.Unlock()
@@ -147,7 +161,7 @@ func (a *App) ContinueCompanionApp() {
 		res, err := c.RequestContinuity(ctx, "handoff_to_pc", "")
 		cancel()
 		if err != nil {
-			a.update(func() { a.compNotice = err.Error() })
+			a.update(func() { a.compNotice = a.failed(L.FailCompanion(), err) })
 			return
 		}
 		if res.Package == "" {
@@ -179,7 +193,7 @@ func (a *App) RunCompanionDisplayGuard() {
 		res, err := c.RunDisplayGuard(ctx)
 		cancel()
 		if err != nil {
-			a.update(func() { a.compNotice = err.Error() })
+			a.update(func() { a.compNotice = a.failed(L.FailCompanion(), err) })
 			return
 		}
 		a.update(func() { a.compNotice = res.Message })
@@ -230,7 +244,7 @@ func (a *App) ProvisionVM() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer cancel()
 		if err := mgr.Provision(ctx, vm.DefaultAVDName); err != nil {
-			a.update(func() { a.deviceNotice = err.Error() })
+			a.update(func() { a.deviceNotice = a.failed(L.FailVM(), err) })
 			return
 		}
 		a.RefreshVMStatus()
@@ -245,7 +259,7 @@ func (a *App) StartVM(avdName string) {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
 		if _, err := mgr.Start(ctx, avdName); err != nil {
-			a.update(func() { a.deviceNotice = err.Error() })
+			a.update(func() { a.deviceNotice = a.failed(L.FailVM(), err) })
 			return
 		}
 		a.RefreshDevices()
@@ -259,7 +273,7 @@ func (a *App) StopVM() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := mgr.Stop(ctx); err != nil {
-			a.update(func() { a.deviceNotice = err.Error() })
+			a.update(func() { a.deviceNotice = a.failed(L.FailVM(), err) })
 			return
 		}
 		a.RefreshDevices()
@@ -273,7 +287,7 @@ func (a *App) DeleteManagedVM() {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		if err := mgr.DeleteManaged(ctx); err != nil {
-			a.update(func() { a.deviceNotice = err.Error() })
+			a.update(func() { a.deviceNotice = a.failed(L.FailVM(), err) })
 			return
 		}
 		a.RefreshDevices()
@@ -510,7 +524,7 @@ func (a *App) RefreshDevices() {
 		if err != nil {
 			a.update(func() {
 				a.scanningDevices = false
-				a.deviceNotice = err.Error()
+				a.deviceNotice = a.failed(L.FailDevices(), err)
 			})
 			return
 		}
@@ -522,6 +536,7 @@ func (a *App) RefreshDevices() {
 		if dErr == nil && a.reconnectRemembered(ctx, client, a.onlineHashes(devs), svcs) {
 			devs, dErr = client.Devices(ctx)
 		}
+		devs = dropDeadWireless(ctx, client, devs)
 
 		a.rt.coreMu.Lock()
 		if !a.rt.recoverRan && dErr == nil {
@@ -532,11 +547,22 @@ func (a *App) RefreshDevices() {
 
 		profiles := make(map[string]adb.DeviceProfile, len(devs))
 		probeErrs := make(map[string]string, len(devs))
+		dead := map[string]bool{}
 		for _, d := range devs {
 			if d.State != "device" {
 				continue
 			}
 			prof, pErr := client.ProbeDevice(ctx, d.Serial)
+			if pErr != nil && ctx.Err() == nil {
+				prof, pErr = client.ProbeDevice(ctx, d.Serial) // a slow link across networks: once more
+			}
+			if pErr != nil && strings.Contains(d.Serial, ":") && d.Transport != adb.TransportEmulator {
+				// A wireless connection that does not answer twice is one adb has not noticed is
+				// gone (the phone left Wi-Fi): close it rather than list it as a phone.
+				_ = client.Disconnect(ctx, d.Serial)
+				dead[d.Serial] = true
+				continue
+			}
 			if pErr != nil {
 				probeErrs[d.Serial] = pErr.Error()
 			} else {
@@ -544,6 +570,7 @@ func (a *App) RefreshDevices() {
 			}
 		}
 
+		devs = slices.DeleteFunc(devs, func(d adb.Device) bool { return dead[d.Serial] })
 		unified := adb.MergeDevices(devs, profiles)
 		inspected := make([]DiscoveredDevice, 0, len(unified))
 		decodedIcons := make(map[string]*ui.Bitmap)
@@ -556,6 +583,11 @@ func (a *App) RefreshDevices() {
 				Profile:      u.Profile,
 				Probed:       u.Probed,
 				ProbeErr:     probeErrs[d.Serial],
+			}
+			if !item.Probed {
+				if hash, name := a.rememberedAt(d.Serial); hash != "" {
+					item.HardwareHash, item.RememberedName = hash, name
+				}
 			}
 			if d.State == "device" && item.Probed {
 				if strings.EqualFold(item.Profile.Manufacturer, "samsung") && d.Transport != adb.TransportEmulator {
@@ -607,6 +639,12 @@ func (a *App) RefreshDevices() {
 		a.update(func() {
 			a.scanningDevices = false
 			a.devices = inspected
+			// A phone that is online again drops the last failure its card showed.
+			for _, d := range inspected {
+				if w, ok := a.cardWork[d.HardwareHash]; ok && d.Target.State == "device" && w.Busy == "" {
+					delete(a.cardWork, d.HardwareHash)
+				}
+			}
 			a.mdnsServices = svcs
 			a.deviceNotice = notice
 			if a.appIcons == nil {
@@ -617,6 +655,7 @@ func (a *App) RefreshDevices() {
 			}
 		})
 		a.openPending(inspected)
+		a.syncCompanions(inspected)
 		a.refreshTray()
 	}()
 }
@@ -656,12 +695,12 @@ func (a *App) LaunchDeX(d DiscoveredDevice, forceFallback bool, open OpenIn) {
 		lib, lErr := a.ensureCoreLocked()
 		a.rt.coreMu.Unlock()
 		if lErr != nil {
-			a.update(func() { a.deviceNotice = lErr.Error() })
+			a.update(func() { a.deviceNotice = a.failed(L.FailEngine(), lErr) })
 			return
 		}
 		client, store, aErr := a.ensureADBAndLeases()
 		if aErr != nil {
-			a.update(func() { a.deviceNotice = aErr.Error() })
+			a.update(func() { a.deviceNotice = a.failed(L.FailEngine(), aErr) })
 			return
 		}
 
@@ -672,7 +711,7 @@ func (a *App) LaunchDeX(d DiscoveredDevice, forceFallback bool, open OpenIn) {
 		if useNative {
 			dexSess, err := dex.StartNativeLoopback(ctx, client, store, d.Target.Serial, 1920, 1080, 160, 30)
 			if err != nil {
-				a.update(func() { a.deviceNotice = err.Error() })
+				a.update(func() { a.deviceNotice = a.failed(L.FailDeX(), err) })
 				return
 			}
 			ready := dexSess.Ready()
@@ -720,7 +759,7 @@ func (a *App) LaunchDeX(d DiscoveredDevice, forceFallback bool, open OpenIn) {
 					ap.Close()
 				}
 				dexSess.Stop()
-				a.update(func() { a.deviceNotice = err.Error() })
+				a.update(func() { a.deviceNotice = a.failed(L.FailDeX(), err) })
 				return
 			}
 			a.addSession(sw)
@@ -774,7 +813,7 @@ func (a *App) LaunchDeX(d DiscoveredDevice, forceFallback bool, open OpenIn) {
 			if ap != nil {
 				ap.Close()
 			}
-			a.update(func() { a.deviceNotice = err.Error() })
+			a.update(func() { a.deviceNotice = a.failed(L.FailDeX(), err) })
 			return
 		}
 		a.addSession(sw)
@@ -799,12 +838,12 @@ func (a *App) LaunchMirror(d DiscoveredDevice, open OpenIn) {
 		lib, lErr := a.ensureCoreLocked()
 		a.rt.coreMu.Unlock()
 		if lErr != nil {
-			a.update(func() { a.deviceNotice = lErr.Error() })
+			a.update(func() { a.deviceNotice = a.failed(L.FailEngine(), lErr) })
 			return
 		}
 		client, store, aErr := a.ensureADBAndLeases()
 		if aErr != nil {
-			a.update(func() { a.deviceNotice = aErr.Error() })
+			a.update(func() { a.deviceNotice = a.failed(L.FailEngine(), aErr) })
 			return
 		}
 
@@ -855,7 +894,7 @@ func (a *App) LaunchMirror(d DiscoveredDevice, open OpenIn) {
 			if ap != nil {
 				ap.Close()
 			}
-			a.update(func() { a.deviceNotice = err.Error() })
+			a.update(func() { a.deviceNotice = a.failed(L.FailScreen(), err) })
 			return
 		}
 		a.addSession(sw)
@@ -893,12 +932,12 @@ func (a *App) LaunchAppWindow(d DiscoveredDevice, app adb.AppEntry, open OpenIn)
 		lib, lErr := a.ensureCoreLocked()
 		a.rt.coreMu.Unlock()
 		if lErr != nil {
-			a.update(func() { a.deviceNotice = lErr.Error() })
+			a.update(func() { a.deviceNotice = a.failed(L.FailEngine(), lErr) })
 			return
 		}
 		client, store, aErr := a.ensureADBAndLeases()
 		if aErr != nil {
-			a.update(func() { a.deviceNotice = aErr.Error() })
+			a.update(func() { a.deviceNotice = a.failed(L.FailEngine(), aErr) })
 			return
 		}
 
@@ -953,7 +992,7 @@ func (a *App) LaunchAppWindow(d DiscoveredDevice, app adb.AppEntry, open OpenIn)
 			if ap != nil {
 				ap.Close()
 			}
-			a.update(func() { a.deviceNotice = err.Error() })
+			a.update(func() { a.deviceNotice = a.failed(L.FailApp(), err) })
 			return
 		}
 		a.addSession(sw)
@@ -969,7 +1008,7 @@ func (a *App) LaunchMiracastDeX() {
 		lib, lErr := a.ensureCoreLocked()
 		a.rt.coreMu.Unlock()
 		if lErr != nil {
-			a.update(func() { a.deviceNotice = lErr.Error() })
+			a.update(func() { a.deviceNotice = a.failed(L.FailEngine(), lErr) })
 			return
 		}
 		sid := newSessionID("miracast")
@@ -1001,7 +1040,7 @@ func (a *App) LaunchMiracastDeX() {
 			}
 		})
 		if err != nil {
-			a.update(func() { a.deviceNotice = err.Error() })
+			a.update(func() { a.deviceNotice = a.failed(L.FailDeX(), err) })
 			return
 		}
 		a.addSession(sw)
@@ -1103,7 +1142,7 @@ func (a *App) ensureMCPServerLocked() *mcp.Server {
 			return devs, nil
 		},
 		RunDiagnostics: func(context.Context) (any, error) {
-			return RunDiagnostics(a.stateDir, ""), nil
+			return a.hostDiagnostics(), nil
 		},
 		LaunchApp: func(_ context.Context, deviceID, packageName string) (any, error) {
 			target, ok := a.findDeviceForMCP(deviceID)
@@ -1144,7 +1183,7 @@ func (a *App) EnableMCP() {
 	st, err := srv.Enable(allow)
 	a.mu.Lock()
 	if err != nil {
-		a.mcpNotice = err.Error()
+		a.mcpNotice = a.failed(L.FailAssistant(), err)
 		a.mcpStatus = srv.Status()
 	} else {
 		a.mcpNotice = ""
@@ -1166,7 +1205,7 @@ func (a *App) EmergencyStopMCP() {
 	err := srv.EmergencyStop()
 	a.mu.Lock()
 	if err != nil {
-		a.mcpNotice = err.Error()
+		a.mcpNotice = a.failed(L.FailAssistant(), err)
 	} else {
 		a.mcpNotice = ""
 	}
@@ -1200,23 +1239,23 @@ func (a *App) launchCamera(d DiscoveredDevice, facing string, open OpenIn, muted
 		lib, lErr := a.ensureCoreLocked()
 		a.rt.coreMu.Unlock()
 		if lErr != nil {
-			a.update(func() { a.deviceNotice = lErr.Error() })
+			a.update(func() { a.deviceNotice = a.failed(L.FailEngine(), lErr) })
 			return
 		}
-		client, store, aErr := a.ensureADBAndLeases()
+		_, _, aErr := a.ensureADBAndLeases()
 		if aErr != nil {
-			a.update(func() { a.deviceNotice = aErr.Error() })
+			a.update(func() { a.deviceNotice = a.failed(L.FailEngine(), aErr) })
 			return
 		}
 
 		mjpegSrv := avbridge.NewMJPEGServer()
 		mjpegURL, mErr := mjpegSrv.Start()
 		if mErr != nil {
-			a.update(func() { a.deviceNotice = mErr.Error() })
+			a.update(func() { a.deviceNotice = a.failed(L.FailEngine(), mErr) })
 			return
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
 		defer cancel()
 
 		tLabel := transportLabel(d.Target.Transport)
@@ -1245,43 +1284,71 @@ func (a *App) launchCamera(d DiscoveredDevice, facing string, open OpenIn, muted
 		sw.audioMuted = muted
 		ap, _ := lib.OpenAudioPlayer(48000, 2)
 		sw.attachAudio(ap)
+		sw.camBridge = mjpegSrv
 
-		var vSess *scrcpy.Session
-		vSess, err := scrcpy.StartADB(ctx, client, lib, store, scrcpy.LaunchConfig{
-			SessionID:     sid,
-			Serial:        d.Target.Serial,
-			VideoSource:   "camera",
-			CameraFacing:  facing,
-			CameraSize:    "1280x720",
-			CameraFPS:     30,
-			VideoBitRate:  6_000_000,
-			Audio:         true,
-			AudioSource:   "mic",
-			InitialWidth:  1280,
-			InitialHeight: 720,
-			OnFrame: func(f core.NV12Frame) {
-				mjpegSrv.PushNV12(f.Width, f.Height, f.YStride, f.UVStride, f.Y, f.UV)
-				if vSess != nil {
-					st := vSess.Stats()
-					sw.PushNV12(f, st.MeasuredFPS, st.AvgDecodeUs)
-				} else {
-					sw.PushNV12(f, 0, int64(f.DecodeUs))
-				}
-			},
-			OnAudioPCM: sw.PushAudioPCM,
-		})
+		vSess, err := a.startCameraStream(ctx, sw, facing)
 		if err != nil {
 			_ = mjpegSrv.Close()
 			if ap != nil {
 				ap.Close()
 			}
-			a.update(func() { a.deviceNotice = err.Error() })
+			a.update(func() { a.deviceNotice = a.failed(L.FailCamera(), err) })
 			return
 		}
 		a.update(func() { a.cameraBridgeURL = mjpegURL })
 		a.addSession(sw)
 		a.runOnMain(func() { sw.attachScrcpy(vSess, nil, sessionDefW, sessionDefH) })
 	}()
+}
+
+// startCameraStream starts the phone camera facing for camera session sw: frames go to sw and
+// its MJPEG bridge, sound to sw.
+// Notes: right after another camera stream (Switch camera) the phone may still hold the camera,
+// and its scrcpy-server then stops at once, so a start that fails is tried twice more.
+func (a *App) startCameraStream(ctx context.Context, sw *SessionWindow, facing string) (*scrcpy.Session, error) {
+	a.rt.coreMu.Lock()
+	lib, err := a.ensureCoreLocked()
+	a.rt.coreMu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	client, store, err := a.ensureADBAndLeases()
+	if err != nil {
+		return nil, err
+	}
+	var vSess *scrcpy.Session
+	cfg := scrcpy.LaunchConfig{
+		SessionID:     sw.spec.ID,
+		Serial:        sw.spec.Serial,
+		VideoSource:   "camera",
+		CameraFacing:  facing,
+		CameraSize:    "1280x720",
+		CameraFPS:     30,
+		VideoBitRate:  6_000_000,
+		Audio:         true,
+		AudioSource:   "mic",
+		InitialWidth:  1280,
+		InitialHeight: 720,
+		OnFrame: func(f core.NV12Frame) {
+			if sw.camBridge != nil {
+				sw.camBridge.PushNV12(f.Width, f.Height, f.YStride, f.UVStride, f.Y, f.UV)
+			}
+			if vSess != nil {
+				st := vSess.Stats()
+				sw.PushNV12(f, st.MeasuredFPS, st.AvgDecodeUs)
+			} else {
+				sw.PushNV12(f, 0, int64(f.DecodeUs))
+			}
+		},
+		OnAudioPCM: sw.PushAudioPCM,
+	}
+	for attempt := 1; ; attempt++ {
+		vSess, err = scrcpy.StartADB(ctx, client, lib, store, cfg)
+		if err == nil || attempt == 3 || ctx.Err() != nil {
+			return vSess, err
+		}
+		time.Sleep(1500 * time.Millisecond)
+	}
 }
 
 // StartCompanionMicUplink opens Windows WASAPI mic capture and streams 20ms s16le PCM to Android Companion (`INV-09`).
@@ -1293,7 +1360,7 @@ func (a *App) StartCompanionMicUplink() {
 		cl := a.rt.compClient
 		a.rt.coreMu.Unlock()
 		if lErr != nil {
-			a.update(func() { a.micUplinkNotice = lErr.Error() })
+			a.update(func() { a.micUplinkNotice = a.failed(L.FailMic(), lErr) })
 			return
 		}
 		if cl == nil {
@@ -1302,7 +1369,7 @@ func (a *App) StartCompanionMicUplink() {
 		}
 		cap, err := lib.OpenMicCapture(48000, 1)
 		if err != nil {
-			a.update(func() { a.micUplinkNotice = err.Error() })
+			a.update(func() { a.micUplinkNotice = a.failed(L.FailMic(), err) })
 			return
 		}
 		bridge := avbridge.NewUplinkBridge(cl)
@@ -1332,7 +1399,7 @@ func (a *App) StartCompanionMicUplink() {
 		a.update(func() {
 			a.micUplinkActive = false
 			if streamErr != nil && !errors.Is(streamErr, context.Canceled) {
-				a.micUplinkNotice = streamErr.Error()
+				a.micUplinkNotice = a.failed(L.FailMic(), streamErr)
 			}
 		})
 	}()
@@ -1587,14 +1654,17 @@ func (a *App) handoffOn() bool {
 	return !a.prefs.NoUSBHandoff
 }
 
-// watchDevices notices phones plugged in, unplugged or reconnected: every 10 s it lists adb's
-// targets (cheap) and scans fully only when that list changed; every minute it scans when a
-// remembered phone with automatic reconnect is offline, which tries to reconnect it.
+// watchDevices notices phones plugged in, unplugged or reconnected: every 5 s it lists adb's
+// targets (cheap), asks each wireless one to answer and closes it after two misses (adb itself
+// notices a phone that left Wi-Fi only minutes later), and scans fully when that list changed;
+// every 30 s it scans when a remembered phone with automatic reconnect is offline, which tries
+// to reconnect it.
 func (a *App) watchDevices(ctx context.Context) {
 	last := ""
-	tick := time.NewTicker(10 * time.Second)
+	tick := time.NewTicker(5 * time.Second)
 	defer tick.Stop()
 	n := 0
+	misses := map[string]int{} // wireless adb connections that did not answer, in a row
 	for {
 		select {
 		case <-ctx.Done():
@@ -1612,6 +1682,28 @@ func (a *App) watchDevices(ctx context.Context) {
 		if err != nil {
 			continue
 		}
+		// adb keeps listing a wireless connection as "device" for minutes after the phone left
+		// Wi-Fi (for mobile data): ask each one to answer, and close it after two misses.
+		dropped := false
+		for _, d := range devs {
+			if d.State != "device" || !strings.Contains(d.Serial, ":") || d.Transport == adb.TransportEmulator {
+				continue
+			}
+			pctx, pcancel := context.WithTimeout(ctx, 3*time.Second)
+			_, pErr := client.Shell(pctx, d.Serial, "echo")
+			pcancel()
+			if pErr == nil {
+				delete(misses, d.Serial)
+				continue
+			}
+			if misses[d.Serial]++; misses[d.Serial] >= 2 {
+				delete(misses, d.Serial)
+				dctx, dcancel := context.WithTimeout(ctx, 3*time.Second)
+				_ = client.Disconnect(dctx, d.Serial)
+				dcancel()
+				dropped = true
+			}
+		}
 		var parts []string
 		for _, d := range devs {
 			parts = append(parts, d.Serial+"="+d.State)
@@ -1620,7 +1712,7 @@ func (a *App) watchDevices(ctx context.Context) {
 		now := strings.Join(parts, ",")
 		changed := now != last
 		last = now
-		if changed || (n%6 == 0 && a.wantsReconnect(devs)) {
+		if changed || dropped || (n%6 == 0 && a.wantsReconnect(devs)) {
 			a.RefreshDevices()
 		}
 	}
@@ -1651,26 +1743,30 @@ func (a *App) LaunchShare(hash string, open OpenIn) {
 		return
 	}
 	b := *r.Companion
+	name := r.displayName()
+	fail := func(err error) { a.setCardWork(hash, cardWork{Note: a.failed(L.CardShareFailed(name), err)}) }
+	a.setCardWork(hash, cardWork{Busy: L.CardReaching(name)})
 	go func() {
 		tok, err := openSecret(b.SealedToken)
 		if err != nil {
-			a.notify(err.Error())
+			fail(err)
 			return
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 		defer cancel()
-		addr, err := a.companionRoute(ctx, hash, b)
+		keys, addr, err := a.findCompanion(ctx, hash, b, string(tok))
 		if err != nil {
-			a.notify(err.Error())
+			fail(err)
 			return
 		}
-		a.toast(L.ShareAsking(r.displayName()))
+		a.setCardWork(hash, cardWork{Busy: L.ShareAsking(name)})
 		stream, err := companion.DialShare(ctx, addr, string(tok), b.Fingerprint)
 		if err != nil {
-			a.notify(err.Error())
+			_ = keys.Close()
+			fail(err)
 			return
 		}
-		keys, _ := companion.Dial(ctx, addr, string(tok), b.Fingerprint)
+		a.setCardWork(hash, cardWork{})
 		a.rt.coreMu.Lock()
 		lib, lErr := a.ensureCoreLocked()
 		a.rt.coreMu.Unlock()

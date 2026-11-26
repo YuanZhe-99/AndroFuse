@@ -101,6 +101,13 @@ func (a *App) migrateMeshLocked() {
 // Side effects: draws and saves DeviceID the first time.
 func (a *App) meshHostname() string {
 	name, _ := os.Hostname()
+	return mesh.Hostname(mesh.KindPC, a.deviceID(), name)
+}
+
+// deviceID is this computer's kept random id: in its mesh hostname, and how phones tell its
+// pairing from other computers' (companion.SetClient).
+// Side effects: draws and saves DeviceID the first time.
+func (a *App) deviceID() string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	p := a.meshPrefsLocked()
@@ -108,7 +115,7 @@ func (a *App) meshHostname() string {
 		p.DeviceID = mesh.NewDeviceID()
 		a.savePrefs()
 	}
-	return mesh.Hostname(mesh.KindPC, p.DeviceID, name)
+	return p.DeviceID
 }
 
 // meshPrefsLocked returns the network settings, creating them; the caller holds a.mu.
@@ -388,6 +395,7 @@ func (a *App) resumeNetworks() {
 func (a *App) pollNetworks(ctx context.Context) {
 	t := time.NewTicker(3 * time.Second)
 	defer t.Stop()
+	present := map[string]bool{} // paired phones seen in a network at the last poll
 	for {
 		select {
 		case <-ctx.Done():
@@ -419,6 +427,20 @@ func (a *App) pollNetworks(ctx context.Context) {
 				a.netViews[id] = v
 			}
 		})
+		// A paired phone that just appeared in a network (it came online, or left Wi-Fi for mobile
+		// data) gets adb back at once (RefreshDevices reconnects through the Companion).
+		now := map[string]bool{}
+		arrived := false
+		for _, r := range a.rememberedList() {
+			if _, in := a.networkWay(r); in {
+				now[r.HardwareHash] = true
+				arrived = arrived || !present[r.HardwareHash]
+			}
+		}
+		present = now
+		if arrived {
+			a.RefreshDevices()
+		}
 	}
 }
 
@@ -447,33 +469,45 @@ func (a *App) meshPeerIPv4(hostname string) (string, string, bool) {
 	return "", "", false
 }
 
-// meshForward returns a loopback port that reaches ip:port through network id, adding the forward
-// (and restarting that network's instance) when it is new.
-func (a *App) meshForward(id, ip string, port int) (int, error) {
+// meshForwards returns loopback ports that reach ip at each of ports through network id, adding
+// the missing forwards with a single restart of that network's instance.
+func (a *App) meshForwards(id, ip string, ports []int) ([]int, error) {
 	a.rt.coreMu.Lock()
 	mgr := a.rt.meshMgr
 	cfg, ok := a.rt.meshCfgs[id]
 	a.rt.coreMu.Unlock()
 	if mgr == nil || !ok {
-		return 0, errors.New(L.CompanionNoRoute())
+		return nil, errors.New(L.CompanionNoRoute())
 	}
-	for _, pf := range cfg.PortForwards {
-		if pf.RemoteHost == ip && pf.RemotePort == port {
-			return pf.LocalPort, nil
+	locals := make([]int, len(ports))
+	added := false
+	cfg.PortForwards = slices.Clone(cfg.PortForwards)
+	for i, port := range ports {
+		for _, pf := range cfg.PortForwards {
+			if pf.RemoteHost == ip && pf.RemotePort == port {
+				locals[i] = pf.LocalPort
+			}
 		}
+		if locals[i] != 0 {
+			continue
+		}
+		local, err := companion.PickPort(0)
+		if err != nil {
+			return nil, err
+		}
+		cfg.PortForwards = append(cfg.PortForwards, mesh.PortForward{LocalPort: local, RemoteHost: ip, RemotePort: port})
+		locals[i], added = local, true
 	}
-	local, err := companion.PickPort(0)
-	if err != nil {
-		return 0, err
+	if !added {
+		return locals, nil
 	}
-	cfg.PortForwards = append(slices.Clone(cfg.PortForwards), mesh.PortForward{LocalPort: local, RemoteHost: ip, RemotePort: port})
 	if err := mgr.Start(cfg); err != nil {
-		return 0, err
+		return nil, err
 	}
 	a.rt.coreMu.Lock()
 	a.rt.meshCfgs[id] = cfg
 	a.rt.coreMu.Unlock()
-	return local, nil
+	return locals, nil
 }
 
 // pairNetworkConfig returns the running network a newly paired phone joins, with its secret.

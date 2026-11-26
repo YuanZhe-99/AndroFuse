@@ -112,7 +112,7 @@ func TestTwoNetworksSideBySide(t *testing.T) {
 	port := freePort(t)
 	base := Config{Enabled: true, NetworkName: "androfuse-two-" + strconv.Itoa(port), NetworkSecret: "two-networks"}
 	a, b := base, base
-	a.Instance, a.DeviceName, a.Listeners = "net-a", "node-a", []string{"tcp://0.0.0.0:" + strconv.Itoa(port)}
+	a.Instance, a.DeviceName, a.Listeners = "net-a", Hostname(KindPC, "0a1b2c3d", "STUDIO PC"), []string{"tcp://0.0.0.0:" + strconv.Itoa(port)}
 	b.Instance, b.DeviceName, b.Peers = "net-b", "node-b", []string{"tcp://" + net.JoinHostPort(lanIPv4(t), strconv.Itoa(port))}
 	if err := m.Start(a); err != nil {
 		t.Fatalf("Start a: %v", err)
@@ -125,14 +125,14 @@ func TestTwoNetworksSideBySide(t *testing.T) {
 	for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline) && peer.Hostname == ""; time.Sleep(250 * time.Millisecond) {
 		if info, ok := m.Info("net-b"); ok {
 			for _, p := range info.Peers {
-				if p.Hostname == "node-a" {
+				if SameDevice(p.Hostname, Hostname(KindPC, "0a1b2c3d", "")) {
 					peer = p
 				}
 			}
 		}
 	}
 	if peer.Hostname == "" || !peer.Direct {
-		t.Fatalf("net-b does not see node-a directly: %+v", peer)
+		t.Fatalf("net-b does not see net-a's node directly: %+v", peer)
 	}
 	if err := m.Stop("net-a"); err != nil {
 		t.Fatal(err)
@@ -142,20 +142,26 @@ func TestTwoNetworksSideBySide(t *testing.T) {
 	}
 }
 
-// TestHostnameRoundTrip checks the AndroFuse hostname format and that other nodes (a public
-// relay server, a plain EasyTier peer) are not taken for AndroFuse devices.
+// TestHostnameRoundTrip checks the compact AndroFuse hostname format, legacy parsing, and that
+// other nodes (a public relay server, a plain EasyTier peer) are not taken for AndroFuse devices.
 func TestHostnameRoundTrip(t *testing.T) {
 	h := Hostname(KindPhone, "0a1b2c3d", "  Galaxy   Z Fold8 ")
-	if h != "AndroFuse-phone-0a1b2c3d Galaxy Z Fold8" {
+	if h != "AF-p-0a1b2c3d Galaxy Z Fold8" {
 		t.Fatalf("Hostname = %q", h)
+	}
+	if len(h) > 32 {
+		t.Fatalf("Hostname exceeds EasyTier 32-char limit: %d (%q)", len(h), h)
 	}
 	if kind, id, name, ok := ParseHostname(h); !ok || kind != KindPhone || id != "0a1b2c3d" || name != "Galaxy Z Fold8" {
 		t.Fatalf("ParseHostname(%q) = %q %q %q %v", h, kind, id, name, ok)
 	}
+	if kind, id, name, ok := ParseHostname("AndroFuse-phone-0a1b2c3d Fold"); !ok || kind != KindPhone || id != "0a1b2c3d" || name != "Fold" {
+		t.Fatalf("legacy ParseHostname failed: %q %q %q %v", kind, id, name, ok)
+	}
 	if _, _, name, ok := ParseHostname(Hostname(KindPC, "ff", "")); !ok || name != "" {
 		t.Fatalf("a nameless pc hostname did not parse")
 	}
-	for _, other := range []string{"PublicServer_CloudCone-S196V", "AndroFuse-", "AndroFuse-tv-01 TV", "AndroFuse-phone- x", "androfuse-desktop"} {
+	for _, other := range []string{"PublicServer_CloudCone-S196V", "AF-", "AF-t-01 TV", "AF-p- x", "AndroFuse-", "AndroFuse-tv-01 TV", "AndroFuse-phone- x", "androfuse-desktop"} {
 		if _, _, _, ok := ParseHostname(other); ok {
 			t.Errorf("ParseHostname(%q) took it for an AndroFuse device", other)
 		}
@@ -165,12 +171,16 @@ func TestHostnameRoundTrip(t *testing.T) {
 	}
 }
 
-// TestSameDeviceIgnoresRenames checks that a renamed phone is the same device and a relay is not.
+// TestSameDeviceIgnoresRenames checks that a renamed phone or legacy/compact format match is the
+// same device and a relay is not.
 func TestSameDeviceIgnoresRenames(t *testing.T) {
-	if !SameDevice("AndroFuse-phone-01ab Fold", "AndroFuse-phone-01ab My Fold") {
+	if !SameDevice("AF-p-01ab Fold", "AF-p-01ab My Fold") {
 		t.Fatal("a renamed phone was taken for another device")
 	}
-	if SameDevice("AndroFuse-phone-01ab Fold", "AndroFuse-pc-01ab Fold") || SameDevice("AndroFuse-phone-01ab", "Relay") {
+	if !SameDevice("AF-p-01ab Fold", "AndroFuse-phone-01ab My Fold") {
+		t.Fatal("compact and legacy hostnames for the same phone did not match")
+	}
+	if SameDevice("AF-p-01ab Fold", "AF-c-01ab Fold") || SameDevice("AF-p-01ab", "Relay") {
 		t.Fatal("different devices matched")
 	}
 	if !SameDevice("Relay", "Relay") {

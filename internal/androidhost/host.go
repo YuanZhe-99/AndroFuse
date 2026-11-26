@@ -4,6 +4,7 @@ package androidhost
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,8 +27,8 @@ const legacyListenPort = 27189
 
 // Config persists per-user Android Companion settings under `<stateDir>/companion.json`.
 type Config struct {
-	// ListenPort is the random high TCP port (companion.PickPort) the Companion keeps while it
-	// stays free, so a paired desktop's saved LAN or mesh address keeps working; 0 until chosen.
+	// ListenPort is the TCP port the Companion last listened on (companion.PickDevicePort), shown on
+	// the phone and handed to a desktop when it pairs; 0 until chosen.
 	ListenPort      int                   `json:"listen_port"`
 	Token           string                `json:"token"`
 	Permissions     companion.Permissions `json:"permissions"`
@@ -37,6 +38,11 @@ type Config struct {
 	Standby bool `json:"standby,omitempty"`
 	// Mesh is the EasyTier network handed over by a paired desktop; nil when not joined.
 	Mesh *MeshSettings `json:"mesh,omitempty"`
+	// Stopped is set when the phone's user stopped the service, which then stays off until they
+	// start it again (AutoStart).
+	Stopped bool `json:"stopped,omitempty"`
+	// Computers are the computers paired with this phone, each with a token of its own.
+	Computers []PairedComputer `json:"computers,omitempty"`
 	// MeshID is the random id in the phone's EasyTier hostname (mesh.Hostname), drawn on first use.
 	MeshID string `json:"mesh_id,omitempty"`
 }
@@ -62,7 +68,18 @@ type Host struct {
 	beaconCheck  string // outcome of the last wireless debugging port check
 	a11yOn       bool   // the Companion's accessibility service is on (checked in the background)
 	a11yChecked  time.Time
-	mesh         meshRuntime
+	// meshForm is the network editor on the phone's network card while it is open; the pointer is
+	// swapped under mu, its fields are edited by the view.
+	meshForm *meshForm
+	// renaming is the paired computer whose Rename editor is open, and renameText its text (UI
+	// thread only).
+	renaming, renameText string
+	// langIndex is the language control's choice (-1 until first drawn), and getLang/setLang reach
+	// the app's saved language (SetLanguageHooks).
+	langIndex int
+	getLang   func() string
+	setLang   func(string)
+	mesh      meshRuntime
 }
 
 // New constructs an Android Companion Host rooted at stateDir and loads saved config.
@@ -72,8 +89,9 @@ func New(stateDir string, onChange func()) *Host {
 		tok = "ANDROFUS"
 	}
 	h := &Host{
-		stateDir: stateDir,
-		onChange: onChange,
+		stateDir:  stateDir,
+		onChange:  onChange,
+		langIndex: -1,
 		cfg: Config{
 			Token:       tok,
 			Permissions: companion.DefaultPermissions(),
@@ -136,8 +154,8 @@ func (h *Host) notify() {
 	}
 }
 
-// StartServer binds the TLS 1.3 Companion listeners: TCP on all interfaces at ListenPort (a random
-// high port, kept while free) for LAN and mesh peers, and, on Android, the abstract local socket
+// StartServer binds the TLS 1.3 Companion listeners: TCP on all interfaces at the first free one of
+// the ports the phone's device id gives (companion.DevicePorts) for LAN and mesh peers, and, on Android, the abstract local socket
 // companion.LocalSocket that `adb forward` reaches.
 // Side effects: saves a newly drawn ListenPort.
 func (h *Host) StartServer() error {
@@ -152,6 +170,7 @@ func (h *Host) StartServer() error {
 
 	_, model, rel, sdk := deviceIdentity()
 	srv, err := companion.NewServer(tok, model, rel, sdk, companion.Handler{
+		Identity: h.identity(),
 		MeshHost: h.meshHost,
 		GetPermissions: func() companion.Permissions {
 			h.mu.Lock()
@@ -162,7 +181,7 @@ func (h *Host) StartServer() error {
 			return h.Status()
 		},
 		OnShare: func() (net.Conn, error) {
-			if err := androidbridge.StartShare(1280, 4_000_000); err != nil {
+			if err := androidbridge.StartShare(1280, 4_000_000, L.ShareNotifTitle(), L.ShareNotifText(), L.ShareNotifStop()); err != nil {
 				return nil, err
 			}
 			var c net.Conn
@@ -262,6 +281,8 @@ func (h *Host) StartServer() error {
 			return companion.DisplayGuardResponse{CleanedCount: 0, Message: "virtual display check complete"}, nil
 		},
 		OnPairRequest: h.askPair,
+		IssueToken:    h.issueToken,
+		CheckToken:    h.checkToken,
 		OnMeshJoin:    h.JoinMesh,
 		OnMediaFrame: func(req companion.MediaFrameRequest) (companion.MediaFrameResponse, error) {
 			androidbridge.TouchActive()
@@ -282,7 +303,9 @@ func (h *Host) StartServer() error {
 		return err
 	}
 
-	port, err = companion.PickPort(port)
+	// The port comes from the phone's device id, so a desktop finds it again from the id in the
+	// phone's mesh hostname even after the saved port was taken.
+	port, err = companion.PickDevicePort(h.meshID())
 	if err == nil {
 		err = srv.Listen(fmt.Sprintf(":%d", port))
 	}
@@ -304,6 +327,10 @@ func (h *Host) StartServer() error {
 	h.cancelSrv = cancel
 	h.running = true
 	h.lastErr = ""
+	if h.cfg.Stopped {
+		h.cfg.Stopped = false
+		h.saveConfigLocked()
+	}
 	if h.cfg.ListenPort != port {
 		h.cfg.ListenPort = port
 		h.saveConfigLocked()
@@ -464,6 +491,7 @@ func (h *Host) Status() companion.DeviceStatus {
 		st.NetworkType = h.network
 	}
 	h.mu.Unlock()
+	st.MeshNetwork, st.MeshRunning, _ = h.MeshState()
 	return st
 }
 
@@ -571,4 +599,64 @@ func (h *Host) AuditLog() []string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return append([]string(nil), h.audit...)
+}
+
+// identityFile keeps the Companion's TLS certificate and key, sealed with the Android Keystore.
+const identityFile = "identity.sealed"
+
+// identity returns the Companion's kept TLS certificate, drawing and keeping one the first time,
+// so a paired desktop's pinned fingerprint survives restarts, updates and reboots.
+// Returns: nil when it cannot be kept (outside Android, no Keystore), and the server then draws
+// a certificate of its own for this run.
+// Side effects: writes identity.sealed in the state directory the first time.
+func (h *Host) identity() *tls.Certificate {
+	if h.stateDir == "" {
+		return nil
+	}
+	path := filepath.Join(h.stateDir, identityFile)
+	if sealed, err := os.ReadFile(path); err == nil {
+		if raw, err := unseal(sealed); err == nil {
+			if cert, err := companion.ParseIdentity(raw); err == nil {
+				return &cert
+			}
+		}
+	}
+	cert, _, err := companion.GenerateSelfSignedCert("AndroFuse Companion")
+	if err != nil {
+		return nil
+	}
+	raw, err := companion.MarshalIdentity(cert)
+	if err != nil {
+		return nil
+	}
+	sealed, err := seal(raw)
+	if err != nil {
+		return nil
+	}
+	if err := os.WriteFile(path, sealed, 0o600); err != nil {
+		return nil
+	}
+	return &cert
+}
+
+// AutoStart starts the Companion service when the app starts, once the phone is paired with a
+// computer or in a network, unless its user stopped it: the network, the Wi-Fi watch and the
+// Wireless debugging port all run with the service, so without it a phone that restarted (an
+// update, a reboot) could not be reached until someone opened the app and tapped Start.
+func (h *Host) AutoStart() {
+	h.mu.Lock()
+	want := !h.cfg.Stopped && (len(h.cfg.Computers) > 0 || h.cfg.Mesh != nil)
+	h.mu.Unlock()
+	if want {
+		_ = h.StartServer()
+	}
+}
+
+// StopByUser stops the service because the phone's user asked, and keeps it off across restarts.
+func (h *Host) StopByUser() {
+	h.mu.Lock()
+	h.cfg.Stopped = true
+	h.saveConfigLocked()
+	h.mu.Unlock()
+	_ = h.StopServer()
 }

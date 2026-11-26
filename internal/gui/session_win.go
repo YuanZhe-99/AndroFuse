@@ -14,6 +14,7 @@ import (
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
+	"github.com/YuanZhe-99/AndroFuse/internal/avbridge"
 	"github.com/YuanZhe-99/AndroFuse/internal/core"
 	"github.com/YuanZhe-99/AndroFuse/internal/dex"
 	"github.com/YuanZhe-99/AndroFuse/internal/scrcpy"
@@ -112,9 +113,11 @@ type SessionWindow struct {
 	noteTimer     *time.Timer
 	touchMode     bool
 	screenOff     bool
-	telemOpen     bool                // the header's telemetry popover
-	shareKey      func(action string) // Back, Home, Recents for a Companion screen-sharing session
-	closed        chan struct{}       // closed once Close released the stream, its leases and audio
+	telemOpen     bool                  // the header's telemetry popover
+	shareKey      func(action string)   // Back, Home, Recents for a Companion screen-sharing session
+	closed        chan struct{}         // closed once Close released the stream, its leases and audio
+	camBridge     *avbridge.MJPEGServer // a camera session's loopback MJPEG bridge (set before streaming)
+	switching     bool                  // Switch camera is restarting the stream
 	statusNote    string
 	negotiatedW   int
 	negotiatedH   int
@@ -326,7 +329,7 @@ func (sw *SessionWindow) watchScrcpyEnd(s *scrcpy.Session) {
 		sw.dexSess.Ready().CtrlPort > 0 &&
 		sw.app != nil
 	sw.mu.Unlock()
-	if closing || !isCurrent {
+	if closing || !isCurrent || sw.switchingNow() {
 		return
 	}
 	if canHandoff && sw.app.handoffOn() {
@@ -334,7 +337,11 @@ func (sw *SessionWindow) watchScrcpyEnd(s *scrcpy.Session) {
 		return
 	}
 	if err := s.Err(); err != nil {
-		sw.setStatusNote(err.Error())
+		if sw.app != nil {
+			sw.setStatusNote(sw.app.failed(L.SessionEnded(), err))
+		} else {
+			sw.setStatusNote(L.SessionEnded())
+		}
 		return
 	}
 	sw.setStatusNote(L.SessionEnded())

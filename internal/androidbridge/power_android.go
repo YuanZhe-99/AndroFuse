@@ -67,10 +67,10 @@ func WatchWirelessDebugging(fn func(port int)) (stop func()) {
 // Companion's screen sharing (android/Share.kt): an H.264 stream at most maxSize pixels on its
 // longest side, served in scrcpy framing on the abstract socket "androfuse-share".
 // Returns: an error when the user declines or capture cannot start.
-func StartShare(maxSize, bitRate int) error {
+func StartShare(maxSize, bitRate int, title, text, stop string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	return power.Call(ctx, "startShare", map[string]int{"maxSize": maxSize, "bitRate": bitRate}, nil)
+	return power.Call(ctx, "startShare", map[string]any{"maxSize": maxSize, "bitRate": bitRate, "title": title, "text": text, "stop": stop}, nil)
 }
 
 // StopShare ends screen sharing.
@@ -114,3 +114,24 @@ func Identity() (name, model, release string, sdk int) {
 	_ = power.Call(ctx, "identity", nil, &r)
 	return r.Name, r.Model, r.Release, r.SDK
 }
+
+// Battery is the phone's charge in percent (-1 when unknown), whether it charges, and its battery
+// temperature in °C (ok false when Android did not report one), from BatteryManager's sticky
+// broadcast; apps cannot read /sys/class/power_supply.
+func Battery() (pct int, charging bool, tempC float64, ok bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var r struct {
+		Pct        int  `json:"pct"`
+		Charging   bool `json:"charging"`
+		TempTenths int  `json:"tempTenths"`
+	}
+	r.Pct = -1
+	if err := power.Call(ctx, "battery", nil, &r); err != nil {
+		return -1, false, 0, false
+	}
+	return r.Pct, r.Charging, float64(r.TempTenths) / 10, r.TempTenths > -1000
+}
+
+// OpenNotificationSettings opens Android's notification settings for AndroFuse.
+func OpenNotificationSettings() { _ = callPower("openNotificationSettings", nil) }

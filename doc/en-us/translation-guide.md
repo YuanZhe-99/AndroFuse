@@ -31,7 +31,7 @@ Authoritative English → Simplified Chinese glossary for AndroFuse documentatio
 | Delay-Load | 延迟加载 | A DLL import resolved only when one of its functions is first called (e.g. `packet.dll`) |
 | Phone screen | 手机屏幕 | Phone mirroring as the interface names it (V3) |
 | App window | 应用窗口 | Independent app window as the interface names it (V3) |
-| Large-screen desktop (not Samsung DeX) | 大屏桌面（非三星 DeX） | The fallback backend, never called DeX (`INV-06`) |
+| Android desktop mode | Android 桌面模式 | The fallback backend (Android's own desktop mode on a virtual display), never called DeX (`INV-06`) |
 | Cross-network | 跨网络 | The EasyTier networks in the interface (instead of "mesh") |
 | Companion screen sharing | 伴侣共享屏幕 | MediaProjection screen sharing on mobile data |
 | Local assistant | 本机助手 | The opt-in local MCP control (instead of "MCP") |

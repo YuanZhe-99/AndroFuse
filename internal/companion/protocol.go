@@ -59,8 +59,11 @@ type Envelope struct {
 
 // AuthRequest authenticates a desktop client against the Companion server using the pairing token.
 type AuthRequest struct {
-	Token           string `json:"token"`
-	ClientName      string `json:"client_name,omitempty"`
+	Token      string `json:"token"`
+	ClientName string `json:"client_name,omitempty"`
+	// ComputerID is the computer's own stable id (its mesh hostname's id), by which the phone
+	// keeps one pairing per computer.
+	ComputerID      string `json:"computer_id,omitempty"`
 	ProtocolVersion int    `json:"protocol_version"`
 }
 
@@ -87,7 +90,11 @@ type DeviceStatus struct {
 	NetworkType       string  `json:"network_type"`
 	ForegroundPackage string  `json:"foreground_package,omitempty"`
 	WirelessADBPort   int     `json:"wireless_adb_port,omitempty"`
-	Timestamp         int64   `json:"timestamp"`
+	// MeshNetwork is the EasyTier network name the phone joined ("" for none) and MeshRunning
+	// whether it runs, so a desktop sees when the phone is not in its network (never the secret).
+	MeshNetwork string `json:"mesh_network,omitempty"`
+	MeshRunning bool   `json:"mesh_running,omitempty"`
+	Timestamp   int64  `json:"timestamp"`
 }
 
 // NotificationEvent represents one synced Android notification.
@@ -178,6 +185,7 @@ type MediaFrameResponse struct {
 type PairRequest struct {
 	ClientName string `json:"client_name"`
 	Code       string `json:"code"`
+	ComputerID string `json:"computer_id,omitempty"`
 }
 
 // PairResponse carries the pairing token after the phone's user allowed the request.

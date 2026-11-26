@@ -14,6 +14,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -28,6 +29,9 @@ import (
 
 // Handler supplies device callbacks invoked by the authenticated TLS Companion Server.
 type Handler struct {
+	// Identity is the server's kept certificate (MarshalIdentity), so the fingerprint a desktop pinned
+	// when pairing still matches after the Companion restarts; nil draws a new one.
+	Identity       *tls.Certificate
 	GetPermissions func() Permissions
 	// MeshHost returns the EasyTier hostname the phone joins networks under; nil for none.
 	MeshHost            func() string
@@ -50,6 +54,11 @@ type Handler struct {
 	// OnPairRequest asks the phone's user to allow an adb-connected desktop; it blocks until
 	// they answer (or the host gives up) and reports whether they allowed it.
 	OnPairRequest func(PairRequest) bool
+	// IssueToken returns a new token for the computer req names once its pairing was allowed,
+	// and CheckToken whether token belongs to a paired computer (recording that it connected);
+	// both nil means one shared token (the Server's own) for every computer.
+	IssueToken func(req PairRequest) (string, error)
+	CheckToken func(req AuthRequest) bool
 }
 
 // Server serves authenticated TLS 1.3 Companion NDJSON requests.
@@ -68,6 +77,10 @@ type Server struct {
 	wg        sync.WaitGroup
 }
 
+// ErrFingerprint means the Companion answered with another certificate than the one pinned at
+// pairing: it was reinstalled, or is another phone.
+var ErrFingerprint = errors.New("companion cert fingerprint mismatch")
+
 // GenerateSelfSignedCert creates an in-memory ECDSA P-256 certificate and colon-separated SHA-256 fingerprint.
 func GenerateSelfSignedCert(commonName string) (tls.Certificate, string, error) {
 	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -84,7 +97,7 @@ func GenerateSelfSignedCert(commonName string) (tls.Certificate, string, error) 
 		SerialNumber: serialNum,
 		Subject:      pkix.Name{CommonName: commonName},
 		NotBefore:    now,
-		NotAfter:     now.Add(365 * 24 * time.Hour),
+		NotAfter:     now.Add(20 * 365 * 24 * time.Hour), // kept for the pairing's life; peers pin it, not its dates
 		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
 		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("::1")},
@@ -125,9 +138,15 @@ func NewServer(token, deviceModel, androidRel string, sdk int, handler Handler) 
 			return nil, err
 		}
 	}
-	cert, fp, err := GenerateSelfSignedCert("AndroFuse Companion")
-	if err != nil {
-		return nil, err
+	var cert tls.Certificate
+	var fp string
+	if handler.Identity != nil && len(handler.Identity.Certificate) > 0 {
+		cert, fp = *handler.Identity, certFingerprint(handler.Identity.Certificate[0])
+	} else {
+		var err error
+		if cert, fp, err = GenerateSelfSignedCert("AndroFuse Companion"); err != nil {
+			return nil, err
+		}
 	}
 	return &Server{
 		cert:        cert,
@@ -319,10 +338,7 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 		_ = enc.Encode(Envelope{ID: authEnv.ID, Type: "auth.res", Error: "invalid auth payload"})
 		return
 	}
-	s.mu.Lock()
-	expectedTok := s.token
-	s.mu.Unlock()
-	if subtle.ConstantTimeCompare([]byte(authReq.Token), []byte(expectedTok)) != 1 {
+	if !s.tokenOK(authReq) {
 		_ = writeEnvelope(enc, authEnv.ID, "auth.res", AuthResponse{OK: false, Error: "invalid pairing token"}, "invalid pairing token")
 		return
 	}
@@ -571,7 +587,7 @@ func Dial(ctx context.Context, addr, token, expectedFingerprint string) (*Client
 				}
 				gotFP := certFingerprint(cs.PeerCertificates[0].Raw)
 				if expectedFingerprint != "" && !strings.EqualFold(strings.TrimSpace(expectedFingerprint), gotFP) {
-					return fmt.Errorf("companion cert fingerprint mismatch: got %s", gotFP)
+					return fmt.Errorf("%w: got %s", ErrFingerprint, gotFP)
 				}
 				return nil
 			},
@@ -593,7 +609,8 @@ func Dial(ctx context.Context, addr, token, expectedFingerprint string) (*Client
 	var authRes AuthResponse
 	if err := c.call(ctx, "auth", AuthRequest{
 		Token:           strings.TrimSpace(token),
-		ClientName:      "AndroFuse-Desktop",
+		ClientName:      clientName(),
+		ComputerID:      clientID(),
 		ProtocolVersion: ProtocolVersion,
 	}, &authRes); err != nil {
 		_ = tlsConn.Close()
@@ -700,9 +717,11 @@ func (s *Server) handlePair(conn net.Conn, enc *json.Encoder, env Envelope) {
 		_ = enc.Encode(Envelope{ID: env.ID, Type: "pair.res", Error: "pairing was declined on the phone"})
 		return
 	}
-	s.mu.Lock()
-	tok := s.token
-	s.mu.Unlock()
+	tok, err := s.issueToken(req)
+	if err != nil {
+		_ = enc.Encode(Envelope{ID: env.ID, Type: "pair.res", Error: err.Error()})
+		return
+	}
 	_ = writeEnvelope(enc, env.ID, "pair.res", PairResponse{Token: tok, CertFingerprint: s.fingerprint, Port: s.tcpPort(), Model: s.model, MeshHost: s.meshHost()}, "")
 }
 
@@ -732,7 +751,7 @@ func RequestPairing(ctx context.Context, addr, clientName, code string) (PairRes
 	sc := bufio.NewScanner(conn)
 	c := &Client{conn: conn, sc: sc, enc: json.NewEncoder(conn)}
 	var res PairResponse
-	if err := c.call(ctx, "pair.request", PairRequest{ClientName: clientName, Code: code}, &res); err != nil {
+	if err := c.call(ctx, "pair.request", PairRequest{ClientName: clientName, Code: code, ComputerID: clientID()}, &res); err != nil {
 		return PairResponse{}, err
 	}
 	if !strings.EqualFold(res.CertFingerprint, gotFP) {
@@ -947,4 +966,71 @@ func DialShare(ctx context.Context, addr, token, fingerprint string) (net.Conn, 
 // Key runs Back, Home or Recents on a phone sharing its screen.
 func (c *Client) Key(ctx context.Context, action string) error {
 	return c.call(ctx, "input.key", KeyRequest{Action: action}, nil)
+}
+
+// MarshalIdentity encodes cert (certificate and private key) as PEM, for the phone to keep sealed.
+func MarshalIdentity(cert tls.Certificate) ([]byte, error) {
+	key, err := x509.MarshalPKCS8PrivateKey(cert.PrivateKey)
+	if err != nil {
+		return nil, err
+	}
+	out := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Certificate[0]})
+	return append(out, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: key})...), nil
+}
+
+// ParseIdentity decodes what MarshalIdentity wrote.
+func ParseIdentity(b []byte) (tls.Certificate, error) {
+	return tls.X509KeyPair(b, b)
+}
+
+// tokenOK checks an auth request's token: with the phone's own pairings (Handler.CheckToken), else
+// against the one shared token, in constant time.
+func (s *Server) tokenOK(req AuthRequest) bool {
+	if s.handler.CheckToken != nil {
+		return s.handler.CheckToken(req)
+	}
+	s.mu.Lock()
+	expected := s.token
+	s.mu.Unlock()
+	return subtle.ConstantTimeCompare([]byte(req.Token), []byte(expected)) == 1
+}
+
+// issueToken is the token an allowed pairing returns: the computer's own (Handler.IssueToken),
+// else the shared one.
+func (s *Server) issueToken(req PairRequest) (string, error) {
+	if s.handler.IssueToken != nil {
+		return s.handler.IssueToken(req)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.token, nil
+}
+
+// self is how this process introduces itself to Companions (SetClient).
+var self struct {
+	sync.Mutex
+	id, name string
+}
+
+// SetClient sets the id and name this computer gives Companions when it pairs and connects, so a
+// phone keeps one pairing per computer and lists it by name.
+func SetClient(id, name string) {
+	self.Lock()
+	self.id, self.name = id, name
+	self.Unlock()
+}
+
+func clientID() string {
+	self.Lock()
+	defer self.Unlock()
+	return self.id
+}
+
+func clientName() string {
+	self.Lock()
+	defer self.Unlock()
+	if self.name == "" {
+		return "AndroFuse-Desktop"
+	}
+	return self.name
 }

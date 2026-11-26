@@ -70,7 +70,7 @@ screens", and nothing may be described as supported before it is verified on rea
   colour, "Last connected 25 Nov 02:23 · Wi-Fi". Four live figures from the Companion (battery,
   temperature, free storage, network), each with a thin bar. Actions: the primary split button is
   the phone's most used kind (Samsung DeX only on Samsung phones that support it), then icons for
-  the other kinds and Send file. Everything else is in ⋯: large-screen desktop (not Samsung DeX),
+  the other kinds and Send file. Everything else is in ⋯: Android desktop mode,
   App window…, Send clipboard, Send file…, Rename…, Routes…, Reconnect automatically (check),
   Companion…, Forget this phone (with Undo).
 - **In your networks** (switch beside the title): phones in a joined network that this computer
@@ -234,7 +234,7 @@ notifications with an inline reply and "Open on PC".
 | 连接手机 | Connect a phone |
 | 打开为 | Open as |
 | 三星 DeX / 手机屏幕 / 应用窗口 / 摄像头 | Samsung DeX / Phone screen / App window / Camera |
-| 大屏桌面（非三星 DeX） | Large-screen desktop (not Samsung DeX) |
+| Android 桌面模式 | Android desktop mode |
 | 手机 · 网络中的其他手机 | Phones · Others in my networks |
 | USB · 断开后自动切到 Wi-Fi | USB · switches to Wi-Fi when unplugged |
 | 跨网络 · 中继 · 48 ms | Cross-network · relayed · 48 ms |

@@ -179,6 +179,7 @@ const (
 	homeMaxW      float32 = 1120 // Home's content never grows wider
 	pageMaxW      float32 = 720  // a Settings page's content
 	devCardMinW   float32 = 300  // a phone card on Home
+	homeGap       float32 = 16   // between Home's cards, the top two and the phone grid alike
 	avatarSize    float32 = 36
 	avatarSmall   float32 = 22
 	avatarLarge   float32 = 44

@@ -508,7 +508,7 @@ func TestOthersInNetworksShowsOnlyAndroFusePhones(t *testing.T) {
 	if got := a.meshPeerName("AndroFuse-pc-1234abcd STUDIO"); got != "STUDIO" {
 		t.Fatalf("meshPeerName(pc) = %q", got)
 	}
-	if h := a.meshHostname(); !strings.HasPrefix(h, "AndroFuse-pc-") || h != a.meshHostname() {
+	if h := a.meshHostname(); !strings.HasPrefix(h, "AF-c-") || h != a.meshHostname() {
 		t.Fatalf("meshHostname = %q, not kept", h)
 	}
 }

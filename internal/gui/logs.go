@@ -3,11 +3,14 @@ package gui
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/YuanZhe-99/AndroFuse/internal/adb"
 	"github.com/YuanZhe-99/AndroFuse/internal/version"
+	L "github.com/YuanZhe-99/AndroFuse/locales"
 )
 
 // writeLogs writes what helps diagnose a problem into one text file: the version, this computer's
@@ -53,4 +56,42 @@ func writeLogs(path string, a *App) error {
 	}
 	fmt.Fprintf(&b, "\n[notices]\ndevices=%q\ncompanion=%q\n", notice, compNotice)
 	return os.WriteFile(path, []byte(b.String()), 0o600)
+}
+
+// errLogMax is how many recent failures Save logs keeps.
+const errLogMax = 50
+
+// errLog holds the recent failures in full for Save logs, while the interface shows plain words.
+type errLog struct {
+	mu      sync.Mutex
+	entries []string
+}
+
+// ipv4 matches an IPv4 address, which the log masks unless it is loopback (`INV-08`).
+var ipv4 = regexp.MustCompile(`\b\d{1,3}(\.\d{1,3}){3}\b`)
+
+// failed keeps err, with what was being done, for Save logs and returns what the interface says
+// instead: plain words for the failure, then where the details are.
+// Notes: takes its own lock, so it may run inside a.update.
+func (a *App) failed(plain string, err error) string {
+	msg := ipv4.ReplaceAllStringFunc(err.Error(), func(ip string) string {
+		if strings.HasPrefix(ip, "127.") {
+			return ip
+		}
+		return "x.x.x.x"
+	})
+	a.errs.mu.Lock()
+	a.errs.entries = append(a.errs.entries, time.Now().Format(time.RFC3339)+" "+plain+": "+msg)
+	if len(a.errs.entries) > errLogMax {
+		a.errs.entries = a.errs.entries[len(a.errs.entries)-errLogMax:]
+	}
+	a.errs.mu.Unlock()
+	return plain + " " + L.FailSeeLogs()
+}
+
+// recentErrors returns a copy of the kept failures, oldest first.
+func (a *App) recentErrors() []string {
+	a.errs.mu.Lock()
+	defer a.errs.mu.Unlock()
+	return append([]string(nil), a.errs.entries...)
 }

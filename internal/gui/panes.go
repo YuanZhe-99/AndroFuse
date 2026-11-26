@@ -1,9 +1,11 @@
 package gui
 
 import (
+	"context"
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -504,33 +506,57 @@ func (sw *SessionWindow) toggleSound() {
 	sw.redraw()
 }
 
-// switchCamera shows the phone's other camera where this session shows now, with the same sound
-// setting. scrcpy picks the camera when it starts, so the stream restarts once this one has let go
-// of the camera.
+// switchCamera shows the phone's other camera in this same pane or window: the last picture
+// stays, dimmed under "Switching to the front camera…", while the stream restarts (scrcpy picks
+// the camera when it starts). Sound, recording state and placement are kept.
 func (sw *SessionWindow) switchCamera() {
-	d, ok := sw.app.findDeviceForMCP(sw.spec.DeviceKey)
-	if !ok {
-		d, ok = sw.app.findDeviceForMCP(sw.spec.Serial)
-	}
-	if !ok {
+	sw.mu.Lock()
+	if sw.switching || sw.closing || sw.scrcpySess == nil {
+		sw.mu.Unlock()
 		return
 	}
+	sw.switching = true
+	old := sw.scrcpySess
 	next := "front"
 	if sw.spec.CameraFacing == "front" {
 		next = "back"
 	}
-	open := OpenWindow
-	if sw.Docked() {
-		open = OpenPane
-	}
-	sw.mu.Lock()
-	muted := sw.audioMuted
+	sw.statusNote = L.CameraSwitching(cameraWord(next))
 	sw.mu.Unlock()
-	sw.Close()
+	sw.redraw()
 	go func() {
-		<-sw.closed
-		sw.app.launchCamera(d, next, open, muted)
+		old.Close() // lets go of the camera before the other one opens
+		ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+		defer cancel()
+		s, err := sw.app.startCameraStream(ctx, sw, next)
+		sw.mu.Lock()
+		sw.switching = false
+		switch {
+		case sw.closing:
+			if s != nil {
+				go s.Close()
+			}
+		case err != nil:
+			sw.statusNote = sw.app.failed(L.FailCamera(), err)
+		default:
+			sw.scrcpySess = s
+			sw.spec.CameraFacing = next
+			sw.spec.Title = sw.app.sessionPhone(sw) + " · " + cameraWord(next)
+			sw.statusNote = ""
+		}
+		sw.mu.Unlock()
+		if err == nil && s != nil {
+			go sw.watchScrcpyEnd(s)
+		}
+		sw.redraw()
 	}()
+}
+
+// switchingNow reports whether Switch camera is restarting sw's stream.
+func (sw *SessionWindow) switchingNow() bool {
+	sw.mu.Lock()
+	defer sw.mu.Unlock()
+	return sw.switching
 }
 
 // cameraWord names a phone camera: "Front Camera" or "Rear Camera".

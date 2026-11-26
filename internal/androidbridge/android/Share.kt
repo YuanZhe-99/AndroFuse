@@ -46,7 +46,7 @@ import kotlin.math.roundToInt
 
 /** Starts and stops sharing for AndroFusePowerPlugin. */
 object AndroFuseShare {
-    fun start(maxSize: Int, bitRate: Int, done: (Boolean, String) -> Unit) {
+    fun start(maxSize: Int, bitRate: Int, title: String, text: String, stop: String, done: (Boolean, String) -> Unit) {
         val ctx = PluginHost.context
         val mpm = ctx.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         if (AndroFuseShareService.running) { done(true, ""); return }
@@ -58,6 +58,7 @@ object AndroFuseShare {
             val intent = Intent(ctx, AndroFuseShareService::class.java)
                 .putExtra("code", code).putExtra("data", data)
                 .putExtra("maxSize", maxSize).putExtra("bitRate", bitRate)
+                .putExtra("title", title).putExtra("text", text).putExtra("stop", stop)
             if (Build.VERSION.SDK_INT >= 26) ctx.startForegroundService(intent) else ctx.startService(intent)
             done(true, "")
         }
@@ -119,10 +120,11 @@ class AndroFuseShareService : Service() {
             PendingIntent.FLAG_IMMUTABLE)
         val b = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(this, CHANNEL) else @Suppress("DEPRECATION") Notification.Builder(this)
         val n = b.setSmallIcon(android.R.drawable.ic_menu_share)
-            .setContentTitle("AndroFuse is sharing this screen")
-            .setContentText("Your computer can see this screen")
+            .setContentTitle(intent?.getStringExtra("title") ?: "AndroFuse")
+            .setContentText(intent?.getStringExtra("text") ?: "")
             .setOngoing(true)
-            .addAction(Notification.Action.Builder(null, "Stop", stop).build())
+            .setContentIntent(openApp(this))
+            .addAction(Notification.Action.Builder(null, intent?.getStringExtra("stop") ?: "Stop", stop).build())
             .build()
         try {
             if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIFICATION_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)

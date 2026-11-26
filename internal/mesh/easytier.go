@@ -62,7 +62,12 @@ type Peer struct {
 
 // HostPrefix starts the EasyTier hostname of every AndroFuse device. Other nodes in a network,
 // such as public relay servers or EasyTier on other machines, have none and are never shown.
-const HostPrefix = "AndroFuse-"
+// EasyTier truncates hostnames to 32 bytes, so Hostname emits the compact "AF-<p|c>-<id> <name>"
+// prefix (14 chars before name, leaving 18 chars for the device name); ParseHostname still accepts
+// the earlier "AndroFuse-<phone|pc>-<id> <name>" format for backward compatibility.
+const HostPrefix = "AF-"
+
+const legacyHostPrefix = "AndroFuse-"
 
 // Kinds of AndroFuse device in a hostname.
 const (
@@ -71,29 +76,50 @@ const (
 )
 
 // Hostname is the name an AndroFuse device joins every network under:
-// "AndroFuse-<kind>-<id> <name>", where id is the device's own random hex (stable while it keeps
+// "AF-<p|c>-<id> <name>", where id is the device's own random hex (stable while it keeps
 // its settings) and name what its person calls it.
 func Hostname(kind, id, name string) string {
-	h := HostPrefix + kind + "-" + id
+	tag := kind
+	switch kind {
+	case KindPhone:
+		tag = "p"
+	case KindPC:
+		tag = "c"
+	}
+	h := HostPrefix + tag + "-" + id
 	if name = strings.Join(strings.Fields(name), " "); name != "" {
 		h += " " + name
 	}
 	return h
 }
 
-// ParseHostname reads an AndroFuse hostname back. EasyTier hostnames are whatever a node chose,
-// so name is only a label.
+// ParseHostname reads an AndroFuse hostname back, accepting both the compact "AF-<p|c>-<id>"
+// form and the legacy "AndroFuse-<phone|pc>-<id>" form. EasyTier hostnames are whatever a node
+// chose, so name is only a label.
 // Returns: ok false for a node that is no AndroFuse device.
 func ParseHostname(h string) (kind, id, name string, ok bool) {
-	rest, found := strings.CutPrefix(h, HostPrefix)
+	var rest string
+	switch {
+	case strings.HasPrefix(h, HostPrefix):
+		rest = h[len(HostPrefix):]
+	case strings.HasPrefix(h, legacyHostPrefix):
+		rest = h[len(legacyHostPrefix):]
+	default:
+		return "", "", "", false
+	}
+	tag, after, found := strings.Cut(rest, "-")
 	if !found {
 		return "", "", "", false
 	}
-	kind, rest, found = strings.Cut(rest, "-")
-	if !found || (kind != KindPhone && kind != KindPC) {
+	switch tag {
+	case "p", KindPhone:
+		kind = KindPhone
+	case "c", KindPC:
+		kind = KindPC
+	default:
 		return "", "", "", false
 	}
-	id, name, _ = strings.Cut(rest, " ")
+	id, name, _ = strings.Cut(after, " ")
 	if id == "" {
 		return "", "", "", false
 	}

@@ -13,9 +13,12 @@ package dev.mygo
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.os.BatteryManager
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.net.ConnectivityManager
 import android.net.Network
@@ -69,7 +72,8 @@ class AndroFusePowerPlugin : MyGoPlugin {
                 reply.success(true)
             }
             "startShare" -> {
-                AndroFuseShare.start(args.optInt("maxSize", 1280), args.optInt("bitRate", 4_000_000)) { ok, why ->
+                AndroFuseShare.start(args.optInt("maxSize", 1280), args.optInt("bitRate", 4_000_000),
+                    args.optString("title", "AndroFuse"), args.optString("text", ""), args.optString("stop", "Stop")) { ok, why ->
                     if (ok) reply.success(true) else reply.failure(PluginFailure(why, why))
                 }
             }
@@ -83,6 +87,24 @@ class AndroFusePowerPlugin : MyGoPlugin {
                 .put("model", Build.MODEL)
                 .put("release", Build.VERSION.RELEASE)
                 .put("sdk", Build.VERSION.SDK_INT))
+            "battery" -> {
+                // The sticky ACTION_BATTERY_CHANGED broadcast: no receiver is registered.
+                val b = ctx.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+                val level = b?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+                val scale = b?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
+                val status = b?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+                reply.success(JSONObject()
+                    .put("pct", if (level >= 0 && scale > 0) level * 100 / scale else -1)
+                    .put("charging", status == BatteryManager.BATTERY_STATUS_CHARGING || status == BatteryManager.BATTERY_STATUS_FULL)
+                    .put("tempTenths", b?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, Int.MIN_VALUE) ?: Int.MIN_VALUE))
+            }
+            "openNotificationSettings" -> {
+                val i = Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                    .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, ctx.packageName)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                ctx.startActivity(i)
+                reply.success(true)
+            }
             "accessibilityOn" -> reply.success(AndroFuseA11yService.instance != null)
             "openAccessibility" -> {
                 AndroFuseShare.openAccessibilitySettings()
@@ -214,6 +236,7 @@ class AndroFuseStandbyService : Service() {
             .setContentTitle(intent?.getStringExtra("title") ?: "AndroFuse")
             .setContentText(intent?.getStringExtra("text") ?: "")
             .setOngoing(true)
+            .setContentIntent(openApp(this))
             .build()
         // Android 14+ requires FOREGROUND_SERVICE_CONNECTED_DEVICE plus a connectivity permission
         // (CHANGE_NETWORK_STATE, declared in mygo-plugin.json) for this type, and may refuse a
@@ -240,4 +263,11 @@ class AndroFuseStandbyService : Service() {
         running = false
         super.onDestroy()
     }
+}
+
+/** A tap on one of AndroFuse's notifications opens the app (its launcher activity, brought to front). */
+fun openApp(ctx: Context): PendingIntent? {
+    val launch = ctx.packageManager.getLaunchIntentForPackage(ctx.packageName) ?: return null
+    launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+    return PendingIntent.getActivity(ctx, 0, launch, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 }
