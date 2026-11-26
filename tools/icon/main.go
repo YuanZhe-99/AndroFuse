@@ -53,11 +53,11 @@ func main() {
 	}
 	writePNG(renderMatte(trayBlackSVG, 64), "internal/gui/assets/tray-black.png")
 
-	// Android adaptive icons keep important content inside the inner 72/108 zone.
-	// The 32.5-unit mark inside a 96-unit viewBox occupies 33.8%; zooming slightly
-	// to a 64-unit viewBox places it at ~51% of 1024px, comfortably centered.
-	fgSource := strings.Replace(inner, `viewBox="0 0 96 96"`, `viewBox="16 16 64 64"`, 1)
-	fgSVG, err := ui.ParseSVG([]byte(fgSource))
+	// Android shows only the middle 72/108 of an adaptive icon's layers, and One UI's mask
+	// crops close to that, so the mark keeps the desktop tile's proportions: the full 96-unit
+	// viewBox puts it at ~37% of the layer (~56% of the visible tile), Material's 38/108 dp keyline.
+	// A larger mark (the old 64-unit viewBox, ~56% of the layer) put its outline on the tile's edge.
+	fgSVG, err := ui.ParseSVG([]byte(inner))
 	if err != nil {
 		fail(err)
 	}

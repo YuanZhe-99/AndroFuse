@@ -72,7 +72,10 @@ type AuthResponse struct {
 	SDKInt          int         `json:"sdk_int"`
 	CertFingerprint string      `json:"cert_fingerprint"`
 	Permissions     Permissions `json:"permissions"`
-	Error           string      `json:"error,omitempty"`
+	// MeshHost is the EasyTier hostname the phone joins networks under (mesh.Hostname), so the
+	// desktop finds it in a network even after it renamed itself.
+	MeshHost string `json:"mesh_host,omitempty"`
+	Error    string `json:"error,omitempty"`
 }
 
 // DeviceStatus reports battery, thermal, foreground app, and cross-network ADB beacon state.
@@ -182,9 +185,11 @@ type PairResponse struct {
 	Token           string `json:"token"`
 	CertFingerprint string `json:"cert_fingerprint"`
 	// Port is the Companion's random TCP port and Model the name it joins the mesh under, so the
-	// desktop can reach it again over LAN or the mesh without adb.
-	Port  int    `json:"port,omitempty"`
-	Model string `json:"model,omitempty"`
+	// desktop can reach it again over LAN or the mesh without adb; MeshHost is its EasyTier
+	// hostname (mesh.Hostname).
+	Port     int    `json:"port,omitempty"`
+	Model    string `json:"model,omitempty"`
+	MeshHost string `json:"mesh_host,omitempty"`
 }
 
 // MeshJoinRequest hands the desktop's EasyTier network to the phone so it joins the same mesh.

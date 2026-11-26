@@ -183,12 +183,12 @@ func (a *App) pickerPopover(c *ui.Context, anchor ui.Element) {
 				if len(others) > 0 && p.Kind != openAsApp {
 					label("picker-net", L.PickerInNetworks())
 					for _, o := range others {
-						if !match(o.Peer, o.IPv4) {
+						if !match(o.Name, o.IPv4) {
 							continue
 						}
 						o := o
-						row("pk-net-"+o.Peer, func() { phoneAvatar(c, 32, phoneLogo(o.Peer), nil, o.Peer) },
-							o.Peer, o.Network+" · "+o.IPv4+" · "+wayWords(o.Direct, o.Latency), true, func() {
+						row("pk-net-"+o.Peer, func() { phoneAvatar(c, 32, phoneLogo(o.Name), nil, o.Name) },
+							o.Name, o.Network+" · "+routeWords(o.IPv4, o.Direct, o.Latency), true, func() {
 								a.closePicker()
 								a.update(func() { a.connect.Input, a.connect.OpenAs = o.IPv4, p.Kind })
 								a.ConnectByAddress()

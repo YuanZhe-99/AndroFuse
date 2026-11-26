@@ -24,7 +24,7 @@
 | `internal/androidcore` | MyGo Kotlin 原生模块：把内置 EasyTier 的 `libandrofuse_core.so`（`scripts/build-android-core.sh` 构建）打进 APK 并加载，另提供 Android Keystore 密封（`Vault`） |
 | `internal/avbridge` | M5 双向音视频桥接：手机摄像头本地防越权 MJPEG 流、系统 `MFCreateVirtualCamera` 探测与加密 PC→Android 麦克风/摄像头传入链路 |
 | `internal/mcp` | 默认关闭的本机回环（`127.0.0.1`）HTTP JSON-RPC 2.0 本地 MCP 服务，带 30 分钟临时密钥、紧急停止与脱敏审计（`INV-07`、`INV-08`）；白名单列出无需询问即可运行的工具，其他每次调用都等待用户「允许一次」或「拒绝」（`Handlers.Approve`，窗格上方的卡片） |
-| `internal/mesh` | 内置于核心库、默认关闭的 EasyTier v2.7.1 组网客户端（`androfuse_call` `mesh.*`；无 TUN，仅回环端口转发；`INV-07`、`INV-08`）；每个网络一个命名实例（`Config.Instance`），`Info` 提供本机组网地址、NAT 类型，以及每个对端的地址、直连或中继和延迟 |
+| `internal/mesh` | 内置于核心库、默认关闭的 EasyTier v2.7.1 组网客户端（`androfuse_call` `mesh.*`；无 TUN，仅回环端口转发；`INV-07`、`INV-08`）；每个网络一个命名实例（`Config.Instance`），`Info` 提供本机组网地址、NAT 类型，以及每个对端的地址、直连或中继和延迟；每台 AndroFuse 设备加入网络所用的 `AndroFuse-<kind>-<id> <name>` 主机名，用于与中继服务器区分（`Hostname`、`ParseHostname`、`SameDevice`） |
 | `internal/bundlesig` | 沿用 Kyokai 规范的 Ed25519 辅助程序包清单（`bundle.json` + `bundle.sig`）签名与校验包 |
 | `internal/adb` | 无 Shell 参数向量 `adb` 客户端、`MergeDevices`（USB 与 TLS 无线去重合并，`INV-02`）、mDNS TLS 无线连接配对、`MaskSerial`/`MaskEndpoint` 脱敏、`emulator-*` 识别、`--user 0` 探测与应用列表；mDNS `adb-<ro.serialno>-…` 实例映射到 `HardwareHash` 用于热切换重连；手机的营销名称、品牌、自己的名称与模拟器标记；`ProbeADB`（CNXN 握手：无线调试、未加密 adb 或都不是）与 `FindWirelessPort`（在一个地址上查找无线调试使用的端口范围）；`ExecOut` 取原始输出（如截图） |
 | `internal/sysproc` | `HideConsole`：所有控制台子进程（adb、emulator、sdkmanager）均以 `CREATE_NO_WINDOW` 启动，不再弹出控制台或 Windows Terminal 窗口 |

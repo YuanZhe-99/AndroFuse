@@ -483,6 +483,7 @@ func (a *App) adbOverCompanion(ctx context.Context, hash string) (string, error)
 	if err != nil {
 		return "", err
 	}
+	a.noteMeshHost(hash, c.PeerInfo().MeshHost)
 	st, err := c.GetStatus(ctx)
 	_ = c.Close()
 	if err != nil {

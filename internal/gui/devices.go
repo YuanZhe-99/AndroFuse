@@ -235,6 +235,21 @@ func (a *App) bindCompanion(hash string, port int, fingerprint, token, meshHost 
 	})
 }
 
+// noteMeshHost keeps the EasyTier hostname hash's Companion reported on connecting, so the desktop
+// finds the phone in a network after it was renamed or updated.
+// Side effects: saves devices.json when it changed.
+func (a *App) noteMeshHost(hash, host string) {
+	if host == "" {
+		return
+	}
+	a.update(func() {
+		if i := a.rememberedIndexLocked(hash); i >= 0 && a.remembered[i].Companion != nil && a.remembered[i].Companion.MeshHost != host {
+			a.remembered[i].Companion.MeshHost = host
+			a.saveDevicesLocked()
+		}
+	})
+}
+
 // reconnectRemembered asks adb to reconnect remembered phones with automatic reconnect on that
 // are not online: through this phone's own mDNS Wireless Debugging instance first, then its last
 // endpoint (`INV-07`: TLS only).

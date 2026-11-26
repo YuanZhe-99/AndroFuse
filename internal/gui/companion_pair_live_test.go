@@ -49,7 +49,7 @@ func TestLiveCompanionPairAndMeshJoin(t *testing.T) {
 	}
 	desk := mesh.NewManager(lib)
 	network := fmt.Sprintf("androfuse-e2e-%d", time.Now().Unix())
-	cfg := mesh.Config{Enabled: true, NetworkName: network, NetworkSecret: "e2e-secret", DeviceName: meshDeviceName, Listeners: []string{fmt.Sprintf("tcp://127.0.0.1:%d", port)}}
+	cfg := mesh.Config{Enabled: true, NetworkName: network, NetworkSecret: "e2e-secret", DeviceName: mesh.Hostname(mesh.KindPC, "e2e00001", "e2e"), Listeners: []string{fmt.Sprintf("tcp://127.0.0.1:%d", port)}}
 	if peer == "" {
 		peer = fmt.Sprintf("tcp://10.0.2.2:%d", port)
 	}

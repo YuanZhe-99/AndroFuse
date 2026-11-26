@@ -232,7 +232,6 @@ notifications with an inline reply and "Open on PC".
 | 主页 | Home |
 | 这台电脑 / 可以使用 | This computer / Ready |
 | 连接手机 | Connect a phone |
-| 填 IP 地址、域名或手机名称；端口可以不填，AndroFuse 会自己找。 | Enter an IP address, a domain or a phone's name. You can leave out the port; AndroFuse finds it. |
 | 打开为 | Open as |
 | 三星 DeX / 手机屏幕 / 应用窗口 / 摄像头 | Samsung DeX / Phone screen / App window / Camera |
 | 大屏桌面（非三星 DeX） | Large-screen desktop (not Samsung DeX) |

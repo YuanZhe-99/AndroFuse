@@ -1178,6 +1178,11 @@ func (a *App) EmergencyStopMCP() {
 // LaunchPhoneCamera opens a scrcpy camera+mic stream paired with a loopback MJPEG bridge (`M5`).
 // Side effects: Starts avbridge.MJPEGServer, opens a SessionWindow, and clears state on close.
 func (a *App) LaunchPhoneCamera(d DiscoveredDevice, facing string, open OpenIn) {
+	a.launchCamera(d, facing, open, true)
+}
+
+// launchCamera starts the camera session; muted says whether its sound starts off on this computer.
+func (a *App) launchCamera(d DiscoveredDevice, facing string, open OpenIn, muted bool) {
 	devKey := d.HardwareHash
 	if devKey == "" {
 		devKey = d.Target.DeviceHash
@@ -1220,12 +1225,13 @@ func (a *App) LaunchPhoneCamera(d DiscoveredDevice, facing string, open OpenIn) 
 			ID:           sid,
 			DeviceKey:    devKey,
 			Serial:       d.Target.Serial,
-			Title:        fmt.Sprintf("%s · %s (%s)", d.Profile.Model, L.ActionLaunchCamera(), facing),
+			Title:        a.phoneName(d) + " · " + cameraWord(facing),
 			Mode:         SessionModeCamera,
+			CameraFacing: facing,
 			Open:         open,
 			Transport:    tLabel,
 			BackendLabel: "scrcpy camera + loopback MJPEG",
-			TargetSpec:   "1280×720 @ 30 fps (" + facing + ")",
+			TargetSpec:   "1280×720 @ 30 fps",
 			OnClose: func() {
 				_ = mjpegSrv.Close()
 				a.update(func() {
@@ -1235,6 +1241,8 @@ func (a *App) LaunchPhoneCamera(d DiscoveredDevice, facing string, open OpenIn) 
 				})
 			},
 		})
+		// The phone's microphone is loud on the computer's speakers, so camera sound starts off.
+		sw.audioMuted = muted
 		ap, _ := lib.OpenAudioPlayer(48000, 2)
 		sw.attachAudio(ap)
 

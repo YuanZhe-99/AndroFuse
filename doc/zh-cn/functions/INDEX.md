@@ -14,7 +14,7 @@
 | `internal/androidcore` | 在 APK 中携带并加载 Android 核心库，提供 Keystore 密封 | `NewLibrary`、`Library.Load`、`NewVault`、`Vault.Seal`、`Vault.Open` |
 | `internal/avbridge` | M5 手机摄像头本地 MJPEG 服务、`MFCreateVirtualCamera` 探测与 PC→Android 音频/视频传入 | `ProbeVirtualCamera`、`NewMJPEGServer`、`MJPEGServer.Start`、`MJPEGServer.PushNV12`、`NewUplinkBridge`、`UplinkBridge.PushMicPCM`、`UplinkBridge.PushCameraJPEG`、`UplinkBridge.StreamMic` |
 | `internal/mcp` | 默认关闭的本机回环 MCP 服务（TTL 令牌、白名单、紧急停止与脱敏审计，`INV-07`、`INV-08`） | `NewServer`、`Server.Enable`、`Server.EmergencyStop`、`Server.Status`、`Server.ServeHTTP`、`Allowlist`、`AuditEntry` |
-| `internal/mesh` | 内置于核心库的 EasyTier v2.7.1 组网客户端（无 TUN，`INV-07`） | `NewManager`、`Manager.Start`、`Manager.Stop`、`Manager.Status`、`Manager.PeerIPv4` |
+| `internal/mesh` | 内置于核心库的 EasyTier v2.7.1 组网客户端（无 TUN，`INV-07`） | `NewManager`、`Manager.Start`、`Manager.Stop`、`Manager.Status`、`Manager.PeerIPv4`、`Hostname`、`ParseHostname`、`SameDevice` |
 | `internal/bundlesig` | Ed25519 辅助包签名与校验器（`bundle.json` / `bundle.sig`） | `Sign`、`Verify`、`Manifest` |
 | `internal/adb` | 无 Shell `adb` 客户端、多传输去重聚合、mDNS TLS 无线连接配对与 `--user 0` 设备探测 | `FindClient`、`MaskSerial`、`MaskEndpoint`、`MergeDevices`、`UnifiedDevice`、`Client.Devices`、`Client.MDNSServices`、`Client.ConnectTLS`、`Client.PairTLS`、`Client.WakeScreen`、`Client.ListLaunchableApps`、`IsNoisyAppPackage` |
 | `internal/sysproc` | Windows 下无控制台窗口的子进程 | `HideConsole` |

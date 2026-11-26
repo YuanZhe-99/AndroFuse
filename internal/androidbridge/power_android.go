@@ -98,3 +98,19 @@ func AccessibilityOn() bool {
 // OpenAccessibilitySettings opens Android's accessibility settings, where the user turns the
 // Companion's service on.
 func OpenAccessibilitySettings() { _ = callPower("openAccessibility", nil) }
+
+// Identity is what the phone calls itself: name is the device name its person set in Settings ›
+// About phone (Build.MODEL when unset), model the model number, and release and sdk Android's
+// version.
+func Identity() (name, model, release string, sdk int) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var r struct {
+		Name    string `json:"name"`
+		Model   string `json:"model"`
+		Release string `json:"release"`
+		SDK     int    `json:"sdk"`
+	}
+	_ = power.Call(ctx, "identity", nil, &r)
+	return r.Name, r.Model, r.Release, r.SDK
+}

@@ -6,15 +6,34 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 
+	"github.com/YuanZhe-99/AndroFuse/internal/androidbridge"
 	"github.com/YuanZhe-99/AndroFuse/internal/androidcore"
 	"github.com/YuanZhe-99/AndroFuse/internal/companion"
 	"github.com/YuanZhe-99/AndroFuse/internal/core"
 	"github.com/YuanZhe-99/AndroFuse/internal/version"
 )
 
-func deviceIdentity() (model, release string, sdk int) {
-	return "Android Device", "Android", 36
+// identity caches what Android reports about this phone once it answered.
+var identity struct {
+	sync.Mutex
+	name, model, release string
+	sdk                  int
+}
+
+// deviceIdentity is the phone's name (Settings › About phone), model number and Android version.
+// Notes: asks the Kotlin side until it answers; "Android" until then.
+func deviceIdentity() (name, model, release string, sdk int) {
+	identity.Lock()
+	defer identity.Unlock()
+	if identity.model == "" {
+		identity.name, identity.model, identity.release, identity.sdk = androidbridge.Identity()
+	}
+	if identity.model == "" {
+		return "Android", "Android", "", 0
+	}
+	return identity.name, identity.model, identity.release, identity.sdk
 }
 
 func readDeviceTelemetry() companion.DeviceStatus {

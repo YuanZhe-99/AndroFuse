@@ -141,3 +141,39 @@ func TestTwoNetworksSideBySide(t *testing.T) {
 		t.Fatal("stopping net-a must leave net-b running")
 	}
 }
+
+// TestHostnameRoundTrip checks the AndroFuse hostname format and that other nodes (a public
+// relay server, a plain EasyTier peer) are not taken for AndroFuse devices.
+func TestHostnameRoundTrip(t *testing.T) {
+	h := Hostname(KindPhone, "0a1b2c3d", "  Galaxy   Z Fold8 ")
+	if h != "AndroFuse-phone-0a1b2c3d Galaxy Z Fold8" {
+		t.Fatalf("Hostname = %q", h)
+	}
+	if kind, id, name, ok := ParseHostname(h); !ok || kind != KindPhone || id != "0a1b2c3d" || name != "Galaxy Z Fold8" {
+		t.Fatalf("ParseHostname(%q) = %q %q %q %v", h, kind, id, name, ok)
+	}
+	if _, _, name, ok := ParseHostname(Hostname(KindPC, "ff", "")); !ok || name != "" {
+		t.Fatalf("a nameless pc hostname did not parse")
+	}
+	for _, other := range []string{"PublicServer_CloudCone-S196V", "AndroFuse-", "AndroFuse-tv-01 TV", "AndroFuse-phone- x", "androfuse-desktop"} {
+		if _, _, _, ok := ParseHostname(other); ok {
+			t.Errorf("ParseHostname(%q) took it for an AndroFuse device", other)
+		}
+	}
+	if a, b := NewDeviceID(), NewDeviceID(); len(a) != 8 || a == b {
+		t.Fatalf("NewDeviceID = %q, %q", a, b)
+	}
+}
+
+// TestSameDeviceIgnoresRenames checks that a renamed phone is the same device and a relay is not.
+func TestSameDeviceIgnoresRenames(t *testing.T) {
+	if !SameDevice("AndroFuse-phone-01ab Fold", "AndroFuse-phone-01ab My Fold") {
+		t.Fatal("a renamed phone was taken for another device")
+	}
+	if SameDevice("AndroFuse-phone-01ab Fold", "AndroFuse-pc-01ab Fold") || SameDevice("AndroFuse-phone-01ab", "Relay") {
+		t.Fatal("different devices matched")
+	}
+	if !SameDevice("Relay", "Relay") {
+		t.Fatal("equal plain hostnames did not match")
+	}
+}

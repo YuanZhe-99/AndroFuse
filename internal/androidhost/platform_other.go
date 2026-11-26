@@ -10,8 +10,9 @@ import (
 	"github.com/YuanZhe-99/AndroFuse/internal/core"
 )
 
-func deviceIdentity() (model, release string, sdk int) {
-	return "Android Companion (" + runtime.GOOS + ")", "16", 36
+// deviceIdentity stands in for a phone outside Android (tests and the desktop preview).
+func deviceIdentity() (name, model, release string, sdk int) {
+	return "Android Companion (" + runtime.GOOS + ")", "Android Companion", "16", 36
 }
 
 func readDeviceTelemetry() companion.DeviceStatus {

@@ -59,7 +59,7 @@ import java.util.regex.Pattern;
  *
  * Subcommands:
  *   probe
- *   apps [--no-icons]
+ *   apps [--no-icons] [--resume <package>]
  *   serve <token> <width> <height> <dpi> <grace_sec>
  *   attach <token> <ctrl_port>
  *   recover
@@ -78,14 +78,22 @@ public final class Main {
 
     public static void main(String[] args) {
         if (args.length < 1) {
-            System.err.println("usage: Main <probe|apps [--no-icons]|serve <token> <w> <h> <dpi> <grace_sec>|attach <token> <ctrl_port>|recover>");
+            System.err.println("usage: Main <probe|apps [--no-icons] [--resume <package>]|serve <token> <w> <h> <dpi> <grace_sec>|attach <token> <ctrl_port>|recover>");
             System.exit(2);
         }
         try {
             Looper.prepareMainLooper();
             if ("apps".equals(args[0])) {
-                boolean includeIcons = !(args.length >= 2 && "--no-icons".equals(args[1]));
-                runApps(includeIcons);
+                boolean includeIcons = true;
+                String resume = null;
+                for (int i = 1; i < args.length; i++) {
+                    if ("--no-icons".equals(args[i])) {
+                        includeIcons = false;
+                    } else if ("--resume".equals(args[i]) && i + 1 < args.length) {
+                        resume = args[++i];
+                    }
+                }
+                runApps(includeIcons, resume);
                 return;
             }
             if ("attach".equals(args[0])) {
@@ -209,7 +217,16 @@ public final class Main {
         System.out.flush();
     }
 
-    private static void runApps(boolean includeIcons) throws Exception {
+    /**
+     * Prints one AFDEX1|APP line per launcher app, then AFDEX1|APPS_DONE.
+     *
+     * Inputs: includeIcons renders 96x96 PNG icons; resume, when set, skips the apps listed
+     * before that package and lists it without an icon.
+     * Notes: some icons (Samsung Calendar's, which draws today's date) abort app_process natively
+     * while drawing, which Java cannot catch; AFDEX1|ICON|pkg is printed before each icon so the
+     * desktop sees which one and runs again with --resume pkg.
+     */
+    private static void runApps(boolean includeIcons, String resume) throws Exception {
         Context sysCtx = getSystemContextWorkaround();
         PackageManager pm = sysCtx.getPackageManager();
         if (pm == null) {
@@ -231,6 +248,14 @@ public final class Main {
                 String pkg = nonNull(act.packageName).trim();
                 if (isNoisyPackage(pkg) || !seen.add(pkg)) {
                     continue;
+                }
+                boolean skipIcon = false;
+                if (resume != null) {
+                    if (!resume.equals(pkg)) {
+                        continue;
+                    }
+                    resume = null;
+                    skipIcon = true;
                 }
                 ApplicationInfo appInfo = act.applicationInfo;
                 String label = "";
@@ -257,7 +282,9 @@ public final class Main {
                 boolean resizeable = isActivityResizeable(act);
 
                 String iconB64 = "";
-                if (includeIcons) {
+                if (includeIcons && !skipIcon) {
+                    System.out.println("AFDEX1|ICON|" + pkg);
+                    System.out.flush();
                     try {
                         Drawable d = loadAppDrawable(sysCtx, pm, ri, act, appInfo);
                         iconB64 = renderIconBase64(d, APP_ICON_SIZE_PX);
@@ -283,11 +310,13 @@ public final class Main {
         System.out.flush();
     }
 
+    /**
+     * Loads an app's launcher icon from its resources, and only then through PackageManager.
+     * Notes: PackageManager.loadIcon on One UI runs an app's own "live icon" code (Calendar,
+     * Clock), which fails or aborts app_process under the shell uid; the plain resource is the
+     * same icon without today's date.
+     */
     private static Drawable loadAppDrawable(Context sysCtx, PackageManager pm, ResolveInfo ri, ActivityInfo act, ApplicationInfo appInfo) {
-        try {
-            Drawable d = ri.loadIcon(pm);
-            if (d != null) return d;
-        } catch (Throwable ignored) {}
         int resId = ri.getIconResource();
         if (resId == 0 && act != null) resId = act.icon;
         if (resId == 0 && appInfo != null) resId = appInfo.icon;
@@ -303,6 +332,9 @@ public final class Main {
                 if (d != null) return d;
             } catch (Throwable ignored) {}
         }
+        try {
+            return ri.loadIcon(pm);
+        } catch (Throwable ignored) {}
         return null;
     }
 

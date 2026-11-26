@@ -37,6 +37,8 @@ type Config struct {
 	Standby bool `json:"standby,omitempty"`
 	// Mesh is the EasyTier network handed over by a paired desktop; nil when not joined.
 	Mesh *MeshSettings `json:"mesh,omitempty"`
+	// MeshID is the random id in the phone's EasyTier hostname (mesh.Hostname), drawn on first use.
+	MeshID string `json:"mesh_id,omitempty"`
 }
 
 // Host owns the Android-side TLS 1.3 Companion server, persisted permissions, and audit log.
@@ -148,8 +150,9 @@ func (h *Host) StartServer() error {
 	tok := h.cfg.Token
 	h.mu.Unlock()
 
-	model, rel, sdk := deviceIdentity()
+	_, model, rel, sdk := deviceIdentity()
 	srv, err := companion.NewServer(tok, model, rel, sdk, companion.Handler{
+		MeshHost: h.meshHost,
 		GetPermissions: func() companion.Permissions {
 			h.mu.Lock()
 			defer h.mu.Unlock()

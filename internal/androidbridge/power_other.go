@@ -36,3 +36,6 @@ func AccessibilityOn() bool { return false }
 
 // OpenAccessibilitySettings is a no-op outside Android.
 func OpenAccessibilitySettings() {}
+
+// Identity is empty outside Android.
+func Identity() (name, model, release string, sdk int) { return "", "", "", 0 }

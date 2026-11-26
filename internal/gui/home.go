@@ -2,6 +2,7 @@ package gui
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/YuanZhe-99/AndroFuse/internal/adb"
 	"github.com/YuanZhe-99/AndroFuse/internal/companion"
 	"github.com/YuanZhe-99/AndroFuse/internal/dex"
+	"github.com/YuanZhe-99/AndroFuse/internal/mesh"
 	"github.com/YuanZhe-99/AndroFuse/internal/vm"
 	L "github.com/YuanZhe-99/AndroFuse/locales"
 )
@@ -177,7 +179,6 @@ func (a *App) connectCard(c *ui.Context, k tokens, narrow bool) {
 				a.ConnectByAddress()
 			}
 		})
-		ui.Text(c, L.ConnectHint()).FontSize(sizeSmall).TextColor(k.text3)
 		ui.Row(c.Key("conn-as")).FillWidth().Gap(10).AlignItems(ui.Center).Wrap().Children(func() {
 			ui.Text(c, L.ConnectOpenAs()).FontSize(sizeSmall).TextColor(k.text3)
 			ui.Segmented(c.Key("conn-as-seg"), &a.connect.OpenAs, L.KindDeX(), L.KindScreen(), L.KindApp(), L.KindCamera())
@@ -658,20 +659,24 @@ func lastSeenWords(t time.Time) string {
 // networkPhone is a phone in a joined network that this computer never connected to.
 type networkPhone struct {
 	Network string // the network's shown name
-	Peer    string // EasyTier hostname, the name it joined under
+	Peer    string // EasyTier hostname, the name it joined under (mesh.Hostname)
+	Name    string // the name the phone gives itself in that hostname
 	IPv4    string
 	Direct  bool
 	Latency float64
 }
 
-// othersInNetworks lists the peers of the running networks that are no remembered phone, each once.
+// othersInNetworks lists the AndroFuse phones in the running networks that are no remembered
+// phone, each once. Other nodes, such as public relay servers, and computers are left out (like
+// Kyokai, only hostnames with mesh.HostPrefix count).
 func (a *App) othersInNetworks() []networkPhone {
-	known := map[string]bool{meshDeviceName: true}
+	var remembered []string
 	for _, r := range a.rememberedList() {
 		if r.Companion != nil && r.Companion.MeshHost != "" {
-			known[r.Companion.MeshHost] = true
+			remembered = append(remembered, r.Companion.MeshHost)
 		}
 	}
+	known := map[string]bool{}
 	nets := map[string]string{}
 	for _, n := range a.networks() {
 		nets[n.ID] = n.shownName()
@@ -681,14 +686,27 @@ func (a *App) othersInNetworks() []networkPhone {
 	var out []networkPhone
 	for id, v := range a.netViews {
 		for _, p := range v.Info.Peers {
-			if known[p.Hostname] || p.Hostname == "" {
+			kind, devID, name, ok := mesh.ParseHostname(p.Hostname)
+			if !ok || kind != mesh.KindPhone || known[devID] || slices.ContainsFunc(remembered, func(h string) bool { return mesh.SameDevice(h, p.Hostname) }) {
 				continue
 			}
-			known[p.Hostname] = true
-			out = append(out, networkPhone{Network: nets[id], Peer: p.Hostname, IPv4: p.IPv4, Direct: p.Direct, Latency: p.Latency})
+			known[devID] = true
+			if name == "" {
+				name = devID
+			}
+			out = append(out, networkPhone{Network: nets[id], Peer: p.Hostname, Name: name, IPv4: p.IPv4, Direct: p.Direct, Latency: p.Latency})
 		}
 	}
 	return out
+}
+
+// routeWords is a peer's mesh address and route in words, "10.126.126.12 · Direct · 3 ms"; the address
+// is left out while it has none.
+func routeWords(ip string, direct bool, ms float64) string {
+	if ip == "" {
+		return wayWords(direct, ms)
+	}
+	return ip + " · " + wayWords(direct, ms)
 }
 
 // wayWords is a network route in words: "Direct · 12 ms" or "Relayed · 48 ms".
@@ -708,15 +726,15 @@ func (a *App) networkPhoneCard(c *ui.Context, k tokens, p networkPhone) {
 	key := "netp-" + p.Peer
 	phoneShell(c, key, true).Children(func() {
 		phoneHeader(c, k, key+"-h", func() {
-			phoneAvatar(c, avatarSize, phoneLogo(p.Peer), nil, p.Peer)
-		}, p.Peer, L.InNetworkNever(p.Network), nil, nil)
+			phoneAvatar(c, avatarSize, phoneLogo(p.Name), nil, p.Name)
+		}, p.Name, L.InNetworkNever(p.Network), nil, nil)
 		ui.Row(c.Key(key + "-route")).FillWidth().Gap(6).AlignItems(ui.Center).Children(func() {
 			col := k.warn
 			if p.Direct {
 				col = k.good
 			}
 			statusDot(c, col)
-			ui.Text(c, p.IPv4+" · "+wayWords(p.Direct, p.Latency)).FontSize(sizeSmall).TextColor(k.text2).SingleLine()
+			ui.Text(c, routeWords(p.IPv4, p.Direct, p.Latency)).FontSize(sizeSmall).TextColor(k.text2).SingleLine()
 		})
 		ui.Box(c).Grow(1)
 		ui.Row(c.Key(key + "-acts")).Children(func() {

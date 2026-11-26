@@ -148,6 +148,30 @@ func TestParseAppsOutputAndIconCache(t *testing.T) {
 	}
 }
 
+// TestAbortedIconFindsWhereToResume checks that only an icon marker on the helper's last line
+// (before a native abort message) is resumed after, and that shell metacharacters never are.
+func TestAbortedIconFindsWhereToResume(t *testing.T) {
+	cases := map[string]string{
+		"AFDEX1|APP|{}\nAFDEX1|ICON|com.samsung.android.calendar\nAssertion failed: x\nAborted\n": "com.samsung.android.calendar",
+		"AFDEX1|ICON|com.a.b\nAFDEX1|APP|{}\n":                                                    "",
+		"AFDEX1|ICON|com.a.b;reboot\n":                                                            "",
+		"Killed\n":                                                                                "",
+	}
+	for out, want := range cases {
+		if got := abortedIcon(out); got != want {
+			t.Errorf("abortedIcon(%q) = %q, want %q", out, got, want)
+		}
+	}
+	// Two runs joined: the second, resumed one lists the aborted app without an icon.
+	raw := `AFDEX1|ICON|com.a.one` + "\n" + `AFDEX1|APP|{"package":"com.a.one","label":"One"}` + "\n" +
+		`AFDEX1|ICON|com.a.two` + "\nAborted\n" +
+		`AFDEX1|APP|{"package":"com.a.two","label":"Two"}` + "\n" + `AFDEX1|APPS_DONE|1`
+	apps, err := ParseAppsOutput(raw, "")
+	if err != nil || len(apps) != 2 || apps[1].Label != "Two" {
+		t.Fatalf("joined runs = %+v, %v", apps, err)
+	}
+}
+
 // TestLiveEmulatorAppWindowsAndIcons verifies real app label + 96x96 PNG icon
 // extraction and concurrent chromeless flex-display app windows on Pixel_9a_API_36
 // when ANDROFUSE_LIVE_EMULATOR=1 is set.

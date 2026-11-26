@@ -219,6 +219,9 @@ func (a *App) sessionHeader(c *ui.Context, sw *SessionWindow, partner *SessionWi
 	canDown := docked && partner == nil && (box.H == 0 || box.H >= 2*splitMinH)
 
 	title, sub := a.sessionPhone(sw), sw.kindWord()+" · "+sw.transportWord()
+	if sw.spec.Mode == SessionModeCamera {
+		sub = cameraWord(sw.spec.CameraFacing) + " · " + sw.transportWord()
+	}
 	if sw.spec.Mode == SessionModeApp && sw.spec.Title != "" {
 		title, sub = sw.spec.Title, a.sessionPhone(sw)+" · "+L.KindApp()
 	}
@@ -345,7 +348,28 @@ func (sw *SessionWindow) toolbar(c *ui.Context, k tokens, room bool) {
 	t := c.Theme()
 	focus := func() { sw.surface.Focus(c) }
 	ui.Row(c.Key("sess-tools")).Gap(2).AlignItems(ui.Center).Shrink(0).Children(func() {
-		if room && s != nil {
+		if room && s != nil && sw.spec.Mode == SessionModeCamera {
+			sw.mu.Lock()
+			muted := sw.audioMuted
+			sw.mu.Unlock()
+			if iconBtn(c, "tool-flip", iconCameraSwitch, L.ActionSwitchCamera(), false).Clicked() {
+				sw.switchCamera()
+			}
+			sound, soundIcon := L.ActionPlaySound(), iconVolumeOff
+			if !muted {
+				sound, soundIcon = L.ActionMute(), iconVolumeOn
+			}
+			if iconBtn(c, "tool-sound", soundIcon, sound, false).Clicked() {
+				sw.toggleSound()
+			}
+			ui.Box(c).Width(1).Height(20).Background(t.Border).Margin(0, 4)
+			if iconBtn(c, "tool-shot", iconScreenshot, L.ActionScreenshot(), false).Clicked() {
+				sw.Screenshot()
+			}
+			if iconBtn(c, "tool-full", iconFullscreen, L.ActionFullscreen(), false).Clicked() {
+				sw.toggleFullScreen()
+			}
+		} else if room && s != nil {
 			if iconBtn(c, "tool-back", iconBack, L.ActionBack(), false).Clicked() {
 				go sw.pressKey("back")
 				focus()
@@ -388,6 +412,10 @@ func (sw *SessionWindow) toolMenu(m *ui.Menu, c *ui.Context, all bool) {
 		return
 	}
 	share := sw.spec.Mode == SessionModeShare
+	if sw.spec.Mode == SessionModeCamera {
+		sw.cameraMenu(m, all, muted, recording)
+		return
+	}
 	if all {
 		if m.Item(L.ActionBack()).Chosen() {
 			go sw.pressKey("back")
@@ -420,9 +448,7 @@ func (sw *SessionWindow) toolMenu(m *ui.Menu, c *ui.Context, all bool) {
 		sw.ToggleRecording()
 	}
 	if m.Item(L.ActionPlaySound()).Checked(!muted).Chosen() {
-		sw.mu.Lock()
-		sw.audioMuted = !sw.audioMuted
-		sw.mu.Unlock()
+		sw.toggleSound()
 	}
 	if sw.spec.ScreenOffCap {
 		if m.Item(L.ActionPhoneScreenOff()).Checked(screenOff).Chosen() {
@@ -441,6 +467,78 @@ func (sw *SessionWindow) toolMenu(m *ui.Menu, c *ui.Context, all bool) {
 		sw.touchMode = !sw.touchMode
 		sw.mu.Unlock()
 	}
+}
+
+// cameraMenu is the tool menu of a camera session: no phone keys, clipboard or rotation, which a
+// camera stream has none of. all adds the ones the header shows when it has room too.
+func (sw *SessionWindow) cameraMenu(m *ui.Menu, all, muted, recording bool) {
+	if all {
+		if m.Item(L.ActionSwitchCamera()).Chosen() {
+			sw.switchCamera()
+		}
+		if m.Item(L.ActionScreenshot()).Chosen() {
+			sw.Screenshot()
+		}
+		if m.Item(L.ActionFullscreen()).Chosen() {
+			sw.toggleFullScreen()
+		}
+		m.Separator()
+	}
+	recLabel := L.ActionRecordStart()
+	if recording {
+		recLabel = L.ActionRecordStop()
+	}
+	if m.Item(recLabel).Chosen() {
+		sw.ToggleRecording()
+	}
+	if m.Item(L.ActionPlaySound()).Checked(!muted).Chosen() {
+		sw.toggleSound()
+	}
+}
+
+// toggleSound mutes or unmutes the session's sound on this computer.
+func (sw *SessionWindow) toggleSound() {
+	sw.mu.Lock()
+	sw.audioMuted = !sw.audioMuted
+	sw.mu.Unlock()
+	sw.redraw()
+}
+
+// switchCamera shows the phone's other camera where this session shows now, with the same sound
+// setting. scrcpy picks the camera when it starts, so the stream restarts once this one has let go
+// of the camera.
+func (sw *SessionWindow) switchCamera() {
+	d, ok := sw.app.findDeviceForMCP(sw.spec.DeviceKey)
+	if !ok {
+		d, ok = sw.app.findDeviceForMCP(sw.spec.Serial)
+	}
+	if !ok {
+		return
+	}
+	next := "front"
+	if sw.spec.CameraFacing == "front" {
+		next = "back"
+	}
+	open := OpenWindow
+	if sw.Docked() {
+		open = OpenPane
+	}
+	sw.mu.Lock()
+	muted := sw.audioMuted
+	sw.mu.Unlock()
+	sw.Close()
+	go func() {
+		<-sw.closed
+		sw.app.launchCamera(d, next, open, muted)
+	}()
+}
+
+// cameraWord names a phone camera: "Front Camera" or "Rear Camera".
+func cameraWord(facing string) string {
+	if facing == "front" {
+		return L.AVCameraFront()
+	}
+	return L.AVCameraBack()
 }
 
 // toggleFullScreen shows the session alone on the whole screen: its own window full screen, or,

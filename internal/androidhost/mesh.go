@@ -130,8 +130,7 @@ func (h *Host) startMesh(name, secret string, peers []string, fullSpeed bool) (b
 	mgr := h.mesh.mgr
 	h.mu.Unlock()
 
-	model, _, _ := deviceIdentity()
-	err := mgr.Start(mesh.Config{Enabled: true, NetworkName: name, NetworkSecret: secret, DeviceName: model, Peers: peers, LowPower: !fullSpeed})
+	err := mgr.Start(mesh.Config{Enabled: true, NetworkName: name, NetworkSecret: secret, DeviceName: h.meshHost(), Peers: peers, LowPower: !fullSpeed})
 	h.setMeshErr(err)
 	return err == nil && mgr.Status("").Running, err
 }
@@ -217,4 +216,18 @@ func (h *Host) MeshFullSpeed() bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.cfg.Mesh != nil && h.cfg.Mesh.FullSpeed
+}
+
+// meshHost is the EasyTier hostname the phone joins networks under: its kept random id and the
+// name its person gave it, so desktops show it by that name and tell it from relay servers.
+// Side effects: draws and saves MeshID the first time.
+func (h *Host) meshHost() string {
+	name, _, _, _ := deviceIdentity()
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.cfg.MeshID == "" {
+		h.cfg.MeshID = mesh.NewDeviceID()
+		h.saveConfigLocked()
+	}
+	return mesh.Hostname(mesh.KindPhone, h.cfg.MeshID, name)
 }

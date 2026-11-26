@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -29,6 +30,8 @@ type rawAppRecord struct {
 //
 // Inputs: ctx, adb client, device serial, local directory for cached PNG icons.
 // Returns: deterministically sorted AppEntry slice with local IconPath populated.
+// Notes: when an app's icon aborts the helper (it prints AFDEX1|ICON|pkg before each), the
+// helper runs again with --resume pkg, at most three times, and that app is listed without one.
 func ListAppsWithIcons(ctx context.Context, client *adb.Client, serial, iconCacheDir string) ([]adb.AppEntry, error) {
 	if client == nil {
 		return nil, fmt.Errorf("adb client is required")
@@ -43,12 +46,50 @@ func ListAppsWithIcons(ctx context.Context, client *adb.Client, serial, iconCach
 	if err := client.PushFile(callCtx, serial, jar, RemoteHelperPath); err != nil {
 		return nil, fmt.Errorf("push dex helper for apps: %w", err)
 	}
-	cmd := fmt.Sprintf("CLASSPATH=%s app_process / com.androfuse.dexhelper.Main apps", RemoteHelperPath)
-	out, err := client.Shell(callCtx, serial, cmd)
-	if err != nil {
-		return nil, fmt.Errorf("dex helper apps: %w (%s)", err, out)
+	var all strings.Builder
+	resume := ""
+	for range 4 {
+		cmd := fmt.Sprintf("CLASSPATH=%s app_process / com.androfuse.dexhelper.Main apps", RemoteHelperPath)
+		if resume != "" {
+			cmd += " --resume " + resume
+		}
+		out, err := client.Shell(callCtx, serial, cmd)
+		all.WriteString(out)
+		all.WriteByte('\n')
+		if err == nil || strings.Contains(out, "AFDEX1|APPS_DONE|") {
+			break
+		}
+		// The helper died drawing an icon: list that app without one and go on after it.
+		next := abortedIcon(out)
+		if next == "" || next == resume {
+			if strings.Contains(all.String(), "AFDEX1|APP|") {
+				break
+			}
+			return nil, fmt.Errorf("dex helper apps: %w (%s)", err, out)
+		}
+		resume = next
 	}
-	return ParseAppsOutput(out, iconCacheDir)
+	return ParseAppsOutput(all.String(), iconCacheDir)
+}
+
+// packageName matches an Android package name, the only thing passed back to the phone's shell.
+var packageName = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$`)
+
+// abortedIcon returns the package whose icon the helper was drawing when it stopped: the last
+// output line when it is an AFDEX1|ICON line, else "".
+func abortedIcon(out string) string {
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		l := strings.TrimSpace(lines[i])
+		if !strings.HasPrefix(l, "AFDEX1|") {
+			continue // a native abort message after the marker
+		}
+		if pkg, ok := strings.CutPrefix(l, "AFDEX1|ICON|"); ok && packageName.MatchString(pkg) {
+			return pkg
+		}
+		return ""
+	}
+	return ""
 }
 
 // ParseAppsOutput parses `AFDEX1|APP|{json}` lines emitted by `Main apps`, filters

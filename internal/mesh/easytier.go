@@ -6,9 +6,12 @@
 package mesh
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"net/netip"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/YuanZhe-99/AndroFuse/internal/core"
@@ -55,6 +58,64 @@ type Peer struct {
 	IPv4     string  // its mesh address, "" until it has one
 	Direct   bool    // connected directly rather than through a relay
 	Latency  float64 // milliseconds; 0 when not measured yet
+}
+
+// HostPrefix starts the EasyTier hostname of every AndroFuse device. Other nodes in a network,
+// such as public relay servers or EasyTier on other machines, have none and are never shown.
+const HostPrefix = "AndroFuse-"
+
+// Kinds of AndroFuse device in a hostname.
+const (
+	KindPhone = "phone"
+	KindPC    = "pc"
+)
+
+// Hostname is the name an AndroFuse device joins every network under:
+// "AndroFuse-<kind>-<id> <name>", where id is the device's own random hex (stable while it keeps
+// its settings) and name what its person calls it.
+func Hostname(kind, id, name string) string {
+	h := HostPrefix + kind + "-" + id
+	if name = strings.Join(strings.Fields(name), " "); name != "" {
+		h += " " + name
+	}
+	return h
+}
+
+// ParseHostname reads an AndroFuse hostname back. EasyTier hostnames are whatever a node chose,
+// so name is only a label.
+// Returns: ok false for a node that is no AndroFuse device.
+func ParseHostname(h string) (kind, id, name string, ok bool) {
+	rest, found := strings.CutPrefix(h, HostPrefix)
+	if !found {
+		return "", "", "", false
+	}
+	kind, rest, found = strings.Cut(rest, "-")
+	if !found || (kind != KindPhone && kind != KindPC) {
+		return "", "", "", false
+	}
+	id, name, _ = strings.Cut(rest, " ")
+	if id == "" {
+		return "", "", "", false
+	}
+	return kind, id, name, true
+}
+
+// SameDevice reports whether hostnames a and b name the same AndroFuse device: the same kind and
+// id, whatever name each carries now; other hostnames only when they are equal.
+func SameDevice(a, b string) bool {
+	ka, ia, _, oka := ParseHostname(a)
+	kb, ib, _, okb := ParseHostname(b)
+	if oka && okb {
+		return ka == kb && ia == ib
+	}
+	return a == b
+}
+
+// NewDeviceID draws the random id a device keeps in its hostname.
+func NewDeviceID() string {
+	var b [4]byte
+	_, _ = rand.Read(b[:])
+	return hex.EncodeToString(b[:])
 }
 
 // Info is what a running network knows about itself and its peers (never logged, `INV-08`).
@@ -236,7 +297,8 @@ func (m *Manager) Info(instance string) (Info, bool) {
 	return out, true
 }
 
-// PeerIPv4 returns the mesh IPv4 address of the peer that joined instance's network as hostname.
+// PeerIPv4 returns the mesh IPv4 address of the peer that joined instance's network as hostname
+// (the same AndroFuse device under any name, SameDevice).
 // Returns: false while the network is down, the peer is unknown, or it has no address yet.
 func (m *Manager) PeerIPv4(instance, hostname string) (string, bool) {
 	st, err := m.read(instance)
@@ -244,14 +306,14 @@ func (m *Manager) PeerIPv4(instance, hostname string) (string, bool) {
 		return "", false
 	}
 	for _, r := range st.Info.Routes {
-		if r.Hostname == hostname {
+		if SameDevice(r.Hostname, hostname) {
 			if ip := r.IPv4.String(); ip != "" {
 				return ip, true
 			}
 		}
 	}
 	for _, p := range st.Info.Pairs {
-		if p.Route != nil && p.Route.Hostname == hostname {
+		if p.Route != nil && SameDevice(p.Route.Hostname, hostname) {
 			if ip := p.Route.IPv4.String(); ip != "" {
 				return ip, true
 			}

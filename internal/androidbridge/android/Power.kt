@@ -26,6 +26,7 @@ import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import android.provider.Settings
 import java.net.InetAddress
 import java.net.NetworkInterface
 import org.json.JSONObject
@@ -77,6 +78,11 @@ class AndroFusePowerPlugin : MyGoPlugin {
                 reply.success(true)
             }
             "globalAction" -> reply.success(AndroFuseShare.globalAction(args.optString("action")))
+            "identity" -> reply.success(JSONObject()
+                .put("name", Settings.Global.getString(ctx.contentResolver, "device_name")?.takeIf { it.isNotBlank() } ?: Build.MODEL)
+                .put("model", Build.MODEL)
+                .put("release", Build.VERSION.RELEASE)
+                .put("sdk", Build.VERSION.SDK_INT))
             "accessibilityOn" -> reply.success(AndroFuseA11yService.instance != null)
             "openAccessibility" -> {
                 AndroFuseShare.openAccessibilitySettings()

@@ -58,9 +58,9 @@ func testApp(t *testing.T) *App {
 	a.cameraBridgeURL = "http://127.0.0.1:27190/camera/test.mjpeg"
 	a.compHash = "0123456789abcdef"
 	a.prefs.Mesh = &MeshPrefs{Networks: []MeshNetwork{{ID: "net-home", Label: "Home", NetworkName: "home-mesh", Join: true, ListenPort: 31452}, {ID: "net-office", NetworkName: "office"}}, Accept: true, PairNetwork: "net-home"}
-	a.netViews["net-home"] = netView{Status: mesh.Status{Running: true}, Info: mesh.Info{IPv4: "10.126.126.1", NAT: "FullCone", Peers: []mesh.Peer{{Hostname: "SM-F971U1", IPv4: "10.126.126.12", Direct: true, Latency: 3}, {Hostname: "Pixel 8 Pro", IPv4: "10.126.126.13", Latency: 48}}}}
+	a.netViews["net-home"] = netView{Status: mesh.Status{Running: true}, Info: mesh.Info{IPv4: "10.126.126.1", NAT: "FullCone", Peers: []mesh.Peer{{Hostname: "AndroFuse-phone-0a1b2c3d Galaxy Z Fold8", IPv4: "10.126.126.12", Direct: true, Latency: 3}, {Hostname: "AndroFuse-phone-77aa01ff Pixel 8 Pro", IPv4: "10.126.126.13", Latency: 48}, {Hostname: "PublicServer_CloudCone-S196V", Direct: true, Latency: 23}, {Hostname: "AndroFuse-pc-1234abcd STUDIO", IPv4: "10.126.126.2", Direct: true, Latency: 5}}}}
 	a.remembered = []RememberedDevice{
-		{HardwareHash: "0123456789abcdef", Name: "Galaxy Z Fold8", Alias: "My Fold", Maker: "samsung", Model: "SM-F971U1", Android: "17", AutoReconnect: true, Companion: &CompanionBinding{MeshHost: "SM-F971U1"}},
+		{HardwareHash: "0123456789abcdef", Name: "Galaxy Z Fold8", Alias: "My Fold", Maker: "samsung", Model: "SM-F971U1", Android: "17", AutoReconnect: true, Companion: &CompanionBinding{MeshHost: "AndroFuse-phone-0a1b2c3d Fold"}},
 		{HardwareHash: "xiaomi-14", Name: "Xiaomi 14", Maker: "Xiaomi", Model: "23127PN0CC", Android: "15", AutoReconnect: true},
 	}
 	a.diagReady = true
@@ -490,5 +490,42 @@ func TestRememberedDevices(t *testing.T) {
 	b.RestoreDevice(gone)
 	if _, back := New("test", dir).RememberedFor("hw-fold"); !back {
 		t.Fatal("Undo must restore and save the phone")
+	}
+}
+
+// TestOthersInNetworksShowsOnlyAndroFusePhones checks the Home list of network phones: the
+// remembered Fold (renamed since) and the computer are left out, and so is the public relay
+// server, which is no AndroFuse device.
+func TestOthersInNetworksShowsOnlyAndroFusePhones(t *testing.T) {
+	a := testApp(t)
+	others := a.othersInNetworks()
+	if len(others) != 1 || others[0].Name != "Pixel 8 Pro" || others[0].IPv4 != "10.126.126.13" {
+		t.Fatalf("othersInNetworks = %+v", others)
+	}
+	if got := a.meshPeerName("AndroFuse-phone-0a1b2c3d Galaxy Z Fold8"); got != "My Fold" {
+		t.Fatalf("meshPeerName(remembered) = %q", got)
+	}
+	if got := a.meshPeerName("AndroFuse-pc-1234abcd STUDIO"); got != "STUDIO" {
+		t.Fatalf("meshPeerName(pc) = %q", got)
+	}
+	if h := a.meshHostname(); !strings.HasPrefix(h, "AndroFuse-pc-") || h != a.meshHostname() {
+		t.Fatalf("meshHostname = %q, not kept", h)
+	}
+}
+
+// TestCameraSessionLetsGoBeforeSwitching checks what switching cameras waits on: Close signals
+// closed once the session let go of everything, and the header names the camera, not "front".
+func TestCameraSessionLetsGoBeforeSwitching(t *testing.T) {
+	a := testApp(t)
+	sw := newSessionWindow(a, SessionSpec{ID: "cam1", DeviceKey: "0123456789abcdef", Mode: SessionModeCamera, CameraFacing: "front"})
+	a.sessions["cam1"] = sw
+	sw.Close()
+	select {
+	case <-sw.closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close never signalled closed")
+	}
+	if cameraWord("front") == cameraWord("back") || cameraWord("front") == "front" {
+		t.Fatal("cameraWord does not name the cameras")
 	}
 }

@@ -1560,6 +1560,26 @@ func (msgs Messages) ActionPlaySound() string {
 	return Catalog.Format(msgs.locale, "ActionPlaySound", nil)
 }
 
+// ActionMute says "Mute"
+// in the language the app shows.
+func ActionMute() string { return In(i18n.Locale()).ActionMute() }
+
+// ActionMute says "Mute"
+// in the language of msgs.
+func (msgs Messages) ActionMute() string {
+	return Catalog.Format(msgs.locale, "ActionMute", nil)
+}
+
+// ActionSwitchCamera says "Switch camera"
+// in the language the app shows.
+func ActionSwitchCamera() string { return In(i18n.Locale()).ActionSwitchCamera() }
+
+// ActionSwitchCamera says "Switch camera"
+// in the language of msgs.
+func (msgs Messages) ActionSwitchCamera() string {
+	return Catalog.Format(msgs.locale, "ActionSwitchCamera", nil)
+}
+
 // ActionRename says "Rename…"
 // in the language the app shows.
 func ActionRename() string { return In(i18n.Locale()).ActionRename() }
@@ -1798,16 +1818,6 @@ func ConnectGo() string { return In(i18n.Locale()).ConnectGo() }
 // in the language of msgs.
 func (msgs Messages) ConnectGo() string {
 	return Catalog.Format(msgs.locale, "ConnectGo", nil)
-}
-
-// ConnectHint says "Enter an IP address, a domain or a phone's name. You can leave out the port; AndroFuse finds it. Phones connected ove…"
-// in the language the app shows.
-func ConnectHint() string { return In(i18n.Locale()).ConnectHint() }
-
-// ConnectHint says "Enter an IP address, a domain or a phone's name. You can leave out the port; AndroFuse finds it. Phones connected ove…"
-// in the language of msgs.
-func (msgs Messages) ConnectHint() string {
-	return Catalog.Format(msgs.locale, "ConnectHint", nil)
 }
 
 // ConnectLooking says "Looking for {host}…"

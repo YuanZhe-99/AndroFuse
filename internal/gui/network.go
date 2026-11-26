@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 	"time"
@@ -14,9 +15,6 @@ import (
 	"github.com/YuanZhe-99/AndroFuse/internal/mesh"
 	L "github.com/YuanZhe-99/AndroFuse/locales"
 )
-
-// meshDeviceName is the EasyTier hostname the desktop announces in every network.
-const meshDeviceName = "androfuse-desktop"
 
 // maxNetworks is how many networks the desktop keeps (one EasyTier instance each, like Kyokai).
 const maxNetworks = 8
@@ -54,6 +52,8 @@ type MeshPrefs struct {
 	LatencyFirst bool `json:"latency_first,omitempty"`
 	// PairNetwork is the ID of the network a newly paired phone joins ("" for none).
 	PairNetwork string `json:"pair_network,omitempty"`
+	// DeviceID is the random id in this computer's EasyTier hostname (mesh.Hostname).
+	DeviceID string `json:"device_id,omitempty"`
 
 	// Legacy single network (before V3), migrated into Networks on load.
 	On           bool   `json:"on,omitempty"`
@@ -94,6 +94,21 @@ func (a *App) migrateMeshLocked() {
 	}
 	p.On, p.NetworkName, p.Peer, p.SealedSecret, p.ListenPort = false, "", "", nil, 0
 	a.savePrefs()
+}
+
+// meshHostname is the EasyTier hostname this computer joins every network under: its kept random
+// id and its Windows computer name.
+// Side effects: draws and saves DeviceID the first time.
+func (a *App) meshHostname() string {
+	name, _ := os.Hostname()
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	p := a.meshPrefsLocked()
+	if p.DeviceID == "" {
+		p.DeviceID = mesh.NewDeviceID()
+		a.savePrefs()
+	}
+	return mesh.Hostname(mesh.KindPC, p.DeviceID, name)
 }
 
 // meshPrefsLocked returns the network settings, creating them; the caller holds a.mu.
@@ -164,7 +179,7 @@ func (a *App) JoinNetwork(id string) {
 	a.mu.Lock()
 	p := *a.meshPrefsLocked()
 	a.mu.Unlock()
-	cfg := mesh.Config{Instance: n.ID, Enabled: true, NetworkName: n.NetworkName, NetworkSecret: secret, DeviceName: meshDeviceName,
+	cfg := mesh.Config{Instance: n.ID, Enabled: true, NetworkName: n.NetworkName, NetworkSecret: secret, DeviceName: a.meshHostname(),
 		Peers: n.Servers, DisableP2P: p.NoDirect, LatencyFirst: p.LatencyFirst}
 	if p.Accept {
 		port, err := companion.PickPort(n.ListenPort)

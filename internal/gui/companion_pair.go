@@ -104,7 +104,11 @@ func (a *App) PairCompanionOverADB(serial, model string, joinMesh bool) {
 		})
 		a.notify(L.CompanionPaired(model))
 		if hash != "" && res.Port > 0 {
-			a.bindCompanion(hash, res.Port, res.CertFingerprint, res.Token, res.Model)
+			meshHost := res.MeshHost
+			if meshHost == "" {
+				meshHost = res.Model // a Companion from before mesh.Hostname
+			}
+			a.bindCompanion(hash, res.Port, res.CertFingerprint, res.Token, meshHost)
 		}
 		if !joinMesh || !inNet {
 			a.RefreshDevices()
@@ -258,6 +262,7 @@ func (a *App) ReconnectCompanion(hash string) {
 			note(err.Error())
 			return
 		}
+		a.noteMeshHost(hash, c.PeerInfo().MeshHost)
 		st, _ := c.GetStatus(ctx)
 		a.rt.coreMu.Lock()
 		old := a.rt.compClient

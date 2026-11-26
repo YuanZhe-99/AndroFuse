@@ -14,7 +14,7 @@
 | `internal/androidcore` | Carries and loads the Android core library in the APK; Keystore sealing | `NewLibrary`, `Library.Load`, `NewVault`, `Vault.Seal`, `Vault.Open` |
 | `internal/avbridge` | M5 phone-camera loopback MJPEG server, Windows `MFCreateVirtualCamera` probe & PC→Android uplink | `ProbeVirtualCamera`, `NewMJPEGServer`, `MJPEGServer.Start`, `MJPEGServer.PushNV12`, `NewUplinkBridge`, `UplinkBridge.PushMicPCM`, `UplinkBridge.PushCameraJPEG`, `UplinkBridge.StreamMic` |
 | `internal/mcp` | Opt-in default-disabled loopback MCP server with TTL token, allowlist & emergency stop (`INV-07`, `INV-08`) | `NewServer`, `Server.Enable`, `Server.EmergencyStop`, `Server.Status`, `Server.ServeHTTP`, `Allowlist`, `AuditEntry` |
-| `internal/mesh` | Client for the core-embedded EasyTier v2.7.1 mesh (no TUN, `INV-07`) | `NewManager`, `Manager.Start`, `Manager.Stop`, `Manager.Status`, `Manager.PeerIPv4` |
+| `internal/mesh` | Client for the core-embedded EasyTier v2.7.1 mesh (no TUN, `INV-07`) | `NewManager`, `Manager.Start`, `Manager.Stop`, `Manager.Status`, `Manager.PeerIPv4`, `Hostname`, `ParseHostname`, `SameDevice` |
 | `internal/bundlesig` | Ed25519 helper bundle signing & verification (`bundle.json` / `bundle.sig`) | `Sign`, `Verify`, `Manifest` |
 | `internal/adb` | Argument-vector ADB client, multi-transport deduplication, mDNS TLS wireless connect/pair & `--user 0` prober | `FindClient`, `MaskSerial`, `MaskEndpoint`, `MergeDevices`, `UnifiedDevice`, `Client.Devices`, `Client.MDNSServices`, `Client.ConnectTLS`, `Client.PairTLS`, `Client.WakeScreen`, `Client.ListLaunchableApps`, `IsNoisyAppPackage` |
 | `internal/sysproc` | Console-free child processes on Windows | `HideConsole` |

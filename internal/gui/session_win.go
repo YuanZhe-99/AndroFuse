@@ -51,6 +51,8 @@ type SessionSpec struct {
 	ScreenOffCap bool
 	AppIcon      *ui.Bitmap
 	AppPackage   string
+	// CameraFacing is "front" or "back" for a camera session.
+	CameraFacing string
 	OnClose      func()
 	// Open says where the session first shows (OpenDefault follows Settings › Windows).
 	Open OpenIn
@@ -112,6 +114,7 @@ type SessionWindow struct {
 	screenOff     bool
 	telemOpen     bool                // the header's telemetry popover
 	shareKey      func(action string) // Back, Home, Recents for a Companion screen-sharing session
+	closed        chan struct{}       // closed once Close released the stream, its leases and audio
 	statusNote    string
 	negotiatedW   int
 	negotiatedH   int
@@ -138,6 +141,7 @@ func newSessionWindow(app *App, spec SessionSpec) *SessionWindow {
 		writing: 0,
 		ready:   -1,
 		shown:   -1,
+		closed:  make(chan struct{}),
 	}
 	return sw
 }
@@ -733,6 +737,7 @@ func (sw *SessionWindow) Close() {
 		if sw.spec.OnClose != nil {
 			sw.spec.OnClose()
 		}
+		close(sw.closed)
 	}()
 }
 

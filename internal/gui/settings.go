@@ -9,6 +9,7 @@ import (
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
+	"github.com/YuanZhe-99/AndroFuse/internal/mesh"
 	"github.com/YuanZhe-99/AndroFuse/internal/version"
 	"github.com/YuanZhe-99/AndroFuse/internal/vm"
 	L "github.com/YuanZhe-99/AndroFuse/locales"
@@ -839,18 +840,25 @@ func (a *App) networkRow(c *ui.Context, k tokens, n MeshNetwork, v netView, firs
 			}
 		})
 	})
-	if n.Join && v.Status.Running && len(v.Info.Peers) > 0 {
+	var devices []mesh.Peer // AndroFuse devices only, not relay servers (mesh.HostPrefix)
+	for _, p := range v.Info.Peers {
+		if _, _, _, ok := mesh.ParseHostname(p.Hostname); ok {
+			devices = append(devices, p)
+		}
+	}
+	if n.Join && v.Status.Running && len(devices) > 0 {
 		subRow(c, k, key+"-peers", func() {
-			for _, p := range v.Info.Peers {
+			for _, p := range devices {
 				p := p
+				kind, _, _, _ := mesh.ParseHostname(p.Hostname)
 				name := a.meshPeerName(p.Hostname)
 				ui.Row(c.Key(key + "-peer-" + p.Hostname)).FillWidth().Gap(10).AlignItems(ui.Center).Children(func() {
 					phoneAvatar(c, avatarSmall, phoneLogo(name, p.Hostname), nil, name)
 					ui.Column(c).Grow(1).MinWidth(0).Children(func() {
 						ui.Text(c, name).FontSize(sizeBody).SingleLine()
-						ui.Text(c, p.IPv4+" · "+wayWords(p.Direct, p.Latency)).FontSize(sizeSmall).TextColor(k.text3).FontFeatures("tnum").SingleLine()
+						ui.Text(c, routeWords(p.IPv4, p.Direct, p.Latency)).FontSize(sizeSmall).TextColor(k.text3).FontFeatures("tnum").SingleLine()
 					})
-					if p.Hostname != meshDeviceName && p.IPv4 != "" {
+					if kind == mesh.KindPhone && p.IPv4 != "" {
 						if ui.Button(c.Key(key+"-peer-go-"+p.Hostname), L.ConnectGo()).Clicked() {
 							a.update(func() { a.settingsOpen, a.page, a.connect.Input = false, pageHome, p.IPv4 })
 							a.ConnectByAddress()
@@ -862,16 +870,19 @@ func (a *App) networkRow(c *ui.Context, k tokens, n MeshNetwork, v netView, firs
 	}
 }
 
-// meshPeerName is what the interface calls a network peer: a remembered phone's name when it is
-// one, else the name it joined under.
+// meshPeerName is what the interface calls an AndroFuse device in a network: a remembered phone's
+// name when it is one, else the name it gives itself in its hostname.
 func (a *App) meshPeerName(host string) string {
 	for _, r := range a.rememberedList() {
-		if r.Companion != nil && r.Companion.MeshHost == host {
+		if r.Companion != nil && mesh.SameDevice(r.Companion.MeshHost, host) {
 			return r.displayName()
 		}
 	}
-	if host == meshDeviceName {
-		return L.HomeThisComputer()
+	if _, id, name, ok := mesh.ParseHostname(host); ok {
+		if name == "" {
+			return id
+		}
+		return name
 	}
 	return host
 }

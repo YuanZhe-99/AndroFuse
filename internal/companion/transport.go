@@ -28,7 +28,9 @@ import (
 
 // Handler supplies device callbacks invoked by the authenticated TLS Companion Server.
 type Handler struct {
-	GetPermissions      func() Permissions
+	GetPermissions func() Permissions
+	// MeshHost returns the EasyTier hostname the phone joins networks under; nil for none.
+	MeshHost            func() string
 	GetStatus           func() DeviceStatus
 	OnClipboard         func(ClipboardMessage) error
 	OnNotificationReply func(NotificationReply) error
@@ -277,6 +279,14 @@ func (s *Server) RotateToken() (string, error) {
 	return tok, nil
 }
 
+// meshHost is the phone's EasyTier hostname from the handler, "" when it has none.
+func (s *Server) meshHost() string {
+	if s.handler.MeshHost != nil {
+		return s.handler.MeshHost()
+	}
+	return ""
+}
+
 func (s *Server) permissions() Permissions {
 	if s.handler.GetPermissions != nil {
 		return s.handler.GetPermissions()
@@ -324,6 +334,7 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 		SDKInt:          s.sdkInt,
 		CertFingerprint: s.fingerprint,
 		Permissions:     s.permissions(),
+		MeshHost:        s.meshHost(),
 	}, "")
 
 	for sc.Scan() {
@@ -692,7 +703,7 @@ func (s *Server) handlePair(conn net.Conn, enc *json.Encoder, env Envelope) {
 	s.mu.Lock()
 	tok := s.token
 	s.mu.Unlock()
-	_ = writeEnvelope(enc, env.ID, "pair.res", PairResponse{Token: tok, CertFingerprint: s.fingerprint, Port: s.tcpPort(), Model: s.model}, "")
+	_ = writeEnvelope(enc, env.ID, "pair.res", PairResponse{Token: tok, CertFingerprint: s.fingerprint, Port: s.tcpPort(), Model: s.model, MeshHost: s.meshHost()}, "")
 }
 
 // RequestPairing asks the phone at addr (an `adb forward` of the Companion LocalSocket) to pair, showing
