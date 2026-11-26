@@ -1,4 +1,4 @@
-# cargo deny --manifest-path core/Cargo.toml check licenses bans sources
+# cargo deny --manifest-path core/Cargo.toml check licenses bans sources advisories
 # Licenses, advisories, bans, and sources of the Rust core dependency graph.
 
 [graph]
@@ -10,6 +10,42 @@ targets = [
 
 [advisories]
 version = 2
+# Advisories inside the embedded EasyTier mesh (v2.7.1, rev 0d9c52b) that need dependency upgrades
+# only EasyTier can make. AndroFuse follows EasyTier releases instead of patching its tree: when
+# the pinned revision moves, delete this list, rerun `cargo deny ... check advisories` and re-add
+# only what still applies. Any advisory not listed here still fails CI.
+ignore = [
+  { id = "RUSTSEC-2021-0153", reason = "encoding: unmaintained notice for encoding inside EasyTier's dependency tree" },
+  { id = "RUSTSEC-2024-0384", reason = "instant: unmaintained notice for instant inside EasyTier's dependency tree" },
+  { id = "RUSTSEC-2024-0436", reason = "paste: unmaintained notice for paste inside EasyTier's dependency tree" },
+  { id = "RUSTSEC-2026-0118", reason = "hickory-proto: EasyTier pins hickory 0.25 (DNS resolution of peer addresses); the fix needs a newer hickory, or is not released yet, and EasyTier has not moved" },
+  { id = "RUSTSEC-2026-0119", reason = "hickory-proto: EasyTier pins hickory 0.25 (DNS resolution of peer addresses); the fix needs a newer hickory, or is not released yet, and EasyTier has not moved" },
+  { id = "RUSTSEC-2026-0367", reason = "zip: build-time dependency of easytier-proto only, not linked into the shipped library" },
+  { id = "RUSTSEC-2026-0368", reason = "zip: build-time dependency of easytier-proto only, not linked into the shipped library" },
+  { id = "RUSTSEC-2026-0369", reason = "zip: build-time dependency of easytier-proto only, not linked into the shipped library" },
+  { id = "RUSTSEC-2026-0429", reason = "zip: build-time dependency of easytier-proto only, not linked into the shipped library" },
+  { id = "RUSTSEC-2026-0487", reason = "hickory-proto: EasyTier pins hickory 0.25 (DNS resolution of peer addresses); the fix needs a newer hickory, or is not released yet, and EasyTier has not moved" },
+  { id = "RUSTSEC-2026-0489", reason = "hickory-proto: EasyTier pins hickory 0.25 (DNS resolution of peer addresses); the fix needs a newer hickory, or is not released yet, and EasyTier has not moved" },
+  { id = "RUSTSEC-2026-0490", reason = "hickory-proto: EasyTier pins hickory 0.25 (DNS resolution of peer addresses); the fix needs a newer hickory, or is not released yet, and EasyTier has not moved" },
+  { id = "RUSTSEC-2026-0491", reason = "hickory-proto: EasyTier pins hickory 0.25 (DNS resolution of peer addresses); the fix needs a newer hickory, or is not released yet, and EasyTier has not moved" },
+  { id = "RUSTSEC-2026-0504", reason = "hickory-proto: EasyTier pins hickory 0.25 (DNS resolution of peer addresses); the fix needs a newer hickory, or is not released yet, and EasyTier has not moved" },
+  { id = "RUSTSEC-2026-0505", reason = "hickory-proto: EasyTier pins hickory 0.25 (DNS resolution of peer addresses); the fix needs a newer hickory, or is not released yet, and EasyTier has not moved" },
+  { id = "RUSTSEC-2026-0511", reason = "hickory-proto: EasyTier pins hickory 0.25 (DNS resolution of peer addresses); the fix needs a newer hickory, or is not released yet, and EasyTier has not moved" },
+  { id = "RUSTSEC-2026-0512", reason = "hickory-proto: EasyTier pins hickory 0.25 (DNS resolution of peer addresses); the fix needs a newer hickory, or is not released yet, and EasyTier has not moved" },
+  { id = "RUSTSEC-2026-0514", reason = "hickory-resolver: EasyTier pins hickory 0.25 (DNS resolution of peer addresses); the fix needs a newer hickory, or is not released yet, and EasyTier has not moved" },
+  { id = "RUSTSEC-2026-0530", reason = "hickory-proto: EasyTier pins hickory 0.25 (DNS resolution of peer addresses); the fix needs a newer hickory, or is not released yet, and EasyTier has not moved" },
+  { id = "RUSTSEC-2026-0531", reason = "hickory-proto: EasyTier pins hickory 0.25 (DNS resolution of peer addresses); the fix needs a newer hickory, or is not released yet, and EasyTier has not moved" },
+  { id = "RUSTSEC-2026-0532", reason = "hickory-proto: EasyTier pins hickory 0.25 (DNS resolution of peer addresses); the fix needs a newer hickory, or is not released yet, and EasyTier has not moved" },
+  { id = "RUSTSEC-2026-0542", reason = "humantime: unmaintained notice for humantime inside EasyTier's dependency tree" },
+  { id = "RUSTSEC-2026-0543", reason = "chrono: unmaintained notice for chrono inside EasyTier's dependency tree" },
+  { id = "RUSTSEC-2026-0545", reason = "zip: build-time dependency of easytier-proto only, not linked into the shipped library" },
+  { id = "RUSTSEC-2026-0546", reason = "zip: build-time dependency of easytier-proto only, not linked into the shipped library" },
+  { id = "RUSTSEC-2026-0547", reason = "zip: build-time dependency of easytier-proto only, not linked into the shipped library" },
+  { id = "RUSTSEC-2026-0548", reason = "zip: build-time dependency of easytier-proto only, not linked into the shipped library" },
+  { id = "RUSTSEC-2026-0549", reason = "hickory-proto: EasyTier pins hickory 0.25 (DNS resolution of peer addresses); the fix needs a newer hickory, or is not released yet, and EasyTier has not moved" },
+  { id = "RUSTSEC-2026-0550", reason = "hickory-proto: EasyTier pins hickory 0.25 (DNS resolution of peer addresses); the fix needs a newer hickory, or is not released yet, and EasyTier has not moved" },
+  { id = "RUSTSEC-2026-0551", reason = "hickory-proto: EasyTier pins hickory 0.25 (DNS resolution of peer addresses); the fix needs a newer hickory, or is not released yet, and EasyTier has not moved" },
+]
 
 [licenses]
 version = 2
@@ -30,7 +66,7 @@ allow = [
   "LGPL-3.0-or-later",
   "GPL-3.0-only",
   "GPL-3.0-or-later",
-  # Permissive licences pulled in by the embedded EasyTier mesh (PLAN §9.1-1); all GPL-3.0-compatible.
+  # Permissive licences pulled in by the embedded EasyTier mesh; all GPL-3.0-compatible.
   "0BSD",
   "CC0-1.0",
   "CDLA-Permissive-2.0",
