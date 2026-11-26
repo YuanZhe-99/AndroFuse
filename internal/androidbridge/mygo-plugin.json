@@ -2,7 +2,9 @@
   "mobile": {
     "id": "androfusePower",
     "android": {
-      "sources": ["android/*.kt"],
+      "sources": [
+        "android/*.kt"
+      ],
       "class": "AndroFusePowerPlugin",
       "permissions": [
         "ACCESS_NETWORK_STATE",
@@ -10,10 +12,13 @@
         "FOREGROUND_SERVICE",
         "FOREGROUND_SERVICE_CONNECTED_DEVICE",
         "POST_NOTIFICATIONS",
-        "WAKE_LOCK"
+        "WAKE_LOCK",
+        "FOREGROUND_SERVICE_MEDIA_PROJECTION"
       ],
       "application": [
-        "<service android:name=\"dev.mygo.AndroFuseStandbyService\" android:exported=\"false\" android:foregroundServiceType=\"connectedDevice\" />"
+        "<service android:name=\"dev.mygo.AndroFuseStandbyService\" android:exported=\"false\" android:foregroundServiceType=\"connectedDevice\" />",
+        "<service android:name=\"dev.mygo.AndroFuseShareService\" android:exported=\"false\" android:foregroundServiceType=\"mediaProjection\" />",
+        "<service android:name=\"dev.mygo.AndroFuseA11yService\" android:exported=\"false\" android:label=\"AndroFuse\" android:permission=\"android.permission.BIND_ACCESSIBILITY_SERVICE\"><intent-filter><action android:name=\"android.accessibilityservice.AccessibilityService\" /></intent-filter></service>"
       ]
     }
   }

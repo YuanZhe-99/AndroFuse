@@ -4,6 +4,8 @@ import (
 	"io"
 	"net"
 	"testing"
+
+	"github.com/YuanZhe-99/AndroFuse/internal/adb"
 )
 
 // TestProbeLocalADB checks that a Wireless debugging adbd (STLS), plain adb (AUTH) and another
@@ -28,13 +30,13 @@ func TestProbeLocalADB(t *testing.T) {
 		}()
 		return ln.Addr().(*net.TCPAddr).Port
 	}
-	if a, err := probeLocalADB(serve("STLS")); a != adbTLS || err != nil {
+	if a, err := probeLocalADB(serve("STLS")); a != adb.AnswerTLS || err != nil {
 		t.Fatalf("STLS: %v %v", a, err)
 	}
-	if a, err := probeLocalADB(serve("AUTH")); a != adbOpen || err != nil {
+	if a, err := probeLocalADB(serve("AUTH")); a != adb.AnswerOpen || err != nil {
 		t.Fatalf("AUTH: %v %v", a, err)
 	}
-	if a, err := probeLocalADB(serve("HTTP")); a != adbNone || err == nil {
+	if a, err := probeLocalADB(serve("HTTP")); a != adb.AnswerNone || err == nil {
 		t.Fatalf("HTTP: %v %v", a, err)
 	}
 }

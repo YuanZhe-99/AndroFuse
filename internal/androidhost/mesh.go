@@ -88,7 +88,7 @@ func (h *Host) LeaveMesh() {
 	h.saveConfigLocked()
 	h.mu.Unlock()
 	if mgr != nil {
-		_ = mgr.Stop()
+		_ = mgr.Stop("")
 	}
 	h.notify()
 }
@@ -103,7 +103,7 @@ func (h *Host) MeshState() (name string, running bool, errMsg string) {
 	errMsg = h.mesh.err
 	h.mu.Unlock()
 	if mgr != nil {
-		st := mgr.Status()
+		st := mgr.Status("")
 		running = st.Running
 		if errMsg == "" {
 			errMsg = st.LastError
@@ -133,7 +133,7 @@ func (h *Host) startMesh(name, secret string, peers []string, fullSpeed bool) (b
 	model, _, _ := deviceIdentity()
 	err := mgr.Start(mesh.Config{Enabled: true, NetworkName: name, NetworkSecret: secret, DeviceName: model, Peers: peers, LowPower: !fullSpeed})
 	h.setMeshErr(err)
-	return err == nil && mgr.Status().Running, err
+	return err == nil && mgr.Status("").Running, err
 }
 
 func (h *Host) setMeshErr(err error) {

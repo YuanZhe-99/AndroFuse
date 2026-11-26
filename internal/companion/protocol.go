@@ -37,6 +37,9 @@ type Permissions struct {
 	DisplayGuard  bool `json:"display_guard"`
 	ADBBeacon     bool `json:"adb_beacon"`
 	MediaBridge   bool `json:"media_bridge"`
+	// ScreenShare lets a paired computer see this screen when Wireless debugging cannot run
+	// (mobile data); Android still asks for consent each time.
+	ScreenShare bool `json:"screen_share"`
 }
 
 // DefaultPermissions returns conservative defaults (telemetry enabled; sensitive hooks opt-in).

@@ -4,6 +4,9 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
+	"io"
+	"net"
 	"strings"
 	"testing"
 	"time"
@@ -173,5 +176,123 @@ func TestADBPairingAndMeshJoin(t *testing.T) {
 	jr, err := c.JoinMesh(ctx, MeshJoinRequest{NetworkName: "home", NetworkSecret: "s3cret", Peers: []string{"tcp://relay:11010"}})
 	if err != nil || !jr.Running || joined.NetworkName != "home" || joined.NetworkSecret != "s3cret" {
 		t.Fatalf("JoinMesh = %+v, %v; handler got %+v", jr, err, joined)
+	}
+}
+
+// TestTunnelReachesOnlyTheWirelessDebuggingPort checks that ServeTunnels pipes bytes to the port
+// the phone allows, and that another port or a phone without the permission is refused.
+func TestTunnelReachesOnlyTheWirelessDebuggingPort(t *testing.T) {
+	echo, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer echo.Close()
+	go func() {
+		for {
+			c, err := echo.Accept()
+			if err != nil {
+				return
+			}
+			go func() { _, _ = io.Copy(c, c); c.Close() }()
+		}
+	}()
+	adbPort := echo.Addr().(*net.TCPAddr).Port
+	perms := Permissions{ADBBeacon: true}
+	srv, err := NewServer("TUNNEL01", "Pixel", "16", 36, Handler{
+		GetPermissions: func() Permissions { return perms },
+		OnTunnel: func(port int) (net.Conn, error) {
+			if port != adbPort {
+				return nil, fmt.Errorf("port %d is not Wireless debugging", port)
+			}
+			return net.Dial("tcp", echo.Addr().String())
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.Listen("127.0.0.1:0"); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = srv.Serve(ctx) }()
+	defer srv.Close()
+
+	local, err := ServeTunnels(ctx, srv.Addr(), "TUNNEL01", srv.Fingerprint(), adbPort)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := net.Dial("tcp", local)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	_ = c.SetDeadline(time.Now().Add(5 * time.Second))
+	if _, err := c.Write([]byte("CNXN")); err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, 4)
+	if _, err := io.ReadFull(c, buf); err != nil || string(buf) != "CNXN" {
+		t.Fatalf("tunnel echo = %q, %v", buf, err)
+	}
+
+	if _, err := DialTunnel(ctx, srv.Addr(), "TUNNEL01", srv.Fingerprint(), adbPort+1); err == nil {
+		t.Fatal("a port other than Wireless debugging must be refused")
+	}
+	perms.ADBBeacon = false
+	if _, err := DialTunnel(ctx, srv.Addr(), "TUNNEL01", srv.Fingerprint(), adbPort); err == nil {
+		t.Fatal("a tunnel without the port helper permission must be refused")
+	}
+}
+
+// TestShareStreamsOnlyWithPermission checks that share.open hands over the phone's stream and
+// input.key reaches the handler, and that both are refused without the permission.
+func TestShareStreamsOnlyWithPermission(t *testing.T) {
+	perms := Permissions{ScreenShare: true}
+	var gotKey string
+	srv, err := NewServer("SHARE001", "Pixel", "16", 36, Handler{
+		GetPermissions: func() Permissions { return perms },
+		OnShare: func() (net.Conn, error) {
+			a, b := net.Pipe()
+			go func() { _, _ = a.Write([]byte("H264")); a.Close() }()
+			return b, nil
+		},
+		OnKey: func(action string) error { gotKey = action; return nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.Listen("127.0.0.1:0"); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = srv.Serve(ctx) }()
+	defer srv.Close()
+
+	stream, err := DialShare(ctx, srv.Addr(), "SHARE001", srv.Fingerprint())
+	if err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, 4)
+	_ = stream.SetDeadline(time.Now().Add(5 * time.Second))
+	if _, err := io.ReadFull(stream, buf); err != nil || string(buf) != "H264" {
+		t.Fatalf("share stream = %q, %v", buf, err)
+	}
+	stream.Close()
+	c, err := Dial(ctx, srv.Addr(), "SHARE001", srv.Fingerprint())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if err := c.Key(ctx, "back"); err != nil || gotKey != "back" {
+		t.Fatalf("Key = %v, handler got %q", err, gotKey)
+	}
+	perms.ScreenShare = false
+	if err := c.Key(ctx, "home"); err == nil {
+		t.Fatal("input.key without the permission must be refused")
+	}
+	if _, err := DialShare(ctx, srv.Addr(), "SHARE001", srv.Fingerprint()); err == nil {
+		t.Fatal("share.open without the permission must be refused")
 	}
 }

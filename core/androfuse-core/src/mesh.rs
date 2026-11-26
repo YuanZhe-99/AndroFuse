@@ -13,16 +13,33 @@ use serde::{Deserialize, Serialize};
 use std::ffi::{CStr, CString, c_char};
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering};
 
-/// EasyTier instance name used for the single AndroFuse mesh.
-const INSTANCE_NAME: &str = "androfuse";
+/// EasyTier instance name used when a caller names none (the Companion's single network).
+const DEFAULT_INSTANCE: &str = "androfuse";
 
-/// Serializes start/stop so two callers never race on the single named instance.
-static LIFECYCLE: Mutex<()> = Mutex::new(());
+/// Most networks one process runs at once (one EasyTier instance each).
+pub const MAX_INSTANCES: usize = 8;
 
-/// Set once the mesh has been started, so stop/status never spin up EasyTier's runtime otherwise.
-static STARTED: AtomicBool = AtomicBool::new(false);
+/// Instances started and not deleted since. It also serializes start/stop so two callers never
+/// race on one instance, and keeps stop/status from spinning up EasyTier's runtime before any start.
+static STARTED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// Returns the instance name a request refers to: its own, or the default when empty.
+/// Returns: an error for names EasyTier or a file name could not carry safely.
+pub fn instance_name(name: &str) -> Result<String, String> {
+    let n = name.trim();
+    if n.is_empty() {
+        return Ok(DEFAULT_INSTANCE.into());
+    }
+    if n.len() > 32
+        || !n
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err("instance must be 1-32 letters, digits, '-' or '_'".into());
+    }
+    Ok(n.into())
+}
 
 /// One loopback TCP port forwarded across the mesh (`127.0.0.1:local_port` → `remote_host:remote_port`).
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
@@ -35,6 +52,10 @@ pub struct PortForward {
 /// `mesh.start` parameters.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct MeshConfig {
+    /// EasyTier instance to start or replace; empty means the default single instance. The desktop
+    /// runs one instance per joined network.
+    #[serde(default)]
+    pub instance: String,
     pub network_name: String,
     #[serde(default)]
     pub network_secret: String,
@@ -53,6 +74,13 @@ pub struct MeshConfig {
     /// hole punching.
     #[serde(default)]
     pub low_power: bool,
+    /// Never builds direct links; all traffic goes through the network's servers (Settings ›
+    /// Network › Try direct connections, off).
+    #[serde(default)]
+    pub disable_p2p: bool,
+    /// Prefers the lowest-latency route over the fewest hops.
+    #[serde(default)]
+    pub latency_first: bool,
 }
 
 /// `mesh.status` / `mesh.start` result.
@@ -85,8 +113,9 @@ pub fn build_toml(cfg: &MeshConfig) -> Result<String, String> {
     }
     let q = |s: &str| serde_json::to_string(s).unwrap_or_else(|_| "\"\"".into());
 
+    let instance = instance_name(&cfg.instance)?;
     let mut t = String::new();
-    t.push_str(&format!("instance_name = {}\n", q(INSTANCE_NAME)));
+    t.push_str(&format!("instance_name = {}\n", q(&instance)));
     if !cfg.device_name.trim().is_empty() {
         t.push_str(&format!("hostname = {}\n", q(cfg.device_name.trim())));
     }
@@ -117,6 +146,12 @@ pub fn build_toml(cfg: &MeshConfig) -> Result<String, String> {
             "multi_thread = false\nlazy_p2p = true\ndisable_upnp = true\ndisable_sym_hole_punching = true\n",
         );
     }
+    if cfg.disable_p2p {
+        t.push_str("disable_p2p = true\n");
+    }
+    if cfg.latency_first {
+        t.push_str("latency_first = true\n");
+    }
 
     for peer in cfg.peers.iter().map(|p| p.trim()).filter(|p| !p.is_empty()) {
         if !peer.contains("://") {
@@ -146,57 +181,82 @@ pub fn build_toml(cfg: &MeshConfig) -> Result<String, String> {
     Ok(t)
 }
 
-/// Starts (or restarts) the embedded mesh with cfg.
+/// Starts (or restarts) the mesh instance cfg names with cfg.
 ///
-/// Side effects: replaces any running `androfuse` instance; opens outbound peer connections and
-/// loopback listeners for the configured forwards.
+/// Side effects: replaces a running instance of the same name, leaving others alone; opens
+/// outbound peer connections and loopback listeners for the configured forwards.
 pub fn start(cfg: &MeshConfig) -> Result<MeshStatus, String> {
     let toml = build_toml(cfg)?;
-    let _guard = LIFECYCLE.lock().unwrap_or_else(|p| p.into_inner());
-    if STARTED.load(Ordering::SeqCst) {
-        delete_instance()?;
+    let instance = instance_name(&cfg.instance)?;
+    {
+        let mut started = STARTED.lock().unwrap_or_else(|p| p.into_inner());
+        if started.contains(&instance) {
+            delete_instance(&instance)?;
+        } else if started.len() >= MAX_INSTANCES {
+            return Err(format!("at most {MAX_INSTANCES} networks can run at once"));
+        } else {
+            started.push(instance.clone());
+        }
+        let c = CString::new(toml).map_err(|_| "config contains a NUL byte".to_string())?;
+        // SAFETY: `c` is a valid NUL-terminated string that outlives the call; easytier-ffi copies it.
+        if unsafe { easytier_ffi::run_network_instance(c.as_ptr()) } != 0 {
+            let err = last_error("start mesh");
+            started.retain(|n| n != &instance);
+            return Err(err);
+        }
     }
-    let c = CString::new(toml).map_err(|_| "config contains a NUL byte".to_string())?;
-    STARTED.store(true, Ordering::SeqCst);
-    // SAFETY: `c` is a valid NUL-terminated string that outlives the call; easytier-ffi copies it.
-    if unsafe { easytier_ffi::run_network_instance(c.as_ptr()) } != 0 {
-        return Err(last_error("start mesh"));
-    }
-    Ok(status())
+    Ok(status(&instance))
 }
 
-/// Stops the embedded mesh; a no-op when it is not running.
-pub fn stop() -> Result<(), String> {
-    if !STARTED.load(Ordering::SeqCst) {
-        return Ok(());
+/// Stops the named mesh instance, or every instance when instance is None; stopping one that is
+/// not running is not an error.
+pub fn stop(instance: Option<&str>) -> Result<(), String> {
+    let mut started = STARTED.lock().unwrap_or_else(|p| p.into_inner());
+    let names: Vec<String> = match instance {
+        Some(n) => {
+            let n = instance_name(n)?;
+            if started.contains(&n) {
+                vec![n]
+            } else {
+                Vec::new()
+            }
+        }
+        None => started.clone(),
+    };
+    for n in names {
+        delete_instance(&n)?;
+        started.retain(|s| s != &n);
     }
-    let _guard = LIFECYCLE.lock().unwrap_or_else(|p| p.into_inner());
-    delete_instance()
+    Ok(())
 }
 
-/// Reports whether the mesh instance is running, with EasyTier's running info when it is.
-pub fn status() -> MeshStatus {
-    if !STARTED.load(Ordering::SeqCst) {
-        return MeshStatus {
-            engine: ENGINE,
-            ..MeshStatus::default()
-        };
-    }
-    let mut infos = [easytier_ffi::KeyValuePair {
-        key: std::ptr::null(),
-        value: std::ptr::null(),
-    }; 4];
-    // SAFETY: `infos` is writable storage for `infos.len()` pairs; easytier-ffi allocates each
-    // written key/value, and every one is released below with `free_string`.
-    let n = unsafe { easytier_ffi::collect_network_infos(infos.as_mut_ptr(), infos.len()) };
+/// Reports whether the named mesh instance is running, with EasyTier's running info when it is.
+pub fn status(instance: &str) -> MeshStatus {
     let mut out = MeshStatus {
         engine: ENGINE,
         ..MeshStatus::default()
     };
+    let Ok(instance) = instance_name(instance) else {
+        return out;
+    };
+    if !STARTED
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .contains(&instance)
+    {
+        return out;
+    }
+    let mut infos = [easytier_ffi::KeyValuePair {
+        key: std::ptr::null(),
+        value: std::ptr::null(),
+    }; MAX_INSTANCES * 2];
+    // SAFETY: `infos` is writable storage for `infos.len()` pairs; easytier-ffi allocates each
+    // written key/value, and every one is released below with `free_string`.
+    let n = unsafe { easytier_ffi::collect_network_infos(infos.as_mut_ptr(), infos.len()) };
     for kv in infos.iter().take(n.max(0) as usize) {
         let key = take_string(kv.key);
         let value = take_string(kv.value);
-        if key == INSTANCE_NAME {
+        if key == instance {
             out.running = true;
             out.info = serde_json::from_str(&value).ok();
             out.error = out
@@ -213,8 +273,8 @@ pub fn status() -> MeshStatus {
 }
 
 /// Deletes the named instance; succeeds when none exists.
-fn delete_instance() -> Result<(), String> {
-    let name = CString::new(INSTANCE_NAME).map_err(|e| e.to_string())?;
+fn delete_instance(instance: &str) -> Result<(), String> {
+    let name = CString::new(instance).map_err(|e| e.to_string())?;
     let names = [name.as_ptr()];
     // SAFETY: `names` holds one valid NUL-terminated string pointer that outlives the call.
     if unsafe { easytier_ffi::delete_network_instance(names.as_ptr(), names.len()) } != 0 {
@@ -247,6 +307,11 @@ fn last_error(what: &str) -> String {
     }
 }
 
+/// Serializes tests that stop every mesh instance (the C ABI's `androfuse_stop`) with tests that
+/// run instances, since the test harness runs them on parallel threads of one process.
+#[cfg(test)]
+pub(crate) static TEST_INSTANCES: Mutex<()> = Mutex::new(());
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -254,6 +319,7 @@ mod tests {
     #[test]
     fn build_toml_is_no_tun_loopback_only_and_escapes_secrets() {
         let cfg = MeshConfig {
+            instance: String::new(),
             network_name: "my-devices".into(),
             network_secret: "p\"w\\d".into(),
             device_name: "Fold 8".into(),
@@ -265,8 +331,11 @@ mod tests {
                 remote_port: 37000,
             }],
             low_power: false,
+            disable_p2p: true,
+            latency_first: true,
         };
         let t = build_toml(&cfg).unwrap();
+        assert!(t.contains("disable_p2p = true") && t.contains("latency_first = true"));
         assert!(t.contains("[flags]\nno_tun = true"));
         assert!(t.contains("network_secret = \"p\\\"w\\\\d\""));
         assert!(t.contains("bind_addr = \"127.0.0.1:41235\""));
@@ -311,9 +380,77 @@ mod tests {
 
     #[test]
     fn status_is_stopped_by_default_and_stop_is_idempotent() {
-        assert!(stop().is_ok());
-        let st = status();
+        // Other tests in this binary run instances concurrently, so only unused names are touched.
+        assert!(stop(Some("never-started")).is_ok());
+        let st = status("never-started");
         assert!(!st.running);
         assert_eq!(st.engine, ENGINE);
+        assert!(instance_name("bad name!").is_err());
+        assert_eq!(instance_name("").unwrap(), DEFAULT_INSTANCE);
+    }
+
+    #[test]
+    fn two_instances_run_side_by_side_and_see_each_other() {
+        let _serial = TEST_INSTANCES.lock().unwrap_or_else(|p| p.into_inner());
+        // EasyTier binds outbound peer sockets to physical interfaces, so the peer is dialled on
+        // this machine's LAN address (found without sending anything), not 127.0.0.1.
+        let lan = std::net::UdpSocket::bind("0.0.0.0:0")
+            .and_then(|s| s.connect("192.0.2.1:9").map(|_| s))
+            .and_then(|s| s.local_addr())
+            .map(|a| a.ip())
+            .unwrap();
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .and_then(|l| l.local_addr())
+            .map(|a| a.port())
+            .unwrap();
+        let base = MeshConfig {
+            network_name: "af-test-two".into(),
+            network_secret: "two-instance-secret".into(),
+            ..MeshConfig::default()
+        };
+        start(&MeshConfig {
+            instance: "af-a".into(),
+            device_name: "node-a".into(),
+            listeners: vec![format!("tcp://0.0.0.0:{port}")],
+            ..base.clone()
+        })
+        .unwrap();
+        start(&MeshConfig {
+            instance: "af-b".into(),
+            device_name: "node-b".into(),
+            peers: vec![format!("tcp://{lan}:{port}")],
+            ..base
+        })
+        .unwrap();
+        let mut seen = false;
+        for _ in 0..40 {
+            let st = status("af-b");
+            let routes = st
+                .info
+                .as_ref()
+                .and_then(|i| i.get("routes"))
+                .and_then(|r| r.as_array())
+                .cloned()
+                .unwrap_or_default();
+            if routes
+                .iter()
+                .any(|r| r.get("hostname").and_then(|h| h.as_str()) == Some("node-a"))
+            {
+                seen = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(250));
+        }
+        if !seen {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&status("af-b").info).unwrap_or_default()
+            );
+        }
+        assert!(status("af-a").running);
+        assert!(stop(Some("af-a")).is_ok());
+        assert!(!status("af-a").running);
+        assert!(stop(Some("af-b")).is_ok());
+        assert!(seen, "node-b never saw node-a");
     }
 }

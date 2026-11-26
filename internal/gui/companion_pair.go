@@ -67,7 +67,10 @@ func (a *App) PairCompanionOverADB(serial, model string, joinMesh bool) {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
-		c, addr, res, err := pairOverADB(ctx, client, serial, apk, note)
+		defer a.update(func() { a.pairingCode = "" })
+		c, addr, res, err := pairOverADB(ctx, client, serial, apk, note, func(code string) {
+			a.update(func() { a.pairingCode, a.pairingModel = code, model })
+		})
 		if err != nil {
 			note(err.Error())
 			return
@@ -80,16 +83,8 @@ func (a *App) PairCompanionOverADB(serial, model string, joinMesh bool) {
 		if old != nil {
 			_ = old.Close()
 		}
-		a.update(func() {
-			a.compConnected = true
-			a.compStatus = st
-			a.compAddr = addr
-			a.compToken = res.Token
-			a.compNotice = L.CompanionPaired(model)
-		})
-
+		cfg, inNet := a.pairNetworkConfig()
 		a.mu.Lock()
-		cfg := a.rt.meshCfg
 		hash := ""
 		for _, d := range a.devices {
 			for _, tr := range d.Transports {
@@ -99,10 +94,20 @@ func (a *App) PairCompanionOverADB(serial, model string, joinMesh bool) {
 			}
 		}
 		a.mu.Unlock()
+		a.update(func() {
+			a.compConnected = true
+			a.compHash = hash
+			a.compStatus = st
+			a.compAddr = addr
+			a.compToken = res.Token
+			a.compNotice = L.CompanionPaired(model)
+		})
+		a.notify(L.CompanionPaired(model))
 		if hash != "" && res.Port > 0 {
 			a.bindCompanion(hash, res.Port, res.CertFingerprint, res.Token, res.Model)
 		}
-		if !joinMesh || cfg.NetworkName == "" {
+		if !joinMesh || !inNet {
+			a.RefreshDevices()
 			return
 		}
 		jr, err := c.JoinMesh(ctx, companion.MeshJoinRequest{
@@ -116,7 +121,7 @@ func (a *App) PairCompanionOverADB(serial, model string, joinMesh bool) {
 		case jr.Message != "":
 			note(jr.Message)
 		default:
-			note(L.CompanionMeshJoined(model, cfg.NetworkName))
+			note(L.CompanionMeshJoined(model, a.pairNetworkName()))
 		}
 	}()
 }
@@ -126,7 +131,7 @@ func (a *App) PairCompanionOverADB(serial, model string, joinMesh bool) {
 // (reported through progress), retrying while the phone's service starts.
 // Returns: the authenticated client, its forwarded loopback address and the pairing result.
 // Side effects: `adb install -r`, `am start`, an `adb forward` kept for the session.
-func pairOverADB(ctx context.Context, client *adb.Client, serial, apk string, progress func(string)) (*companion.Client, string, companion.PairResponse, error) {
+func pairOverADB(ctx context.Context, client *adb.Client, serial, apk string, progress, onCode func(string)) (*companion.Client, string, companion.PairResponse, error) {
 	var res companion.PairResponse
 	progress(L.CompanionInstalling())
 	if out, err := client.Run(ctx, "-s", serial, "install", "-r", apk); err != nil || !strings.Contains(out, "Success") {
@@ -143,6 +148,9 @@ func pairOverADB(ctx context.Context, client *adb.Client, serial, apk string, pr
 		return nil, "", res, err
 	}
 	progress(L.CompanionConfirmCode(code))
+	if onCode != nil {
+		onCode(code)
+	}
 	host, _ := os.Hostname()
 	for deadline := time.Now().Add(companion.PairWait + 30*time.Second); ; {
 		pctx, pcancel := context.WithTimeout(ctx, companion.PairWait+5*time.Second)
@@ -260,6 +268,7 @@ func (a *App) ReconnectCompanion(hash string) {
 		}
 		a.update(func() {
 			a.compConnected = true
+			a.compHash = hash
 			a.compStatus = st
 			a.compAddr = addr
 			a.compToken = string(tok)
@@ -278,7 +287,6 @@ func (a *App) companionRoute(ctx context.Context, hash string, b CompanionBindin
 			serial = d.Target.Serial
 		}
 	}
-	cfg := a.rt.meshCfg
 	a.mu.Unlock()
 	if serial != "" {
 		client, _, err := a.ensureADBAndLeases()
@@ -292,33 +300,14 @@ func (a *App) companionRoute(ctx context.Context, hash string, b CompanionBindin
 		return fmt.Sprintf("127.0.0.1:%d", port), nil
 	}
 
-	a.rt.coreMu.Lock()
-	mgr := a.rt.meshMgr
-	a.rt.coreMu.Unlock()
-	if mgr == nil || cfg.NetworkName == "" || b.MeshHost == "" {
-		return "", errors.New(L.CompanionNoRoute())
-	}
-	ip, ok := mgr.PeerIPv4(b.MeshHost)
+	id, ip, ok := a.meshPeerIPv4(b.MeshHost)
 	if !ok {
 		return "", errors.New(L.CompanionNoRoute())
 	}
-	for _, pf := range cfg.PortForwards {
-		if pf.RemoteHost == ip && pf.RemotePort == b.Port {
-			return fmt.Sprintf("127.0.0.1:%d", pf.LocalPort), nil
-		}
-	}
-	local, err := companion.PickPort(0)
+	local, err := a.meshForward(id, ip, b.Port)
 	if err != nil {
 		return "", err
 	}
-	cfg.PortForwards = append(cfg.PortForwards, mesh.PortForward{LocalPort: local, RemoteHost: ip, RemotePort: b.Port})
-	if err := mgr.Start(cfg); err != nil {
-		return "", err
-	}
-	a.mu.Lock()
-	a.rt.meshCfg = cfg
-	a.meshStatus = mgr.Status()
-	a.mu.Unlock()
 	return fmt.Sprintf("127.0.0.1:%d", local), nil
 }
 

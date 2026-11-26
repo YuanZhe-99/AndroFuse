@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"net"
 	"net/netip"
@@ -36,6 +37,14 @@ type Handler struct {
 	OnDisplayGuard      func(DisplayGuardRequest) (DisplayGuardResponse, error)
 	OnMediaFrame        func(MediaFrameRequest) (MediaFrameResponse, error)
 	OnMeshJoin          func(MeshJoinRequest) (MeshJoinResponse, error)
+	// OnTunnel opens a loopback connection to this phone's Wireless debugging port for a
+	// "tunnel.open" request; it refuses any other port (`INV-07`).
+	OnTunnel func(port int) (net.Conn, error)
+	// OnShare starts screen sharing (after Android's consent) and returns a connection carrying
+	// the H.264 stream in scrcpy framing.
+	OnShare func() (net.Conn, error)
+	// OnKey runs "back", "home" or "recents" on the phone while it shares its screen.
+	OnKey func(action string) error
 	// OnPairRequest asks the phone's user to allow an adb-connected desktop; it blocks until
 	// they answer (or the host gives up) and reports whether they allowed it.
 	OnPairRequest func(PairRequest) bool
@@ -326,6 +335,14 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 			_ = enc.Encode(Envelope{Type: "error", Error: fmt.Sprintf("invalid json: %v", err)})
 			continue
 		}
+		if env.Type == "tunnel.open" {
+			s.serveTunnel(conn, enc, env)
+			return
+		}
+		if env.Type == "share.open" {
+			s.serveShare(conn, enc, env)
+			return
+		}
 		resp := s.dispatch(env)
 		if err := enc.Encode(resp); err != nil {
 			return
@@ -336,6 +353,16 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 func (s *Server) dispatch(env Envelope) Envelope {
 	perms := s.permissions()
 	switch env.Type {
+	case "input.key":
+		var req KeyRequest
+		_ = json.Unmarshal(env.Payload, &req)
+		if !perms.ScreenShare || s.handler.OnKey == nil {
+			return Envelope{ID: env.ID, Type: "input.res", Error: "screen sharing permission disabled"}
+		}
+		if err := s.handler.OnKey(req.Action); err != nil {
+			return Envelope{ID: env.ID, Type: "input.res", Error: err.Error()}
+		}
+		return Envelope{ID: env.ID, Type: "input.res"}
 	case "status.get":
 		if !perms.Telemetry {
 			return Envelope{ID: env.ID, Type: "status.res", Error: "telemetry permission disabled"}
@@ -774,4 +801,139 @@ func (s *Server) tcpPort() int {
 		return int(ap.Port())
 	}
 	return 0
+}
+
+// TunnelRequest asks the Companion to join this connection to its own Wireless debugging port.
+type TunnelRequest struct {
+	Port int `json:"port"`
+}
+
+// serveTunnel answers "tunnel.open": after a successful reply the connection stops carrying
+// NDJSON and becomes a byte pipe to the phone's Wireless debugging port, until either side closes.
+// Notes: needs the cross-network port helper permission; the handler only accepts the port that
+// answers as Wireless debugging (`INV-07`). The desktop sends nothing until it reads the reply, so
+// no tunnel bytes sit in the line scanner.
+func (s *Server) serveTunnel(conn net.Conn, enc *json.Encoder, env Envelope) {
+	var req TunnelRequest
+	_ = json.Unmarshal(env.Payload, &req)
+	if !s.permissions().ADBBeacon || s.handler.OnTunnel == nil {
+		_ = enc.Encode(Envelope{ID: env.ID, Type: "tunnel.res", Error: "cross-network port helper permission disabled"})
+		return
+	}
+	target, err := s.handler.OnTunnel(req.Port)
+	if err != nil {
+		_ = enc.Encode(Envelope{ID: env.ID, Type: "tunnel.res", Error: err.Error()})
+		return
+	}
+	defer target.Close()
+	if err := enc.Encode(Envelope{ID: env.ID, Type: "tunnel.res"}); err != nil {
+		return
+	}
+	pipe(conn, target)
+}
+
+// pipe copies both ways between a and b until one side ends, then closes both.
+func pipe(a, b net.Conn) {
+	done := make(chan struct{}, 2)
+	go func() { _, _ = io.Copy(a, b); done <- struct{}{} }()
+	go func() { _, _ = io.Copy(b, a); done <- struct{}{} }()
+	<-done
+	_ = a.Close()
+	_ = b.Close()
+	<-done
+}
+
+// DialTunnel opens a new authenticated connection to the Companion at addr and turns it into a
+// byte pipe to the phone's Wireless debugging port (see serveTunnel).
+// Returns: the connection, which the caller closes.
+func DialTunnel(ctx context.Context, addr, token, fingerprint string, port int) (net.Conn, error) {
+	c, err := Dial(ctx, addr, token, fingerprint)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.call(ctx, "tunnel.open", TunnelRequest{Port: port}, nil); err != nil {
+		_ = c.Close()
+		return nil, err
+	}
+	return c.conn, nil
+}
+
+// ServeTunnels listens on a free loopback port and joins each connection to a new tunnel to the
+// Companion at addr, so adb can reach the phone's Wireless debugging port as 127.0.0.1:<port>.
+// Returns: the loopback address; the listener and its tunnels stop when ctx ends.
+func ServeTunnels(ctx context.Context, addr, token, fingerprint string, port int) (string, error) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return "", err
+	}
+	go func() {
+		<-ctx.Done()
+		_ = ln.Close()
+	}()
+	go func() {
+		for {
+			local, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				dctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+				remote, err := DialTunnel(dctx, addr, token, fingerprint, port)
+				cancel()
+				if err != nil {
+					_ = local.Close()
+					return
+				}
+				pipe(local, remote)
+			}()
+		}
+	}()
+	return ln.Addr().String(), nil
+}
+
+// KeyRequest is "back", "home" or "recents" for a phone sharing its screen.
+type KeyRequest struct {
+	Action string `json:"action"`
+}
+
+// serveShare answers "share.open": once the phone's user allows capture, the connection stops
+// carrying NDJSON and carries the screen's H.264 stream in scrcpy framing until either side ends.
+func (s *Server) serveShare(conn net.Conn, enc *json.Encoder, env Envelope) {
+	if !s.permissions().ScreenShare || s.handler.OnShare == nil {
+		_ = enc.Encode(Envelope{ID: env.ID, Type: "share.res", Error: "screen sharing permission disabled"})
+		return
+	}
+	_ = conn.SetDeadline(time.Time{})
+	stream, err := s.handler.OnShare()
+	if err != nil {
+		_ = enc.Encode(Envelope{ID: env.ID, Type: "share.res", Error: err.Error()})
+		return
+	}
+	defer stream.Close()
+	if err := enc.Encode(Envelope{ID: env.ID, Type: "share.res"}); err != nil {
+		return
+	}
+	pipe(conn, stream)
+}
+
+// DialShare opens a new authenticated connection to the Companion at addr and asks it to share its
+// screen; it waits while the phone's user answers Android's consent dialog.
+// Returns: the stream (scrcpy framing: device name, codec, a session packet, media packets).
+func DialShare(ctx context.Context, addr, token, fingerprint string) (net.Conn, error) {
+	c, err := Dial(ctx, addr, token, fingerprint)
+	if err != nil {
+		return nil, err
+	}
+	wait, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	if err := c.call(wait, "share.open", struct{}{}, nil); err != nil {
+		_ = c.Close()
+		return nil, err
+	}
+	return c.conn, nil
+}
+
+// Key runs Back, Home or Recents on a phone sharing its screen.
+func (c *Client) Key(ctx context.Context, action string) error {
+	return c.call(ctx, "input.key", KeyRequest{Action: action}, nil)
 }

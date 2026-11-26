@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>AndroFuse V3 · 窗格</title>
+<link rel="stylesheet" href="common.css">
+<style>
+  .pop { position: absolute; z-index: 30; width: 300px; background: var(--raised); border-radius: var(--r-lg); box-shadow: var(--shadow-pop); padding: 14px; font-size: 13px; }
+  .pop .kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; }
+  .pop .k { color: var(--tx3); }
+  .pop .big { font-size: 28px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1; }
+  .infostrip { flex: none; display: flex; align-items: center; gap: 8px; padding: 8px 12px; font-size: 13px; color: var(--tx2); background: var(--sunk); border-bottom: 1px solid var(--divider); }
+  .appicon { width: 20px; height: 20px; border-radius: 5px; background: #07c160; flex: none; }
+</style>
+</head>
+<body>
+<div class="stagehead"><a href="index.html">← 目录</a><b>窗格 · 分屏 · 画面信息</b><span class="sp"></span><button data-theme-toggle>浅色 / 深色</button></div>
+<div class="artboards">
+<div>
+<p class="cap"><b>三星 DeX 与应用窗口分屏。</b>每个窗格只有一个 44 高的标题栏（不再叠一层窗口标题）：左边是名字和方式，中间是手机按键与工具，右边是弹出、分屏、关闭；窗口按钮画在右上角窗格的标题栏末尾。画面信息不再盖在画面上，收成标题栏里的一个小标签，点开看详情（实测帧率与目标分开写）。窄于 560 的窗格把工具收进 ⋯。窗格上方的卡片用于需要你决定的事。</p>
+<div class="win">
+  <aside class="side">
+    <div class="side-top"><button class="ib"><i data-i="sidebar"></i></button><span class="sp"></span><button class="ib"><i data-i="plus"></i></button></div>
+    <div class="nav"><span class="mark"></span><span class="t">主页</span></div>
+    <div class="side-label"><span>已打开</span><span class="num">3</span></div>
+    <div class="group">
+      <div class="gtitle ell">我的折叠屏</div>
+      <div class="nav on"><i data-i="dex"></i><span class="t ell">三星 DeX</span></div>
+      <div class="nav"><span class="appicon" style="width:18px;height:18px"></span><span class="t ell">微信</span></div>
+    </div>
+    <div class="nav"><span class="av sm" data-dev="Google||"></span><span class="t ell">Pixel 8 Pro</span><span class="k">手机屏幕</span></div>
+    <div class="side-scroll"></div>
+    <div class="side-foot"><div class="netstate"><span class="dot ok"></span><span class="ell">跨网络 · 已连接</span></div><button class="ib"><i data-i="search"></i></button><button class="ib"><i data-i="auto"></i></button><button class="ib"><i data-i="gear"></i></button></div>
+  </aside>
+  <main class="panes">
+    <div class="notice">
+      <span class="tile acc"><i data-i="spark" class="s"></i></span>
+      <div class="tx"><div class="t1 ell">本机助手想在「我的折叠屏」上打开微信</div><div class="t2 ell">来自 Claude · 只允许这一次，之后还会再问</div></div>
+      <button class="btn">拒绝</button><button class="btn pri">允许一次</button>
+    </div>
+    <div class="panes prow" style="padding:0; flex:1; min-height:0">
+      <section class="pane focus" style="flex: 1.9">
+        <header class="ph">
+          <div class="who"><i data-i="dex"></i><div class="names"><div class="n1 ell">我的折叠屏</div><div class="n2 ell">三星 DeX · USB</div></div></div>
+          <span class="grow"></span>
+          <div class="tools">
+            <button class="ib" title="返回"><i data-i="back"></i></button><button class="ib" title="主屏幕"><i data-i="circle"></i></button><button class="ib" title="最近任务"><i data-i="recents"></i></button>
+            <span class="vsep"></span>
+            <button class="ib" title="截图"><i data-i="shot"></i></button><button class="ib" title="发送剪贴板"><i data-i="clip"></i></button><button class="ib" title="全屏 (F11)"><i data-i="full"></i></button><button class="ib" title="更多：录屏、声音、关闭手机屏幕、旋转"><i data-i="more"></i></button>
+          </div>
+          <span class="vsep"></span>
+          <span class="telem" style="outline:2px solid var(--accent-tint)"><span class="dot ok"></span>59.8 fps</span>
+          <span class="grow"></span>
+          <button class="ib" title="在独立窗口打开"><i data-i="popout"></i></button><button class="ib" title="向右分屏"><i data-i="splitR"></i></button><button class="ib" title="向下分屏"><i data-i="splitD"></i></button><button class="ib" title="关闭"><i data-i="close"></i></button>
+        </header>
+        <div class="stage">
+          <div class="screen" style="width:92%; aspect-ratio:16/9">
+            <div class="dexwin" style="left:8%; top:10%; width:42%; height:55%"></div>
+            <div class="dexwin" style="left:46%; top:22%; width:38%; height:50%"></div>
+            <div class="dexbar"><i></i><i></i><i></i><i></i><i></i></div>
+          </div>
+        </div>
+        <div class="pop" style="left:300px; top:48px; width:340px">
+          <div style="display:flex; align-items:baseline; gap:8px; margin-bottom:10px"><span class="big">59.8</span><span>fps 实测</span><span class="muted">目标 60，不保证</span></div>
+          <div class="kv num">
+            <span class="k">画面</span><span>1920×1080（手机实际输出）</span>
+            <span class="k">解码</span><span>H.265 · 硬件 · 每帧 3.2 ms</span>
+            <span class="k">码率</span><span>11.4 Mbps</span>
+            <span class="k">连接</span><span>USB，断开后自动切到 Wi-Fi</span>
+            <span class="k">方式</span><span>三星 DeX（手机自带桌面）</span>
+          </div>
+        </div>
+      </section>
+      <section class="pane" style="flex: 1">
+        <header class="ph">
+          <div class="who"><span class="appicon"></span><div class="names"><div class="n1 ell">微信</div><div class="n2 ell">我的折叠屏 · 应用窗口</div></div></div>
+          <span class="grow"></span>
+          <button class="ib" title="更多：返回、截图、30 fps 等"><i data-i="more"></i></button><button class="ib" title="关闭"><i data-i="close"></i></button>
+          <span class="vsep"></span>
+          <div class="winbtns"><span><i data-i="min" class="s"></i></span><span><i data-i="max" class="s"></i></span><span class="x"><i data-i="close" class="s"></i></span></div>
+        </header>
+        <div class="stage"><div class="screen" style="height:92%; aspect-ratio:9/16; background:linear-gradient(#ededed,#ededed)"><div style="height:8%; background:#e5e5e5"></div></div></div>
+      </section>
+    </div>
+  </main>
+</div>
+</div>
+
+<div>
+<p class="cap"><b>深色 · 手机在移动网络上（跨网络，没有 Wi-Fi）。</b>无线调试只在 Wi-Fi 下工作，所以这时由 AndroFuse 伴侣共享屏幕：标题栏写明方式，窗格顶部一条说明能做什么、不能做什么，不冒充普通的手机屏幕。分屏按钮弹出其他窗格的列表和「打开设备…」。</p>
+<div class="win dark">
+  <aside class="side rail">
+    <div class="side-top"><button class="ib"><i data-i="sidebar"></i></button></div>
+    <button class="ib"><i data-i="plus"></i></button>
+    <div class="nav"><span class="mark"></span></div>
+    <div class="nav on"><span class="av sm" data-dev="Google||"></span></div>
+    <div class="side-scroll"></div>
+    <div class="side-foot"><button class="ib"><i data-i="search"></i></button><button class="ib"><i data-i="gear"></i></button><span class="dot ok" style="margin:10px"></span></div>
+  </aside>
+  <main class="panes">
+    <section class="pane">
+      <header class="ph">
+        <div class="who"><span class="av sm" data-dev="Google||"></span><div class="names"><div class="n1 ell">Pixel 8 Pro</div><div class="n2 ell">伴侣共享屏幕 · 跨网络 · 中继</div></div></div>
+        <span class="grow"></span>
+        <div class="tools"><button class="ib"><i data-i="back"></i></button><button class="ib"><i data-i="circle"></i></button><button class="ib"><i data-i="recents"></i></button><span class="vsep"></span><button class="ib"><i data-i="shot"></i></button><button class="ib"><i data-i="clip"></i></button><button class="ib"><i data-i="full"></i></button></div>
+        <span class="vsep"></span>
+        <span class="telem"><span class="dot warn"></span>24 fps · 48 ms</span>
+        <span class="grow"></span>
+        <button class="ib"><i data-i="popout"></i></button><button class="ib on"><i data-i="splitR"></i></button><button class="ib"><i data-i="splitD"></i></button><button class="ib"><i data-i="close"></i></button>
+        <span class="vsep"></span>
+        <div class="winbtns"><span><i data-i="min" class="s"></i></span><span><i data-i="max" class="s"></i></span><span class="x"><i data-i="close" class="s"></i></span></div>
+      </header>
+      <div class="infostrip"><i data-i="info" class="s"></i><span class="ell">手机在移动网络上，由 AndroFuse 伴侣共享屏幕：可以看、点和输入文字；声音、三星 DeX 和应用窗口要等手机连上 Wi-Fi。</span></div>
+      <div class="stage"><div class="screen" style="height:90%; aspect-ratio:9/19.5"></div></div>
+      <div class="menu" style="right:200px; top:44px; width:260px">
+        <div class="mlabel">放在右边</div>
+        <div class="mi"><i data-i="dex" class="s"></i><span class="t">我的折叠屏 · 三星 DeX</span></div>
+        <div class="mi"><span class="appicon" style="width:16px;height:16px"></span><span class="t">我的折叠屏 · 微信</span></div>
+        <div class="msep"></div>
+        <div class="mi hl"><i data-i="plus" class="s"></i><span class="t">打开设备…</span></div>
+      </div>
+    </section>
+  </main>
+</div>
+</div>
+</div>
+<script src="logos.js"></script>
+<script src="common.js"></script>
+</body>
+</html>

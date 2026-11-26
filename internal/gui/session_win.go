@@ -30,6 +30,9 @@ const (
 	SessionModeCamera      SessionMode = "camera"
 	SessionModeMiracastDeX SessionMode = "miracast_dex"
 	SessionModeDeXFallback SessionMode = "dex_fallback"
+	// SessionModeShare is the Companion's screen sharing on mobile data (MediaProjection), when
+	// Wireless debugging cannot run.
+	SessionModeShare SessionMode = "share"
 )
 
 // SessionSpec configures a live interactive desktop stream window.
@@ -93,34 +96,33 @@ type SessionWindow struct {
 	shown        int
 	updateQueued atomic.Bool
 
-	mu             sync.Mutex
-	services       ui.Services
-	scrcpySess     *scrcpy.Session
-	dexSess        *dex.LoopbackSession
-	miracastSess   *dex.MiracastSession
-	audioPlayer    *core.AudioPlayer
-	audioMuted     bool
-	recording      bool
-	recordPath     string
-	lastClipText   string
-	clipSeq        uint64
-	noteTimer      *time.Timer
-	touchMode      bool
-	screenOff      bool
-	hudCollapsed   bool
-	focusHudNext   bool
-	hudCloseHandle ui.Handle
-	statusNote     string
-	negotiatedW    int
-	negotiatedH    int
-	measuredFPS    float64
-	avgDecodeUs    int64
-	hwAccelerated  bool
-	codecLabel     string
-	surfaceBox     ui.Rect
-	lastResizeBox  ui.Rect
-	resizeTimer    *time.Timer
-	closing        bool
+	mu            sync.Mutex
+	services      ui.Services
+	scrcpySess    *scrcpy.Session
+	dexSess       *dex.LoopbackSession
+	miracastSess  *dex.MiracastSession
+	audioPlayer   *core.AudioPlayer
+	audioMuted    bool
+	recording     bool
+	recordPath    string
+	lastClipText  string
+	clipSeq       uint64
+	noteTimer     *time.Timer
+	touchMode     bool
+	screenOff     bool
+	telemOpen     bool                // the header's telemetry popover
+	shareKey      func(action string) // Back, Home, Recents for a Companion screen-sharing session
+	statusNote    string
+	negotiatedW   int
+	negotiatedH   int
+	measuredFPS   float64
+	avgDecodeUs   int64
+	hwAccelerated bool
+	codecLabel    string
+	surfaceBox    ui.Rect
+	lastResizeBox ui.Rect
+	resizeTimer   *time.Timer
+	closing       bool
 	// docked sessions draw in a main-window pane; docking is set while their own window
 	// closes to dock, so closing it does not end the session.
 	docked     bool
@@ -130,13 +132,12 @@ type SessionWindow struct {
 
 func newSessionWindow(app *App, spec SessionSpec) *SessionWindow {
 	sw := &SessionWindow{
-		app:          app,
-		spec:         spec,
-		bmp:          ui.NewBitmap(image.NewRGBA(image.Rect(0, 0, 1, 1))),
-		writing:      0,
-		ready:        -1,
-		shown:        -1,
-		hudCollapsed: spec.Mode == SessionModeApp,
+		app:     app,
+		spec:    spec,
+		bmp:     ui.NewBitmap(image.NewRGBA(image.Rect(0, 0, 1, 1))),
+		writing: 0,
+		ready:   -1,
+		shown:   -1,
 	}
 	return sw
 }
@@ -218,10 +219,12 @@ func (sw *SessionWindow) openWindow(w, h int) {
 		MinHeight: sessionMinH,
 		Content:   ui.View(sw.view),
 	}
-	if sw.spec.Mode == SessionModeApp && runtime.GOOS == "windows" {
+	if runtime.GOOS == "windows" {
 		opts.TitleBarStyle = mygo.TitleBarHidden
-		opts.TitleBarHeight = int(appTitleBarH)
+		opts.TitleBarHeight = int(paneHeaderH)
 		opts.HideWindowButtons = true
+	}
+	if sw.spec.Mode == SessionModeApp {
 		opts.MinWidth = appMinResizePx
 		opts.MinHeight = appMinResizePx
 	}
@@ -322,7 +325,7 @@ func (sw *SessionWindow) watchScrcpyEnd(s *scrcpy.Session) {
 	if closing || !isCurrent {
 		return
 	}
-	if canHandoff {
+	if canHandoff && sw.app.handoffOn() {
 		sw.attemptDeXGraceHandoff(s)
 		return
 	}
@@ -755,341 +758,61 @@ func (sw *SessionWindow) FocusWindow() {
 	}
 }
 
-// view is the root of sw's own window.
+// view is the root of sw's own window: the same header as its pane (with dock back and the
+// window's buttons), then the picture.
 func (sw *SessionWindow) view(c *ui.Context) {
 	c.Root().Background(ui.Hex(stageBgHex))
-	sw.content(c, false)
-}
-
-// content renders the telemetry HUD and the interactive NV12 D3D11 surface, in sw's own window
-// or, embedded, in a main-window pane whose header holds the window controls.
-func (sw *SessionWindow) content(c *ui.Context, embedded bool) {
-	sw.present()
-
-	k := tok(c)
-
-	sw.mu.Lock()
-	sw.services = c.Services()
-	collapsed := sw.hudCollapsed
-	focusHud := sw.focusHudNext
-	sw.focusHudNext = false
-	note := sw.statusNote
-	negW, negH := sw.negotiatedW, sw.negotiatedH
-	fps, decUs := sw.measuredFPS, sw.avgDecodeUs
-	hw := sw.hwAccelerated
-	codec := sw.codecLabel
-	touchMode := sw.touchMode
-	screenOff := sw.screenOff
-	audioMuted := sw.audioMuted
-	recording := sw.recording
-	win := sw.win
-	s := sw.scrcpySess
-	specTransport := sw.spec.Transport
-	specBackend := sw.spec.BackendLabel
-	specTarget := sw.spec.TargetSpec
-	sw.mu.Unlock()
-
-	if codec == "" {
-		codec = "H.264"
-	}
-	hwTag := "SW"
-	if hw {
-		hwTag = "HW"
-	}
-	resText := "--"
-	if negW > 0 && negH > 0 {
-		resText = fmt.Sprintf("%d×%d", negW, negH)
-	}
-	telem := fmt.Sprintf("%s · %s · %.1f fps · %s [%s] · %.1f ms",
-		specBackend, resText, fps, codec, hwTag, float64(decUs)/1000.0)
-
-	ui.Column(c.Key("session-root")).Fill().AlignItems(ui.Stretch).Children(func() {
-		if sw.spec.Mode == SessionModeApp && !embedded {
-			sw.appTitleBar(c, k)
-		}
-		if !collapsed {
-			ui.Row(c.Key("session-hud")).Height(hudHeight).Shrink(0).FillWidth().
-				Background(ui.Hex(hudBgDark)).Padding(6, 12).Gap(8).AlignItems(ui.Center).Children(func() {
-				if embedded {
-					// The pane header already shows the transport and measured telemetry.
-					ui.Text(c, telem).FontSize(sizeSmall).TextColor(ui.Hex("#9AA4AE")).Grow(1).SingleLine().
-						Tooltip(L.TelemetryTargetPrefix(specTarget))
-				} else {
-					ui.Row(c.Key("hud-transport-pill")).Padding(badgePadV, badgePadH).Radius(pillRadius).
-						Background(k.brandSoft).Children(func() {
-						ui.Text(c, specTransport).FontSize(sizeSmall).TextColor(k.brand).Bold().SingleLine()
-					})
-					ui.Text(c, telem).FontSize(sizeSmall).TextColor(ui.Hex("#E6EEF2")).Grow(1).SingleLine().
-						Tooltip(L.TelemetryTargetPrefix(specTarget))
-				}
-
-				if s != nil {
-					modeLbl := L.InputModeMouse()
-					if touchMode {
-						modeLbl = L.InputModeTouch()
-					}
-					if ui.Button(c.Key("hud-input-mode"), modeLbl).Clicked() {
-						sw.mu.Lock()
-						sw.touchMode = !sw.touchMode
-						sw.mu.Unlock()
-						sw.surface.Focus(c)
-					}
-					if ui.Button(c.Key("hud-back"), "").Tooltip(L.ActionBack()).Children(func() {
-						ui.Icon(c, iconBack).Size(14, 14)
-					}).Clicked() {
-						go func() { _ = s.TapKeycode(scrcpy.KeycodeBack) }()
-						sw.surface.Focus(c)
-					}
-					if ui.Button(c.Key("hud-home"), "").Tooltip(L.ActionHome()).Children(func() {
-						ui.Icon(c, iconHome).Size(14, 14)
-					}).Clicked() {
-						go func() { _ = s.TapKeycode(scrcpy.KeycodeHome) }()
-						sw.surface.Focus(c)
-					}
-					if ui.Button(c.Key("hud-recents"), "").Tooltip(L.ActionRecents()).Children(func() {
-						ui.Icon(c, iconRecents).Size(14, 14)
-					}).Clicked() {
-						go func() { _ = s.TapKeycode(scrcpy.KeycodeAppSwitch) }()
-						sw.surface.Focus(c)
-					}
-					if !sw.spec.IsDeX {
-						if ui.Button(c.Key("hud-rotate"), "").Tooltip(L.ActionRotate()).Children(func() {
-							ui.Icon(c, iconRotate).Size(14, 14)
-						}).Clicked() {
-							go func() { _ = s.RotateDevice() }()
-							sw.surface.Focus(c)
-						}
-					}
-					if sw.spec.ScreenOffCap {
-						if ui.Button(c.Key("hud-screenoff"), "").Tooltip(L.ActionScreenOff()).Children(func() {
-							ui.Icon(c, iconScreenOff).Size(14, 14)
-						}).Clicked() {
-							next := !screenOff
-							sw.mu.Lock()
-							sw.screenOff = next
-							sw.mu.Unlock()
-							go func() { _ = s.SetDisplayPower(!next) }()
-							sw.surface.Focus(c)
-						}
-					}
-					if ui.Button(c.Key("hud-shot"), "").Tooltip(L.ActionScreenshot()).Children(func() {
-						ui.Icon(c, iconCamera).Size(14, 14)
-					}).Clicked() {
-						sw.Screenshot()
-						sw.surface.Focus(c)
-					}
-					recTip := L.ActionRecordStart()
-					if recording {
-						recTip = L.ActionRecordStop()
-					}
-					if ui.Button(c.Key("hud-rec"), "").Tooltip(recTip).Children(func() {
-						rcColor := ui.Hex("#CBD5E1")
-						if recording {
-							rcColor = k.bad
-						}
-						ui.Icon(c, iconRecord).Size(14, 14).TextColor(rcColor)
-					}).Clicked() {
-						sw.ToggleRecording()
-						sw.surface.Focus(c)
-					}
-					if ui.Button(c.Key("hud-clip"), "").Tooltip(L.ActionSyncClipboard()).Children(func() {
-						ui.Icon(c, iconClipboard).Size(14, 14)
-					}).Clicked() {
-						sw.SyncClipboardToDevice(c.ReadClipboard())
-						sw.surface.Focus(c)
-					}
-					muteIcon := iconVolumeOn
-					muteTip := L.ActionMuteAudio()
-					if audioMuted {
-						muteIcon = iconVolumeOff
-						muteTip = L.ActionUnmuteAudio()
-					}
-					if ui.Button(c.Key("hud-audio"), "").Tooltip(muteTip).Children(func() {
-						ui.Icon(c, muteIcon).Size(14, 14)
-					}).Clicked() {
-						sw.mu.Lock()
-						sw.audioMuted = !sw.audioMuted
-						sw.mu.Unlock()
-						sw.surface.Focus(c)
-					}
-				}
-				if win != nil {
-					if ui.Button(c.Key("hud-dock"), "").Tooltip(L.PaneDock()).Children(func() {
-						ui.Icon(c, iconDock).Size(14, 14)
-					}).Clicked() {
-						sw.Dock()
-						return
-					}
-					if ui.Button(c.Key("hud-fullscreen"), "").Tooltip(L.ActionFullscreen()).Children(func() {
-						ui.Icon(c, iconFullscreen).Size(14, 14)
-					}).Clicked() {
-						win.SetFullScreen(!win.IsFullScreen())
-						sw.surface.Focus(c)
-					}
-				}
-				if ui.Button(c.Key("hud-hide"), L.HudHide()).Clicked() {
-					sw.mu.Lock()
-					sw.hudCollapsed = true
-					sw.mu.Unlock()
-					sw.surface.Focus(c)
-				}
-				if !embedded && ui.Button(c.Key("hud-close"), L.ActionDisconnect()).Bind(&sw.hudCloseHandle).Clicked() {
-					sw.Close()
-				}
-			})
-			if focusHud {
-				sw.hudCloseHandle.Focus(c)
-			}
-		}
-
-		stage := ui.Box(c.Key("video-stage")).Grow(1).FillWidth().MinHeight(0).
-			Background(ui.Hex(stageBgHex)).Focusable().AutoFocus().Bind(&sw.surface).
-			HandleInput(func(ev ui.InputEvent) bool {
-				return sw.handleInput(ev)
-			})
-		box := sw.surface.Bounds(c)
-		sw.onStageBounds(box)
-
-		stage.Children(func() {
-			if negW > 0 && negH > 0 {
-				ui.Image(c.Key("video-bmp"), sw.bmp).Fill().Fit(ui.Contain)
-			}
-			if note != "" {
-				ui.Column(c.Key("stage-note")).Fill().Center().Padding(24).Gap(8).PassThrough().Children(func() {
-					ui.Text(c, sw.spec.BackendLabel).Bold().FontSize(sizeHeading).TextColor(ui.Hex("#FFFFFF"))
-					ui.Text(c, note).FontSize(sizeBody).TextColor(ui.Hex("#B8F1D2"))
-				})
-			}
-			if collapsed && (sw.spec.Mode != SessionModeApp || embedded) {
-				ui.Row(c.Key("hud-pill-open")).Absolute().Top(10).Right(10).Children(func() {
-					if ui.Button(c.Key("hud-show"), L.HudShow()).Clicked() {
-						sw.mu.Lock()
-						sw.hudCollapsed = false
-						sw.mu.Unlock()
-						sw.surface.Focus(c)
-					}
-				})
-			}
+	t := c.Theme()
+	ui.Column(c.Key("sess-own")).Fill().Background(t.Background).Children(func() {
+		sw.app.sessionHeader(c, sw, nil, false, runtime.GOOS == "windows")
+		sw.shareStrip(c)
+		ui.Column(c.Key("sess-own-body")).Grow(1).FillWidth().MinHeight(0).Background(ui.Hex(stageBgHex)).Children(func() {
+			sw.content(c, false)
 		})
 	})
 }
 
-func (sw *SessionWindow) appTitleBar(c *ui.Context, k tokens) {
-	t := c.Theme()
+// shareStrip explains, under the header of a Companion screen-sharing session, what works and
+// what waits for Wi-Fi (`INV-09`: it is not the phone screen over Wireless debugging).
+func (sw *SessionWindow) shareStrip(c *ui.Context) {
+	if sw.spec.Mode != SessionModeShare {
+		return
+	}
+	k := tok(c)
+	ui.Row(c.Key("share-strip")).FillWidth().Shrink(0).Padding(8, 12).Gap(8).AlignItems(ui.Center).Background(k.sunk).Children(func() {
+		ui.Icon(c, iconInfo).Size(14, 14).TextColor(k.text2)
+		ui.Text(c, L.ShareStrip()).FontSize(sizeSmall).TextColor(k.text2).SingleLine().MinWidth(0)
+	})
+}
+
+// content renders the interactive NV12 D3D11 surface; the telemetry and tools live in the header
+// (sessionHeader), so nothing covers the picture.
+func (sw *SessionWindow) content(c *ui.Context, embedded bool) {
+	sw.present()
+
 	sw.mu.Lock()
-	s := sw.scrcpySess
-	win := sw.win
-	collapsed := sw.hudCollapsed
-	audioMuted := sw.audioMuted
-	recording := sw.recording
+	sw.services = c.Services()
+	note := sw.statusNote
+	negW, negH := sw.negotiatedW, sw.negotiatedH
 	sw.mu.Unlock()
 
-	ui.Row(c.Key("app-titlebar")).Height(appTitleBarH).Shrink(0).FillWidth().
-		Background(ui.Hex(hudBgDark)).Padding(0, 6, 0, 10).Gap(6).AlignItems(ui.Center).Children(func() {
-		if sw.spec.AppIcon != nil {
-			ui.Image(c, sw.spec.AppIcon).Size(appTitleIconSz, appTitleIconSz).Radius(4)
-		}
-		ui.Text(c, sw.spec.Title).Bold().FontSize(sizeBody).TextColor(ui.Hex("#F1F5F9")).SingleLine().DragWindow()
-		ui.Box(c.Key("app-tb-drag")).Grow(1).FillHeight().DragWindow()
+	stage := ui.Box(c.Key("video-stage")).Grow(1).FillWidth().MinHeight(0).
+		Background(ui.Hex(stageBgHex)).Focusable().AutoFocus().Bind(&sw.surface).
+		HandleInput(func(ev ui.InputEvent) bool {
+			return sw.handleInput(ev)
+		})
+	box := sw.surface.Bounds(c)
+	sw.onStageBounds(box)
 
-		if s != nil {
-			if ui.ButtonBase(c.Key("app-tb-back")).Size(28, 26).Radius(6).Center().Tooltip(L.ActionBack()).Children(func() {
-				ui.Icon(c, iconBack).Size(14, 14).TextColor(ui.Hex("#CBD5E1"))
-			}).Clicked() {
-				go func() { _ = s.TapKeycode(scrcpy.KeycodeBack) }()
-				sw.surface.Focus(c)
-			}
-			if ui.ButtonBase(c.Key("app-tb-rotate")).Size(28, 26).Radius(6).Center().Tooltip(L.ActionRotate()).Children(func() {
-				ui.Icon(c, iconRotate).Size(13, 13).TextColor(ui.Hex("#CBD5E1"))
-			}).Clicked() {
-				go func() { _ = s.RotateDevice() }()
-				sw.surface.Focus(c)
-			}
-			if ui.ButtonBase(c.Key("app-tb-shot")).Size(28, 26).Radius(6).Center().Tooltip(L.ActionScreenshot()).Children(func() {
-				ui.Icon(c, iconCamera).Size(13, 13).TextColor(ui.Hex("#CBD5E1"))
-			}).Clicked() {
-				sw.Screenshot()
-				sw.surface.Focus(c)
-			}
-			recTip := L.ActionRecordStart()
-			recColor := ui.Hex("#CBD5E1")
-			if recording {
-				recTip = L.ActionRecordStop()
-				recColor = k.bad
-			}
-			if ui.ButtonBase(c.Key("app-tb-rec")).Size(28, 26).Radius(6).Center().Tooltip(recTip).Children(func() {
-				ui.Icon(c, iconRecord).Size(12, 12).TextColor(recColor)
-			}).Clicked() {
-				sw.ToggleRecording()
-				sw.surface.Focus(c)
-			}
-			muteIcon := iconVolumeOn
-			muteTip := L.ActionMuteAudio()
-			if audioMuted {
-				muteIcon = iconVolumeOff
-				muteTip = L.ActionUnmuteAudio()
-			}
-			if ui.ButtonBase(c.Key("app-tb-audio")).Size(28, 26).Radius(6).Center().Tooltip(muteTip).Children(func() {
-				ui.Icon(c, muteIcon).Size(13, 13).TextColor(ui.Hex("#CBD5E1"))
-			}).Clicked() {
-				sw.mu.Lock()
-				sw.audioMuted = !sw.audioMuted
-				sw.mu.Unlock()
-				sw.surface.Focus(c)
-			}
+	stage.Children(func() {
+		if negW > 0 && negH > 0 {
+			ui.Image(c.Key("video-bmp"), sw.bmp).Fill().Fit(ui.Contain)
 		}
-		if ui.ButtonBase(c.Key("app-tb-dock")).Size(28, 26).Radius(6).Center().Tooltip(L.PaneDock()).Children(func() {
-			ui.Icon(c, iconDock).Size(13, 13).TextColor(ui.Hex("#CBD5E1"))
-		}).Clicked() {
-			sw.Dock()
-			return
-		}
-		hudTip := L.HudShow()
-		if !collapsed {
-			hudTip = L.HudHide()
-		}
-		if ui.ButtonBase(c.Key("app-tb-hud")).Size(28, 26).Radius(6).Center().Tooltip(hudTip).Children(func() {
-			ui.Icon(c, iconDiagnostics).Size(13, 13).TextColor(k.brand)
-		}).Clicked() {
-			sw.mu.Lock()
-			sw.hudCollapsed = !sw.hudCollapsed
-			sw.mu.Unlock()
-			sw.surface.Focus(c)
-		}
-
-		if runtime.GOOS == "windows" {
-			btn := func(name string, glyph *ui.SVG) ui.Element {
-				b := ui.ButtonBase(c.Key("app-win-"+name)).Size(32, 26).Radius(6).Center().Shrink(0).Label(name)
-				fg := ui.Hex("#CBD5E1")
-				if b.Hovered() {
-					if name == "close" {
-						b.Background(closeHover)
-						fg = closeHoverText
-					} else {
-						b.Background(t.SurfaceHover)
-					}
-				}
-				b.Children(func() { ui.Icon(c, glyph).Size(winGlyph, winGlyph).TextColor(fg) })
-				return b
-			}
-			if btn("min", winMinimize).Clicked() && win != nil {
-				win.Minimize()
-			}
-			maximized := win != nil && win.IsMaximized()
-			maxGlyph := winMaximize
-			if maximized {
-				maxGlyph = winRestore
-			}
-			if btn("max", maxGlyph).MaximizeButton().Clicked() && win != nil {
-				if maximized {
-					win.Unmaximize()
-				} else {
-					win.Maximize()
-				}
-			}
-			if btn("close", winClose).Clicked() {
-				sw.Close()
-			}
+		if note != "" {
+			ui.Column(c.Key("stage-note")).Fill().Center().Padding(24).Gap(8).PassThrough().Children(func() {
+				ui.Text(c, sw.app.paneLabel(sw)).Bold().FontSize(sizeHeading).TextColor(ui.Hex("#FFFFFF"))
+				ui.Text(c, note).FontSize(sizeBody).TextColor(ui.Hex("#D6DEE6"))
+			})
 		}
 	})
 }
@@ -1181,14 +904,10 @@ func (sw *SessionWindow) handleInput(ev ui.InputEvent) bool {
 	case ActionNone:
 		return false
 	case ActionToggleFullscreen:
-		if win != nil {
-			win.SetFullScreen(!win.IsFullScreen())
-		}
+		sw.toggleFullScreen()
 		return true
 	case ActionReleaseFocus:
 		sw.mu.Lock()
-		sw.hudCollapsed = false
-		sw.focusHudNext = true
 		sw.statusNote = L.FocusReleasedHint()
 		sw.mu.Unlock()
 		sw.redraw()

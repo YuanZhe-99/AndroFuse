@@ -20,10 +20,14 @@ import android.content.pm.ServiceInfo
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
+import android.net.nsd.NsdManager
+import android.net.nsd.NsdServiceInfo
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import java.net.InetAddress
+import java.net.NetworkInterface
 import org.json.JSONObject
 
 /** Plugin entry point; methods run on the UI thread. */
@@ -58,6 +62,25 @@ class AndroFusePowerPlugin : MyGoPlugin {
             "watchNetwork" -> {
                 watchNetwork(ctx)
                 reply.success(currentNetwork(ctx))
+            }
+            "watchWirelessDebugging" -> {
+                watchWirelessDebugging(ctx)
+                reply.success(true)
+            }
+            "startShare" -> {
+                AndroFuseShare.start(args.optInt("maxSize", 1280), args.optInt("bitRate", 4_000_000)) { ok, why ->
+                    if (ok) reply.success(true) else reply.failure(PluginFailure(why, why))
+                }
+            }
+            "stopShare" -> {
+                AndroFuseShare.stop()
+                reply.success(true)
+            }
+            "globalAction" -> reply.success(AndroFuseShare.globalAction(args.optString("action")))
+            "accessibilityOn" -> reply.success(AndroFuseA11yService.instance != null)
+            "openAccessibility" -> {
+                AndroFuseShare.openAccessibilitySettings()
+                reply.success(true)
             }
             "state" -> {
                 val pm = ctx.getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -103,6 +126,51 @@ class AndroFusePowerPlugin : MyGoPlugin {
         cm.registerDefaultNetworkCallback(cb)
         netCallback = cb
     }
+
+    // Wireless debugging advertises itself as _adb-tls-connect._tcp on the LAN with a port the system
+    // picks anew each time it starts. The phone discovers its own advertisement (the one whose
+    // address is one of this phone's), so the computer is told the port without the user typing it.
+    private var nsdListener: NsdManager.DiscoveryListener? = null
+    private var ownAdbService: String? = null
+
+    private fun watchWirelessDebugging(ctx: Context) {
+        if (nsdListener != null) return
+        val nsd = ctx.getSystemService(Context.NSD_SERVICE) as NsdManager
+        val l = object : NsdManager.DiscoveryListener {
+            override fun onDiscoveryStarted(serviceType: String) {}
+            override fun onDiscoveryStopped(serviceType: String) {}
+            override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) { nsdListener = null }
+            override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) {}
+            override fun onServiceFound(info: NsdServiceInfo) = resolveOwn(nsd, info)
+            override fun onServiceLost(info: NsdServiceInfo) {
+                if (info.serviceName == ownAdbService) {
+                    ownAdbService = null
+                    PluginHost.emit("androfusePower", "adbPort", 0)
+                }
+            }
+        }
+        nsd.discoverServices("_adb-tls-connect._tcp", NsdManager.PROTOCOL_DNS_SD, l)
+        nsdListener = l
+    }
+
+    @Suppress("DEPRECATION")
+    private fun resolveOwn(nsd: NsdManager, info: NsdServiceInfo) {
+        nsd.resolveService(info, object : NsdManager.ResolveListener {
+            override fun onResolveFailed(s: NsdServiceInfo, errorCode: Int) {}
+            override fun onServiceResolved(s: NsdServiceInfo) {
+                val host = s.host ?: return
+                if (!isOwnAddress(host)) return
+                ownAdbService = s.serviceName
+                PluginHost.emit("androfusePower", "adbPort", s.port)
+            }
+        })
+    }
+
+    private fun isOwnAddress(a: InetAddress): Boolean = try {
+        NetworkInterface.getNetworkInterfaces()?.toList().orEmpty()
+            .flatMap { it.inetAddresses.toList() }
+            .any { it == a }
+    } catch (e: Exception) { false }
 
     private fun currentNetwork(ctx: Context): String {
         val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager

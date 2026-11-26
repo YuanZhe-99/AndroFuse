@@ -9,14 +9,25 @@ import (
 	"strings"
 	"time"
 
+	"github.com/egoist/mygo/ui"
+
 	"github.com/YuanZhe-99/AndroFuse/internal/adb"
+	L "github.com/YuanZhe-99/AndroFuse/locales"
 )
 
 // RememberedDevice is a phone AndroFuse has connected to, kept in `<stateDir>/devices.json` keyed
 // by its HardwareHash, so the Devices page can list it while offline, reconnect it and forget it.
 type RememberedDevice struct {
 	HardwareHash string `json:"hardware_hash"`
-	Name         string `json:"name"`
+	// Name is the phone's own name (see ownName); Alias, when set, is the name given on this
+	// computer, never sent anywhere, and shown instead.
+	Name  string `json:"name"`
+	Alias string `json:"alias,omitempty"`
+	// Maker, Brand and Model pick the avatar's mark; Android is the release shown under the name.
+	Maker   string `json:"maker,omitempty"`
+	Brand   string `json:"brand,omitempty"`
+	Model   string `json:"model,omitempty"`
+	Android string `json:"android,omitempty"`
 	// Endpoint is the last TLS Wireless Debugging `host:port` it was reached on.
 	Endpoint      string            `json:"endpoint,omitempty"`
 	AutoReconnect bool              `json:"auto_reconnect"`
@@ -91,23 +102,27 @@ func (a *App) rememberDevices(devs []DiscoveredDevice, now time.Time) {
 		if d.HardwareHash == "" || !d.Probed || d.Target.State != "device" || d.Target.Transport == adb.TransportEmulator {
 			continue
 		}
-		name := strings.TrimSpace(d.Profile.Model)
-		if name == "" {
-			name = d.Target.Model
-		}
+		name := ownName(d)
 		endpoint := ""
 		for _, tr := range d.Transports {
-			if tr.Transport == adb.TransportTLSWiFi && strings.Contains(tr.Serial, ":") {
+			if tr.Transport == adb.TransportTLSWiFi && strings.Contains(tr.Serial, ":") && !strings.HasPrefix(tr.Serial, "127.0.0.1:") {
 				endpoint = tr.Serial
 			}
 		}
 		i := a.rememberedIndexLocked(d.HardwareHash)
 		if i < 0 {
-			a.remembered = append(a.remembered, RememberedDevice{HardwareHash: d.HardwareHash, Name: name, Endpoint: endpoint, AutoReconnect: true, LastSeen: now})
+			a.remembered = append(a.remembered, RememberedDevice{HardwareHash: d.HardwareHash, AutoReconnect: true})
+			i = len(a.remembered) - 1
 			changed = true
-			continue
+			if d.Target.Transport == adb.TransportUSB && !a.prefs.NoCompanionOffer && a.firstConnect == nil {
+				a.firstConnect = &firstConnect{Hash: d.HardwareHash, Serial: d.Target.Serial, Name: name, Install: true, Join: true}
+			}
 		}
 		r := &a.remembered[i]
+		p := d.Profile
+		if r.Maker != p.Manufacturer || r.Brand != p.Brand || r.Model != p.Model || r.Android != p.AndroidRelease {
+			r.Maker, r.Brand, r.Model, r.Android, changed = p.Manufacturer, p.Brand, p.Model, p.AndroidRelease, true
+		}
 		if name != "" && r.Name != name {
 			r.Name, changed = name, true
 		}
@@ -248,6 +263,11 @@ func (a *App) reconnectRemembered(ctx context.Context, client *adb.Client, onlin
 			_, err := client.ConnectTLS(ctx, r.Endpoint, false)
 			done = err == nil
 		}
+		// Last, through its Companion (on the LAN or across a network), at most every two minutes.
+		if !done && r.Companion != nil && a.tunnelDue(r.HardwareHash) {
+			_, err := a.adbOverCompanion(ctx, r.HardwareHash)
+			done = err == nil
+		}
 		connected = connected || done
 	}
 	return connected
@@ -275,4 +295,105 @@ func (a *App) onlineHashes(devs []adb.Device) map[string]bool {
 		}
 	}
 	return out
+}
+
+// SetAlias names the remembered phone hash on this computer only; an empty alias goes back to the
+// phone's own name.
+// Side effects: saves devices.json.
+func (a *App) SetAlias(hash, alias string) {
+	alias = strings.TrimSpace(alias)
+	a.update(func() {
+		if i := a.rememberedIndexLocked(hash); i >= 0 {
+			a.remembered[i].Alias = alias
+			a.saveDevicesLocked()
+		}
+	})
+}
+
+// isEmulator reports whether d is an Android emulator or virtual device.
+func isEmulator(d DiscoveredDevice) bool {
+	return d.Target.Transport == adb.TransportEmulator || d.Profile.Emulator
+}
+
+// ownName is the name a phone gives itself: the one set in its settings, else its marketing name,
+// else its model; never an emulator's AVD name or a serial.
+func ownName(d DiscoveredDevice) string {
+	p := d.Profile
+	for _, s := range []string{p.DeviceName, p.MarketName, p.Model, d.Target.Model} {
+		if s = strings.TrimSpace(s); s != "" {
+			return s
+		}
+	}
+	return "Android"
+}
+
+// phoneName is what the interface calls an online device: the name given on this computer, else
+// "Android emulator" for an emulator, else its own name.
+func (a *App) phoneName(d DiscoveredDevice) string {
+	if r, ok := a.RememberedFor(d.HardwareHash); ok && r.Alias != "" {
+		return r.Alias
+	}
+	if isEmulator(d) {
+		return L.EmulatorName()
+	}
+	return ownName(d)
+}
+
+// displayName is what the interface calls a remembered phone.
+func (r RememberedDevice) displayName() string {
+	if r.Alias != "" {
+		return r.Alias
+	}
+	if r.Name != "" {
+		return r.Name
+	}
+	return "Android"
+}
+
+// phoneDetail is the line under a phone's name: its model when the name differs from it, and its
+// Android release ("Galaxy Z Fold8 · Android 17").
+func phoneDetail(shown, model, release string) string {
+	var parts []string
+	if model != "" && !strings.EqualFold(model, shown) {
+		parts = append(parts, model)
+	}
+	if release != "" {
+		parts = append(parts, "Android "+release)
+	}
+	return strings.Join(parts, " · ")
+}
+
+// deviceModel is the product name of an online device for phoneDetail.
+func deviceModel(d DiscoveredDevice) string {
+	if isEmulator(d) {
+		return ""
+	}
+	if d.Profile.MarketName != "" {
+		return d.Profile.MarketName
+	}
+	return d.Profile.Model
+}
+
+// deviceLogo is the maker's mark for an online device, or nil.
+func deviceLogo(d DiscoveredDevice) *ui.SVG {
+	if isEmulator(d) {
+		return nil
+	}
+	p := d.Profile
+	return phoneLogo(p.Manufacturer, p.Brand, p.Model, p.MarketName, p.DeviceName)
+}
+
+// tunnelDue reports whether automatic reconnection may try hash's Companion tunnel now, and
+// records the try (at most every two minutes per phone, since a mesh route may restart a network).
+func (a *App) tunnelDue(hash string) bool {
+	a.rt.coreMu.Lock()
+	defer a.rt.coreMu.Unlock()
+	if a.rt.tunnelTried == nil {
+		a.rt.tunnelTried = map[string]time.Time{}
+	}
+	if time.Since(a.rt.tunnelTried[hash]) < 2*time.Minute {
+		return false
+	}
+	a.rt.tunnelTried[hash] = time.Now()
+	return true
 }

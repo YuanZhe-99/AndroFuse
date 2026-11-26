@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>AndroFuse V3 · 设置</title>
+<link rel="stylesheet" href="common.css">
+<style>
+  .tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+  .ttile { border: 1px solid var(--ctl); border-radius: var(--r-md); padding: 8px 10px; display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  .ttile.on { border-color: var(--accent); background: var(--accent-tint); color: var(--accent-tx); }
+  .netdev { display: flex; align-items: center; gap: 10px; padding: 6px 0; min-width: 0; }
+  .netdev + .netdev { border-top: 1px solid var(--divider); }
+  .netdev .tx { flex: 1; min-width: 0; line-height: 1.25; }
+  .netdev .s2 { font-size: 12px; color: var(--tx3); }
+  .form { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 16px; }
+  .form .full { grid-column: 1 / -1; }
+  .sel { height: 32px; border: 1px solid var(--ctl); border-radius: var(--r-md); padding: 0 10px; display: inline-flex; align-items: center; gap: 8px; background: var(--pane); white-space: nowrap; }
+  .logline { display: flex; gap: 10px; font-size: 13px; padding: 4px 0; }
+  .logline .tm { color: var(--tx3); font-variant-numeric: tabular-nums; flex: none; }
+  details summary { cursor: default; color: var(--accent-tx); font-size: 13px; }
+  .mono-box { background: var(--sunk); border-radius: var(--r-md); padding: 10px 12px; margin-top: 8px; line-height: 1.7; }
+</style>
+</head>
+<body>
+<div class="stagehead"><a href="index.html">← 目录</a><b>设置 · 盖在窗口上的面板（Kyokai 式）</b><span class="sp"></span><span style="font-size:13px">左侧分区可点击切换</span><button data-theme-toggle>浅色 / 深色</button></div>
+<div class="artboards">
+<div>
+<p class="cap"><b>设置是盖在整个窗口上的面板，</b>Esc、× 或点外面关闭。左侧按「偏好 / 这台电脑 / 手机 / AndroFuse」分组，顶部可以搜索。每页一个标题和一句说明，下面是分组的行：图标、标题、一句话，控件在最右；长解释放在 ⓘ 里。</p>
+<div class="win">
+  <aside class="side">
+    <div class="side-top"><button class="ib"><i data-i="sidebar"></i></button><span class="sp"></span><button class="ib"><i data-i="plus"></i></button></div>
+    <div class="nav on"><span class="mark"></span><span class="t">主页</span></div>
+    <div class="side-scroll"></div>
+    <div class="side-foot"><div class="netstate"><span class="dot ok"></span><span class="ell">跨网络 · 已连接</span></div><button class="ib"><i data-i="search"></i></button><button class="ib"><i data-i="auto"></i></button><button class="ib on"><i data-i="gear"></i></button></div>
+  </aside>
+  <main class="panes"><section class="pane"><header class="ph"><div class="who"><i data-i="home"></i><div class="names"><div class="n1">主页</div></div></div><span class="grow"></span><div class="winbtns"><span><i data-i="min" class="s"></i></span><span><i data-i="max" class="s"></i></span><span class="x"><i data-i="close" class="s"></i></span></div></header><div class="pbody"></div></section></main>
+  <div class="scrim"></div>
+  <div class="sheet">
+    <div class="sheet-h">设置<span class="sp"></span><button class="ib"><i data-i="close"></i></button></div>
+    <div class="sheet-b">
+      <nav class="snav">
+        <div class="field" style="margin-bottom:6px"><i data-i="search" class="s"></i><input placeholder="搜索设置"></div>
+        <div class="glabel">偏好</div>
+        <div class="nav" data-page="general"><i data-i="gear"></i><span class="t">常规</span></div>
+        <div class="glabel">手机</div>
+        <div class="nav" data-page="phones"><i data-i="phone"></i><span class="t">手机与画面</span></div>
+        <div class="nav" data-page="camera"><i data-i="camera"></i><span class="t">摄像头与麦克风</span></div>
+        <div class="glabel">这台电脑</div>
+        <div class="nav on" data-page="network"><i data-i="mesh"></i><span class="t">网络</span></div>
+        <div class="nav" data-page="vm"><i data-i="vm"></i><span class="t">电脑上的 Android</span></div>
+        <div class="nav" data-page="security"><i data-i="shield"></i><span class="t">安全与隐私</span></div>
+        <div class="glabel">AndroFuse</div>
+        <div class="nav" data-page="about"><i data-i="info"></i><span class="t">关于与更新</span></div>
+      </nav>
+      <div class="spage">
+
+<!-- ================= 网络 ================= -->
+<div class="spage-in" data-spage="network">
+  <div class="page-title">网络</div>
+  <div class="page-lead">让不在同一个 Wi-Fi 的手机也能连接。由内置的 EasyTier 提供，不安装虚拟网卡，也不占用手机的 VPN。</div>
+  <div class="list"><div class="row"><span class="tile acc"><i data-i="mesh" class="s"></i></span><div class="tx"><div class="t1"><span class="dot ok"></span>已连接</div><div class="t2">加入了 2 个网络，1 个已连接 · 2 台手机在线</div></div></div></div>
+
+  <div class="sec"><span>网络</span><span class="info" title="这台电脑在每个网络里都用同一个名字。">i</span><span class="sp"></span><button class="btn sm"><i data-i="plus" class="s"></i>添加网络</button></div>
+  <div class="list">
+    <div class="row">
+      <span class="tile acc"><i data-i="globe" class="s"></i></span>
+      <div class="tx"><div class="t1">家里</div><div class="t2 ell">网络名 home-mesh · 本机 100.64.0.1 · 容易直连 · 在 31452 端口接受直连</div></div>
+      <div class="end"><span class="pill ok">已连接</span><span class="sw on" title="加入"></span><button class="ib"><i data-i="more"></i></button></div>
+    </div>
+    <div class="sub-row">
+      <div class="netdev"><span class="av sm" data-dev="samsung||"></span><div class="tx"><div class="ell">我的折叠屏</div><div class="s2 num">100.64.0.12 · 直连 · 3 ms</div></div><button class="btn sm">连接</button></div>
+      <div class="netdev"><span class="av sm" data-dev="Google||"></span><div class="tx"><div class="ell">Pixel 8 Pro</div><div class="s2 num">100.64.0.13 · 中继 · 48 ms</div></div><span class="pill ok">已连接</span></div>
+      <div class="netdev"><span class="av sm dash" data-dev="samsung||"></span><div class="tx"><div class="ell">Galaxy S24 <span class="muted">· 从未连接过</span></div><div class="s2 num">100.64.0.31 · 直连 · 12 ms</div></div><button class="btn sm">连接</button></div>
+    </div>
+    <div class="row">
+      <span class="tile"><i data-i="globe" class="s"></i></span>
+      <div class="tx"><div class="t1">公司</div><div class="t2 ell">网络名 office · 未加入</div></div>
+      <div class="end"><span class="sw"></span><button class="ib on"><i data-i="more"></i></button></div>
+    </div>
+    <div class="sub-row">
+      <div class="form">
+        <div><label class="lbl">显示名称（可选）</label><div class="field"><input value="公司"></div></div>
+        <div><label class="lbl">网络名称</label><div class="field focus"><input value="office"></div></div>
+        <div class="full"><label class="lbl">服务器（每行一个）</label><textarea class="area">tcp://relay.example.com:11010
+udp://relay.example.com:11010</textarea><div class="hint">可以用自己的中继，也可以用公共节点；经过公共节点时流量会经过第三方服务器（已加密）。</div></div>
+        <div class="full"><label class="lbl">网络密钥</label><div class="field"><input type="password" value="short"></div><div class="err">密钥太短，至少 12 个字符更安全。留空则保留已保存的密钥。</div></div>
+        <div class="full" style="display:flex; justify-content:flex-end; gap:8px"><button class="btn">取消</button><button class="btn pri">保存</button></div>
+      </div>
+    </div>
+    <div class="row">
+      <span class="tile"><i data-i="globe" class="s"></i></span>
+      <div class="tx"><div class="t1">旅行</div><div class="t2 ell" style="color:var(--bad)">连接失败：服务器拒绝了网络密钥</div></div>
+      <div class="end"><span class="sw on"></span><button class="ib"><i data-i="more"></i></button></div>
+    </div>
+  </div>
+
+  <div class="sec"><span>新手机</span></div>
+  <div class="list">
+    <div class="row"><span class="tile"><i data-i="link" class="s"></i></span><div class="tx"><div class="t1">配对新手机时加入</div><div class="t2">手机会记住网络，重启后自动重新加入</div></div><div class="end"><span class="sel">家里 <i data-i="chevD" class="s"></i></span></div></div>
+    <div class="row"><span class="tile"><i data-i="battery" class="s"></i></span><div class="tx"><div class="t1">手机省电模式</div><div class="t2">连接慢一点，手机被唤醒的次数少约两成；手机上可以单独关闭</div></div><div class="end"><span class="sw on"></span></div></div>
+  </div>
+
+  <div class="sec"><span>其他连接方式</span></div>
+  <div class="list">
+    <div class="row"><span class="tile"><i data-i="dex" class="s"></i></span><div class="tx"><div class="t1">接受直接连接</div><div class="t2">其他设备可以直接连到这台电脑的 31452 端口，不经过服务器</div></div><div class="end"><span class="sw on"></span></div></div>
+  </div>
+
+  <div class="sec"><span>高级</span></div>
+  <div class="list">
+    <div class="row"><span class="tile"><i data-i="pulse" class="s"></i></span><div class="tx"><div class="t1">尝试直连 <span class="info" title="会尝试穿过路由器直接相连，延迟更低，但这台电脑也更容易被网络里的设备发现。">i</span></div><div class="t2">能直连时不走中继，延迟更低</div></div><div class="end"><span class="sw on"></span></div></div>
+    <div class="row"><span class="tile"><i data-i="globe" class="s"></i></span><div class="tx"><div class="t1">优先走延迟最低的路线</div><div class="t2">有多条路线时选最快的，而不是最近用过的</div></div><div class="end"><span class="sw"></span></div></div>
+    <div class="row"><span class="tile"><i data-i="cpu" class="s"></i></span><div class="tx"><div class="t1">网络引擎</div><div class="t2">内置 EasyTier 2.7.1，随 AndroFuse 更新</div></div><div class="end"><span class="pill">内置</span></div></div>
+  </div>
+</div>
+
+<!-- ================= 常规 ================= -->
+<div class="spage-in" data-spage="general" hidden>
+  <div class="page-title">常规</div>
+  <div class="page-lead">语言、外观，以及 AndroFuse 怎样启动和关闭。</div>
+  <div class="sec"><span>语言与外观</span></div>
+  <div class="list">
+    <div class="row"><span class="tile"><i data-i="globe" class="s"></i></span><div class="tx"><div class="t1">语言</div><div class="t2">立即生效</div></div><div class="end"><span class="sel">跟随系统（简体中文） <i data-i="chevD" class="s"></i></span></div></div>
+    <div class="row"><span class="tile"><i data-i="auto" class="s"></i></span><div class="tx"><div class="t1">外观</div><div class="t2">侧栏底部的按钮也能切换</div></div><div class="end"><div class="seg"><button class="on">跟随系统</button><button>浅色</button><button>深色</button></div></div></div>
+  </div>
+  <div class="sec"><span>启动与关闭</span></div>
+  <div class="list">
+    <div class="row"><span class="tile"><i data-i="power" class="s"></i></span><div class="tx"><div class="t1">登录 Windows 时启动</div><div class="t2">记住的手机上线后自动连接</div></div><div class="end"><span class="sw on"></span></div></div>
+    <div class="row"><span class="tile"><i data-i="tray" class="s"></i></span><div class="tx"><div class="t1">登录时只显示托盘图标</div><div class="t2">不弹出主窗口</div></div><div class="end"><span class="sw on"></span></div></div>
+    <div class="row"><span class="tile"><i data-i="close" class="s"></i></span><div class="tx"><div class="t1">关闭主窗口时</div><div class="t2">第一次关到托盘时会提示一次</div></div><div class="end"><div class="seg"><button class="on">留在托盘</button><button>退出</button></div></div></div>
+  </div>
+  <div class="sec"><span>打开位置</span></div>
+  <div class="list">
+    <div class="row"><span class="tile"><i data-i="dex" class="s"></i></span><div class="tx"><div class="t1">三星 DeX 和手机屏幕</div><div class="t2">也可以在打开时临时选择</div></div><div class="end"><div class="seg"><button class="on">主窗口</button><button>独立窗口</button></div></div></div>
+    <div class="row"><span class="tile"><i data-i="app" class="s"></i></span><div class="tx"><div class="t1">应用窗口</div><div class="t2">独立窗口更方便在多个屏幕间摆放</div></div><div class="end"><div class="seg"><button>主窗口</button><button class="on">独立窗口</button></div></div></div>
+  </div>
+  <div style="margin-top:20px"><button class="btn">重新显示新手引导</button></div>
+</div>
+
+<!-- ================= 手机与画面 ================= -->
+<div class="spage-in" data-spage="phones" hidden>
+  <div class="page-title">手机与画面</div>
+  <div class="page-lead">记住的手机、画面清晰度和连接方式。</div>
+  <div class="sec"><span>记住的手机</span><span class="muted num">3</span></div>
+  <div class="list">
+    <div class="row"><span class="av" data-dev="samsung||我的折叠屏"></span><div class="tx"><div class="t1">我的折叠屏</div><div class="t2 ell">Galaxy Z Fold8 · 已连接 · USB</div></div><div class="end"><span class="muted" style="font-size:13px">自动重连</span><span class="sw on"></span><button class="ib"><i data-i="more"></i></button></div></div>
+    <div class="row"><span class="av" data-dev="Google|Pixel 8 Pro|"></span><div class="tx"><div class="t1">Pixel 8 Pro</div><div class="t2 ell">已连接 · 跨网络</div></div><div class="end"><span class="muted" style="font-size:13px">自动重连</span><span class="sw on"></span><button class="ib"><i data-i="more"></i></button></div></div>
+    <div class="row"><span class="av" data-dev="Xiaomi||小米 14"></span><div class="tx"><div class="t1">小米 14</div><div class="t2 ell">离线 · 上次 11 月 25 日 02:23</div></div><div class="end"><span class="muted" style="font-size:13px">自动重连</span><span class="sw"></span><button class="ib"><i data-i="more"></i></button></div></div>
+  </div>
+  <div class="sec"><span>画面</span></div>
+  <div class="list">
+    <div class="row"><span class="tile"><i data-i="dex" class="s"></i></span><div class="tx"><div class="t1">清晰度上限</div><div class="t2">窗格里显示的是手机实际给出的分辨率和实测帧率</div></div><div class="end"><div class="seg"><button class="on">跟随手机</button><button>1080p</button><button>720p</button></div></div></div>
+    <div class="row"><span class="tile"><i data-i="pulse" class="s"></i></span><div class="tx"><div class="t1">帧率上限</div><div class="t2">目标值，不保证达到</div></div><div class="end"><div class="seg"><button class="on">60</button><button>30</button></div></div></div>
+    <div class="row"><span class="tile"><i data-i="cpu" class="s"></i></span><div class="tx"><div class="t1">视频格式</div><div class="t2">H.265 更省流量，H.264 兼容更好</div></div><div class="end"><div class="seg"><button class="on">自动</button><button>H.264</button><button>H.265</button></div></div></div>
+    <div class="row"><span class="tile"><i data-i="sound" class="s"></i></span><div class="tx"><div class="t1">播放手机声音</div><div class="t2">Android 11 及以上</div></div><div class="end"><span class="sw on"></span></div></div>
+  </div>
+  <div class="sec"><span>连接</span></div>
+  <div class="list">
+    <div class="row"><span class="tile"><i data-i="usb" class="s"></i></span><div class="tx"><div class="t1">拔掉 USB 后切到 Wi-Fi</div><div class="t2">30 秒内接上，三星 DeX 和打开的应用不会关闭</div></div><div class="end"><span class="sw on"></span></div></div>
+    <div class="row"><span class="tile"><i data-i="phone" class="s"></i></span><div class="tx"><div class="t1">第一次用 USB 连接手机时</div><div class="t2">AndroFuse 伴侣带来通知、剪贴板、文件和跨网络连接</div></div><div class="end"><div class="seg"><button class="on">询问是否安装伴侣</button><button>不询问</button></div></div></div>
+  </div>
+</div>
+
+<!-- ================= 摄像头与麦克风 ================= -->
+<div class="spage-in" data-spage="camera" hidden>
+  <div class="page-title">摄像头与麦克风</div>
+  <div class="page-lead">把手机摄像头当作电脑摄像头，或者把电脑麦克风传给手机。</div>
+  <div class="sec"><span>手机摄像头</span></div>
+  <div class="list">
+    <div class="row"><span class="tile"><i data-i="camera" class="s"></i></span><div class="tx"><div class="t1">默认摄像头</div><div class="t2">打开后也可以在窗格里切换</div></div><div class="end"><div class="seg"><button class="on">后置</button><button>前置</button></div></div></div>
+    <div class="row"><span class="tile acc"><i data-i="download" class="s"></i></span><div class="tx"><div class="t1">给其他应用使用 <span class="info" title="视频通话和会议软件能在摄像头列表里看到「AndroFuse 手机摄像头」。需要单独安装一个组件，Windows 要求管理员权限才能注册摄像头。只支持 Windows 11。">i</span></div><div class="t2">安装 AndroFuse 摄像头组件后，会议软件可以选择手机摄像头</div></div><div class="end"><button class="btn">安装…</button></div></div>
+    <div class="row"><span class="tile"><i data-i="link" class="s"></i></span><div class="tx"><div class="t1">本机预览地址</div><div class="t2">只有这台电脑上的程序能打开，每次启动换一个密钥</div></div><div class="end"><span class="sw"></span></div></div>
+  </div>
+  <div class="sec"><span>电脑麦克风</span></div>
+  <div class="list">
+    <div class="row"><span class="tile"><i data-i="mic" class="s"></i></span><div class="tx"><div class="t1">把电脑麦克风传给手机</div><div class="t2">手机上需要在伴侣里允许「接收电脑麦克风」</div></div><div class="end"><span class="sw"></span></div></div>
+  </div>
+</div>
+
+<!-- ================= 电脑上的 Android ================= -->
+<div class="spage-in" data-spage="vm" hidden>
+  <div class="page-title">电脑上的 Android</div>
+  <div class="page-lead">没有手机时，也能在这台电脑上运行 Android 应用。</div>
+  <div class="list">
+    <div class="row"><span class="tile acc"><i data-i="vm" class="s"></i></span><div class="tx"><div class="t1">Android 16</div><div class="t2">已下载 · 占用 6.2 GB · 原生运行，不经过转译</div></div><div class="end"><button class="btn pri">启动</button></div></div>
+    <div class="row"><span class="tile"><i data-i="power" class="s"></i></span><div class="tx"><div class="t1">随 AndroFuse 启动</div><div class="t2">在后台启动，不显示窗口</div></div><div class="end"><span class="sw"></span></div></div>
+    <div class="row"><span class="tile"><i data-i="folder" class="s"></i></span><div class="tx"><div class="t1">存放位置</div><div class="t2 ell">本地应用数据 › AndroFuse › 虚拟机</div></div><div class="end"><button class="btn">打开文件夹</button></div></div>
+    <div class="row"><span class="tile"><i data-i="trash" class="s"></i></span><div class="tx"><div class="t1">删除</div><div class="t2">释放 6.2 GB，以后可以重新下载</div></div><div class="end"><button class="btn danger">删除…</button></div></div>
+  </div>
+</div>
+
+<!-- ================= 安全与隐私 ================= -->
+<div class="spage-in" data-spage="security" hidden>
+  <div class="page-title">安全与隐私</div>
+  <div class="page-lead">无线连接、配对，以及本机助手能做什么。</div>
+  <div class="sec"><span>无线连接</span></div>
+  <div class="list">
+    <div class="row"><span class="tile"><i data-i="lock" class="s"></i></span><div class="tx"><div class="t1">允许未加密的无线连接</div><div class="t2">默认只用加密的无线调试；打开后每次连接前仍会再问你</div></div><div class="end"><span class="sw"></span></div></div>
+    <div class="row"><span class="tile"><i data-i="key" class="s"></i></span><div class="tx"><div class="t1">这台电脑的配对指纹</div><div class="t2 num">3F9A 21C0 8B4E … 7C21 · 手机上显示的应一致</div></div><div class="end"><button class="ib" title="复制"><i data-i="copy"></i></button></div></div>
+  </div>
+  <div class="sec"><span>本机助手</span><span class="info" title="例如在这台电脑上运行的 AI 助手。只接受这台电脑上的程序，不接受网络上的。">i</span></div>
+  <div class="list">
+    <div class="row"><span class="tile"><i data-i="spark" class="s"></i></span><div class="tx"><div class="t1">允许本机助手控制手机</div><div class="t2">30 分钟后自动关闭；托盘里可以随时停止</div></div><div class="end"><span class="sw on"></span></div></div>
+    <div class="sub-row">
+      <div class="lbl">可以做的事</div>
+      <div class="tiles"><span class="ttile on"><i data-i="eye" class="s"></i>查看手机状态</span><span class="ttile on"><i data-i="shot" class="s"></i>截图</span><span class="ttile"><i data-i="apps" class="s"></i>打开应用</span><span class="ttile"><i data-i="hand" class="s"></i>点按和输入</span></div>
+      <div class="hint">没有勾选的操作，每次都会在窗格上方问你。</div>
+    </div>
+    <div class="row"><span class="tile"><i data-i="log" class="s"></i></span><div class="tx"><div class="t1">最近的操作</div>
+      <div class="logline"><span class="tm">10:42</span><span>截图 · 我的折叠屏 · 已允许</span></div>
+      <div class="logline"><span class="tm">10:41</span><span>打开微信 · 我的折叠屏 · 你允许了一次</span></div>
+      <div class="logline"><span class="tm">10:40</span><span>查看手机状态 · 全部手机</span></div>
+    </div><div class="end" style="align-self:flex-start"><button class="btn danger"><i data-i="stop" class="s"></i>立即停止</button></div></div>
+  </div>
+  <div class="sec"><span>日志</span></div>
+  <div class="list">
+    <div class="row"><span class="tile"><i data-i="shield" class="s"></i></span><div class="tx"><div class="t1">日志里隐去手机编号、地址和密钥</div><div class="t2">始终开启</div></div><div class="end"><span class="sw on" style="opacity:.5"></span></div></div>
+  </div>
+</div>
+
+<!-- ================= 关于与更新 ================= -->
+<div class="spage-in" data-spage="about" hidden>
+  <div class="page-title">关于与更新</div>
+  <div class="page-lead">版本、更新和这台电脑的检查结果。</div>
+  <div class="list">
+    <div class="row"><span class="mark" style="width:32px;height:32px;border-radius:8px"></span><div class="tx"><div class="t1">AndroFuse 0.1.0</div><div class="t2">开源软件，GPL-3.0 许可</div></div><div class="end"><button class="btn">源代码</button><button class="btn">开源许可</button></div></div>
+  </div>
+  <div class="sec"><span>更新</span></div>
+  <div class="list">
+    <div class="row"><span class="tile"><i data-i="update" class="s"></i></span><div class="tx"><div class="t1">已是最新版本</div><div class="t2">上次检查：今天 09:12 · 更新包经过签名校验</div></div><div class="end"><button class="btn">检查更新</button></div></div>
+    <div class="row"><span class="tile"><i data-i="refresh" class="s"></i></span><div class="tx"><div class="t1">每天检查</div></div><div class="end"><span class="sw on"></span></div></div>
+    <div class="row"><span class="tile"><i data-i="download" class="s"></i></span><div class="tx"><div class="t1">自动安装更新</div><div class="t2">没有打开的画面时才会重启</div></div><div class="end"><div class="seg"><button>从不</button><button class="on">电脑空闲时</button><button>每天 3:00</button></div></div></div>
+  </div>
+  <div class="sec"><span>这台电脑</span><span class="sp"></span><button class="btn sm"><i data-i="refresh" class="s"></i>重新检查</button></div>
+  <div class="list">
+    <div class="row"><span class="tile"><i data-i="cpu" class="s"></i></span><div class="tx"><div class="t1">处理器</div><div class="t2">Windows 11 · ARM64 · 原生运行</div></div><div class="end"><span class="pill ok">正常</span></div></div>
+    <div class="row"><span class="tile"><i data-i="dex" class="s"></i></span><div class="tx"><div class="t1">画面解码</div><div class="t2">H.264 和 H.265 都能用硬件解码</div></div><div class="end"><span class="pill ok">正常</span></div></div>
+    <div class="row"><span class="tile"><i data-i="usb" class="s"></i></span><div class="tx"><div class="t1">手机连接工具</div><div class="t2">已随 AndroFuse 安装</div></div><div class="end"><span class="pill ok">正常</span></div></div>
+    <div class="row"><span class="tile"><i data-i="wifi" class="s"></i></span><div class="tx"><div class="t1">无线投屏到电脑（Miracast）</div><div class="t2">已停用：会让部分无线网卡驱动崩溃，无线 DeX 改用加密的无线调试</div></div><div class="end"><span class="pill">已停用</span></div></div>
+  </div>
+  <div style="display:flex; gap:8px; margin-top:12px"><button class="btn"><i data-i="folder" class="s"></i>打开数据文件夹</button><button class="btn"><i data-i="log" class="s"></i>保存日志…</button></div>
+  <details style="margin-top:14px"><summary>技术详情</summary><div class="mono-box mono">core ABI v6 · androfuse_core 0.1.0<br>adb 36.0.0 · scrcpy-server 5.0.1<br>Media Foundation: H.264 HW, HEVC HW<br>EasyTier 2.7.1 (0d9c52b)</div></details>
+</div>
+
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+</div>
+<script src="logos.js"></script>
+<script src="common.js"></script>
+<script>
+  // #general, #about … opens that page (for review links and screenshots).
+  const h = location.hash.slice(1);
+  if (h) document.querySelector(`[data-page="${h}"]`)?.click();
+</script>
+</body>
+</html>

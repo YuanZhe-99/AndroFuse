@@ -148,3 +148,52 @@ func rpcCall(t *testing.T, url, token string, payload map[string]any) []byte {
 	_, _ = buf.ReadFrom(resp.Body)
 	return buf.Bytes()
 }
+
+// TestServerAsksBeforeToolsOutsideTheAllowlist checks that, with Approve set, a tool outside the
+// allowlist runs only when the user allows that call, is refused when they deny it, and that
+// both answers are audited.
+func TestServerAsksBeforeToolsOutsideTheAllowlist(t *testing.T) {
+	answer := true
+	var asked []string
+	launched := 0
+	srv := NewServer(Handlers{
+		LaunchApp: func(context.Context, string, string) (any, error) {
+			launched++
+			return map[string]any{"launched": true}, nil
+		},
+		Approve: func(_ context.Context, tool, detail string) bool {
+			asked = append(asked, tool+":"+detail)
+			return answer
+		},
+	}, time.Minute)
+	st, err := srv.Enable(Allowlist{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	url := "http://" + st.Addr
+	call := func(id int) []byte {
+		return rpcCall(t, url, st.Token, map[string]any{
+			"jsonrpc": "2.0", "id": id, "method": "tools/call",
+			"params": map[string]any{"name": "launch_app", "arguments": map[string]any{"device_id": "d", "package_name": "com.example.app"}},
+		})
+	}
+	if body := call(1); launched != 1 || bytes.Contains(body, []byte("disabled")) {
+		t.Fatalf("an allowed call must run: launched=%d body=%s", launched, body)
+	}
+	answer = false
+	if body := call(2); launched != 1 || !bytes.Contains(body, []byte("tool disabled by allowlist")) {
+		t.Fatalf("a denied call must not run: launched=%d body=%s", launched, body)
+	}
+	if len(asked) != 2 || asked[0] != "launch_app:com.example.app" {
+		t.Fatalf("asked = %v", asked)
+	}
+	list := rpcCall(t, url, st.Token, map[string]any{"jsonrpc": "2.0", "id": 3, "method": "tools/list"})
+	if !bytes.Contains(list, []byte("launch_app")) {
+		t.Fatalf("tools/list must offer tools that can be approved: %s", list)
+	}
+	raw, _ := json.Marshal(srv.Status().Audit)
+	if !bytes.Contains(raw, []byte("user_allowed_once")) || !bytes.Contains(raw, []byte("user_denied")) {
+		t.Fatalf("approvals must be audited: %s", raw)
+	}
+	_ = srv.EmergencyStop()
+}

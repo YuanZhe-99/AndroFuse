@@ -24,6 +24,7 @@ Every reused or adapted component retains its upstream license text and attribut
 - **adirh3/DeXDesk** (Miracast / Wi-Fi Direct Sink, RTSP/RTP/MPEG-TS, UIBC, Media Foundation DXVA reference) — MIT License.
 - **Aureliano021/ScrcpyDex** (`SemWifiDisplayConfig` loopback DeX activator reference) — Apache-2.0 License.
 - **maze-mei/DX-Manager** (multi-session registry, initial DPI ≥ 160 bootstrap & companion UX reference) — MIT License.
+- **Simple Icons** phone makers' marks (`internal/gui/assets/logos/`: Samsung, Google, Xiaomi, Huawei, Sony, LG, Lenovo, ASUS) — CC0 1.0. Each mark is a trademark of its owner, used only to identify a phone's maker (nominative use, no affiliation or endorsement implied) and removed if its owner asks; see `internal/gui/assets/logos/SOURCES.md`.
 - **Keremerk/MyDeX** (virtual display behavior findings) — MIT License.
 - **fabriciolima77/DeXter** (fallback research reference) — GPL-3.0-or-later License.
 - **AndroMeld** (`catchingnow`) — Proprietary commercial product; referenced strictly at a functional/UX level. No APK, bytecode, source code, or asset from AndroMeld may ever be copied, decompiled, or redistributed.

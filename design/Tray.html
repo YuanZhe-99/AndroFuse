@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>AndroFuse V3 · 托盘</title>
+<link rel="stylesheet" href="common.css">
+<style>
+  .winmenu .mi .av.sm { width: 20px; height: 20px; }
+  .winmenu .mi .av.sm svg { width: 15px; height: 15px; }
+  .winmenu .mi .s2 { color: var(--tx3); font-size: 12px; }
+  .arrow { color: var(--tx3); }
+  .appdot { width: 16px; height: 16px; border-radius: 4px; flex: none; }
+  .wtoast .from { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--tx2); margin-bottom: 8px; }
+  .wtoast .reply { display: flex; gap: 8px; margin-top: 10px; }
+</style>
+</head>
+<body>
+<div class="stagehead"><a href="index.html">← 目录</a><b>托盘菜单 · 通知</b><span class="sp"></span><button data-theme-toggle>浅色 / 深色</button></div>
+<div class="artboards">
+<div>
+<p class="cap"><b>托盘菜单。</b>不打开主窗口也能完成常用操作：每台手机一个子菜单（打开三星 DeX、手机屏幕、最近用过的应用、发送剪贴板和文件、截图、关闭手机屏幕），已打开的画面、网络开关和电脑上的 Android 也各有子菜单。本机助手工作时，顶部多一条「停止本机助手」（Kyokai 的紧急停止）。图标跟随任务栏深浅变色。</p>
+<div class="desk">
+  <div class="winmenu" style="right:96px; bottom:56px; width:280px">
+    <div class="mi head"><div style="font-weight:600">AndroFuse</div><div class="s2">2 台手机已连接 · 跨网络已连接</div></div>
+    <div class="mi" style="color:var(--bad)"><i data-i="stop" class="s"></i><span class="t">停止本机助手</span></div>
+    <div class="msep"></div>
+    <div class="mi hl"><span class="av sm" data-dev="samsung||"></span><span class="t">我的折叠屏 <span class="s2">USB</span></span><i data-i="chevR" class="s arrow"></i></div>
+    <div class="mi"><span class="av sm" data-dev="Google||"></span><span class="t">Pixel 8 Pro <span class="s2">跨网络</span></span><i data-i="chevR" class="s arrow"></i></div>
+    <div class="mi"><span class="av sm" data-dev="Xiaomi||"></span><span class="t">小米 14 <span class="s2">离线</span></span><i data-i="chevR" class="s arrow"></i></div>
+    <div class="mi"><i data-i="plus" class="s"></i><span class="t">连接手机…</span></div>
+    <div class="msep"></div>
+    <div class="mi"><i data-i="sidebar" class="s"></i><span class="t">已打开的画面</span><span class="k num">3</span><i data-i="chevR" class="s arrow"></i></div>
+    <div class="mi"><i data-i="mesh" class="s"></i><span class="t">跨网络</span><i data-i="chevR" class="s arrow"></i></div>
+    <div class="mi"><i data-i="vm" class="s"></i><span class="t">电脑上的 Android</span><i data-i="chevR" class="s arrow"></i></div>
+    <div class="msep"></div>
+    <div class="mi"><i data-i="home" class="s"></i><span class="t">显示 AndroFuse</span></div>
+    <div class="mi"><i data-i="gear" class="s"></i><span class="t">设置</span></div>
+    <div class="mi"><i data-i="power" class="s"></i><span class="t">退出 AndroFuse</span></div>
+  </div>
+  <div class="winmenu" style="right:380px; bottom:178px; width:250px">
+    <div class="mi"><i data-i="dex" class="s"></i><span class="t">三星 DeX</span></div>
+    <div class="mi"><i data-i="mirror" class="s"></i><span class="t">手机屏幕</span></div>
+    <div class="mi hl"><i data-i="apps" class="s"></i><span class="t">打开应用</span><i data-i="chevR" class="s arrow"></i></div>
+    <div class="mi"><i data-i="camera" class="s"></i><span class="t">摄像头</span></div>
+    <div class="msep"></div>
+    <div class="mi"><i data-i="clip" class="s"></i><span class="t">发送剪贴板</span></div>
+    <div class="mi"><i data-i="send" class="s"></i><span class="t">发送文件…</span></div>
+    <div class="mi"><i data-i="shot" class="s"></i><span class="t">截图</span><span class="k">存到「图片」</span></div>
+    <div class="mi"><i data-i="screenoff" class="s"></i><span class="t">关闭手机屏幕</span></div>
+    <div class="msep"></div>
+    <div class="mi"><i data-i="close" class="s"></i><span class="t">断开</span></div>
+  </div>
+  <div class="winmenu" style="right:636px; bottom:300px; width:200px">
+    <div class="mlabel">最近用过</div>
+    <div class="mi"><span class="appdot" style="background:#07c160"></span><span class="t">微信</span></div>
+    <div class="mi"><span class="appdot" style="background:#1677ff"></span><span class="t">支付宝</span></div>
+    <div class="mi"><span class="appdot" style="background:#ff2442"></span><span class="t">小红书</span></div>
+    <div class="mi"><span class="appdot" style="background:#4285f4"></span><span class="t">Chrome</span></div>
+    <div class="msep"></div>
+    <div class="mi"><i data-i="apps" class="s"></i><span class="t">全部应用…</span></div>
+  </div>
+
+  <div class="taskbar">
+    <span class="trayic"><i data-i="chevD" class="s" style="transform:rotate(180deg)"></i></span>
+    <span class="trayic"><i data-i="wifi" class="s"></i></span>
+    <span class="trayic"><i data-i="sound" class="s"></i></span>
+    <span class="trayic on" title="AndroFuse"><svg class="i" viewBox="0 0 24 24" style="fill:none"><rect x="7" y="3" width="10" height="18" rx="2.5" stroke="currentColor" stroke-width="2"/></svg></span>
+    <span class="clock num">10:42<br>2026/11/26</span>
+  </div>
+</div>
+</div>
+
+<div>
+<p class="cap"><b>其他子菜单与通知。</b>跨网络：每个网络一个勾选项，直接加入或退出。已打开的画面：点一下切到那个窗格，或全部关闭。手机通知用 Windows 通知显示，可以直接回复，或在电脑上打开那个应用。</p>
+<div class="desk" style="height:560px">
+  <div class="winmenu" style="left:40px; top:40px; width:260px">
+    <div class="mlabel">跨网络</div>
+    <div class="mi"><span class="ck"><i data-i="check" class="s"></i></span><span class="t">家里</span><span class="k">已连接</span></div>
+    <div class="mi"><span class="ck"></span><span class="t">公司</span><span class="k">未加入</span></div>
+    <div class="mi"><span class="ck"><i data-i="check" class="s"></i></span><span class="t">旅行</span><span class="k" style="color:var(--bad)">连接失败</span></div>
+    <div class="msep"></div>
+    <div class="mi"><i data-i="gear" class="s"></i><span class="t">网络设置…</span></div>
+  </div>
+  <div class="winmenu" style="left:330px; top:40px; width:280px">
+    <div class="mlabel">已打开的画面</div>
+    <div class="mi"><i data-i="dex" class="s"></i><span class="t">我的折叠屏 · 三星 DeX</span></div>
+    <div class="mi"><span class="appdot" style="background:#07c160"></span><span class="t">我的折叠屏 · 微信</span></div>
+    <div class="mi"><i data-i="mirror" class="s"></i><span class="t">Pixel 8 Pro · 手机屏幕</span></div>
+    <div class="msep"></div>
+    <div class="mi"><i data-i="close" class="s"></i><span class="t">全部关闭</span></div>
+  </div>
+  <div class="winmenu" style="left:40px; top:270px; width:260px">
+    <div class="mlabel">电脑上的 Android</div>
+    <div class="mi"><i data-i="power" class="s"></i><span class="t">启动</span></div>
+    <div class="mi"><i data-i="apps" class="s"></i><span class="t">打开应用…</span></div>
+  </div>
+  <div class="wtoast" style="bottom:170px">
+    <div class="from"><span class="appdot" style="background:#07c160"></span>微信 · 我的折叠屏</div>
+    <div style="font-weight:600">张三</div>
+    <div class="sub">今晚七点在老地方见？</div>
+    <div class="reply"><div class="field" style="flex:1"><input placeholder="回复"></div><button class="btn pri">发送</button></div>
+    <div style="display:flex; gap:8px; margin-top:8px"><button class="btn" style="flex:1">在电脑上打开</button><button class="btn" style="flex:1">关闭</button></div>
+  </div>
+  <div class="wtoast" style="bottom:60px">
+    <div class="from"><span class="mark" style="width:16px;height:16px;border-radius:4px"></span>AndroFuse</div>
+    <div style="font-weight:600">我的折叠屏 已切到 Wi-Fi</div>
+    <div class="sub">USB 已断开，三星 DeX 继续运行。</div>
+  </div>
+  <div class="taskbar"><span class="trayic on"><svg class="i" viewBox="0 0 24 24" style="fill:none"><rect x="7" y="3" width="10" height="18" rx="2.5" stroke="currentColor" stroke-width="2"/></svg></span><span class="clock num">10:43<br>2026/11/26</span></div>
+</div>
+</div>
+</div>
+<script src="logos.js"></script>
+<script src="common.js"></script>
+</body>
+</html>

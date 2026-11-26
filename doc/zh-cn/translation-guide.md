@@ -29,3 +29,13 @@ AndroFuse 文档（`doc/en-us/` → `doc/zh-cn/`）的权威英文→简体中�
 | Background Standby | 后台待机 | 用户开启后由最低重要性前台服务保持伴侣在后台可被连接 |
 | Activity Lease | 活动租约 | 仅在传输期间持有、空闲 30 秒后释放的唤醒锁与 Wi-Fi 锁 |
 | Delay-Load | 延迟加载 | DLL 仅在首次调用其函数时才解析加载（如 `packet.dll`） |
+| Phone screen | 手机屏幕 | 界面中对手机镜像的叫法（V3） |
+| App window | 应用窗口 | 界面中对独立应用窗口的叫法（V3） |
+| Large-screen desktop (not Samsung DeX) | 大屏桌面（非三星 DeX） | 回退方案，绝不称作 DeX（`INV-06`） |
+| Cross-network | 跨网络 | 界面中对 EasyTier 网络的叫法（代替「组网」） |
+| Companion screen sharing | 伴侣共享屏幕 | 移动网络下的 MediaProjection 屏幕共享 |
+| Local assistant | 本机助手 | 可选的本地 MCP 控制（代替「MCP」） |
+| Android on this PC | 电脑上的 Android | 内建虚拟机（代替 AVD 名称） |
+| Android emulator | Android 模拟器 | 经 adb 发现的模拟器（不显示 AVD 名称） |
+| Direct / Relayed | 直连 / 中继 | 网络对端的连接方式 |
+| Remembered phones | 记住的手机 | `devices.json` |

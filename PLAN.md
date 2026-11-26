@@ -294,10 +294,13 @@ flowchart TB
 - **设计**：自连仅用于手机端自愈（断线后清理残留虚拟显示、保持端口信标准确），远程运维走 EasyTier 端口转发；ADB RSA 密钥存于 Android Keystore 包装的私有存储（`INV-08`），每次配对需用户确认（`INV-09`）。
 - **待实测**：Fold 8 上在安全页填入无线调试端口，确认显示「无线调试在此端口应答」（STLS），以及 One UI 9 是否对回环连接另有限制；通过后再实现 App 内配对与自连。
 
-#### 3. 前端收尾
-1. 在 `androfuse.exe` 中实测实时画面的窗格停靠、弹出与分屏（目前仅 `ui.NewTester` 渲染与停靠状态单元测试）；
-2. Fold 8 展开态（`>= 680dp`）手机端双栏布局实机检查；
-3. 命令面板（`Ctrl K`）、快捷键提示与外部助手操作确认卡（Approval Gate）仍为 [design/README.md](design/README.md) 中的待评审提案，实现并实测前不得标为已支持。
+#### 3. 前端重做（V3，参照 Kyokai）
+- **已实现（2026-11-26）**：按 [design/README.md](design/README.md) 重写原生界面、ARB 文案目录与文档（行为见 `doc/en-us/architecture.md` 的 `internal/gui` 行与 `doc/en-us/protocols.md` §6）：只填地址连接与端口查找、手机名称/改名/厂商标志、Kyokai 式外壳（单标题栏窗格、决定卡、设置面板与搜索、+ 选择器、`Ctrl K`）、最多 8 个网络（核心多实例）、经伴侣隧道使用无线调试（`tunnel.open`）与 NsdManager 自动发现端口、移动网络下伴侣共享屏幕（`share.open`）、托盘子菜单、MyGo 签名自动更新、本机助手逐次允许卡片。
+- **仍未完成**：
+  1. 供其他应用使用的手机摄像头组件（M5 第 6 项：单独的原生 Media Source DLL，安装包以管理员身份注册）——界面标为「尚未提供」；
+  2. 移动网络下共享屏幕时的点按与输入：MyGo 插件无法附带无障碍服务所需的 XML（`canPerformGestures`），目前只有返回、主屏幕、最近任务；需要 MyGo 支持插件资源后再做；
+  3. 手机通知在 Windows 通知中内联回复：MyGo 通知不支持回复输入，伴侣协议也还没有通知推送通道；
+  4. 真机验证：隧道与 NsdManager 需要有 Wi-Fi 的真机（模拟器没有 Wi-Fi 射频）；`androfuse.exe` 中实测窗格停靠、弹出与分屏；Fold 8 展开态（`>= 680dp`）双栏布局。
 
 ---
 

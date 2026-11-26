@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>AndroFuse V3 · 主页</title>
+<link rel="stylesheet" href="common.css">
+<style>
+  .narrow .home-top { grid-template-columns: 1fr; }
+  .narrow .devgrid { grid-template-columns: 1fr; }
+  .this-pc .kv { display: grid; grid-template-columns: auto 1fr auto; gap: 10px 12px; align-items: center; }
+  .this-pc .kv .k { color: var(--tx3); font-size: 13px; white-space: nowrap; }
+  .editor { display: flex; align-items: center; gap: 12px; padding: 14px; border-radius: var(--r-xl); background: var(--pane); border: 1px solid var(--accent); box-shadow: 0 0 0 3px var(--accent-tint); margin-bottom: 12px; }
+  .editor .field { flex: 1; }
+</style>
+</head>
+<body>
+<div class="stagehead"><a href="index.html">← 目录</a><b>主页 · 设备</b><span class="sp"></span><button data-theme-toggle>浅色 / 深色</button></div>
+
+<div class="artboards">
+<div>
+<p class="cap"><b>1280×800 · 主页。</b>左侧是 Kyokai 式侧栏（打开的窗格按组列出，底部是搜索、外观、设置和网络状态）。主页顶部两张卡：「这台电脑」和「连接手机」（只填 IP 也能连）；下方每台手机一张卡，名字、厂商标志、连接方式、实时状态和最常用的操作都在卡上。</p>
+<div class="win">
+  <aside class="side">
+    <div class="side-top"><button class="ib" title="收起侧栏"><i data-i="sidebar"></i></button><span class="sp"></span><button class="ib" title="打开…"><i data-i="plus"></i></button></div>
+    <div class="nav on"><span class="mark"></span><span class="t" style="font-weight:600">主页</span></div>
+    <div class="side-label"><span>已打开</span><span class="num">3</span></div>
+    <div class="side-scroll">
+      <div class="group">
+        <div class="gtitle ell">我的折叠屏</div>
+        <div class="nav"><i data-i="dex"></i><span class="t ell">三星 DeX</span></div>
+        <div class="nav"><i data-i="app"></i><span class="t ell">微信</span></div>
+      </div>
+      <div class="nav"><span class="av sm" data-dev="Google|Pixel 8 Pro|Pixel 8 Pro"></span><span class="t ell">Pixel 8 Pro</span><span class="k">手机屏幕</span></div>
+      <div class="side-label"><span>独立窗口</span></div>
+      <div class="nav"><i data-i="camera"></i><span class="t ell">我的折叠屏</span><span class="k">摄像头</span></div>
+    </div>
+    <div class="side-foot">
+      <div class="netstate" title="打开网络设置"><span class="dot ok"></span><span class="ell">跨网络 · 已连接</span></div>
+      <button class="ib" title="搜索 (Ctrl K)"><i data-i="search"></i></button>
+      <button class="ib" title="外观：跟随系统"><i data-i="auto"></i></button>
+      <button class="ib" title="设置"><i data-i="gear"></i></button>
+    </div>
+  </aside>
+
+  <main class="panes">
+    <section class="pane">
+      <header class="ph">
+        <div class="who"><i data-i="home"></i><div class="names"><div class="n1">主页</div></div></div>
+        <span class="grow"></span>
+        <div class="winbtns"><span><i data-i="min" class="s"></i></span><span><i data-i="max" class="s"></i></span><span class="x"><i data-i="close" class="s"></i></span></div>
+      </header>
+      <div class="pbody pad"><div class="center">
+        <div class="home-top">
+          <div class="card this-pc">
+            <div class="ctitle"><i data-i="dex"></i>这台电脑<span class="sp"></span><span class="pill ok"><span class="dot ok"></span>可以使用</span></div>
+            <div class="kv">
+              <span class="k">画面</span><span class="ell">硬件解码，H.264 和 H.265</span><span></span>
+              <span class="k">跨网络</span><span class="ell">家里 · 2 台手机在线</span><button class="btn sm">网络设置</button>
+              <span class="k">电脑上的 Android</span><span class="ell muted">已下载，未启动</span><button class="btn sm">启动</button>
+            </div>
+          </div>
+          <div class="card">
+            <div class="ctitle"><i data-i="link"></i>连接手机</div>
+            <div style="display:flex; gap:8px">
+              <div class="field focus" style="flex:1"><input value="100.64.0.12" aria-label="手机地址"></div>
+              <button class="btn pri">连接</button>
+            </div>
+            <div class="hint">填 IP 地址、域名或手机名称；端口可以不填，AndroFuse 会自己找。用 USB 连接的手机会自动出现。</div>
+            <div style="display:flex; align-items:center; gap:10px; margin-top:12px; flex-wrap:wrap">
+              <span class="muted" style="font-size:13px">打开为</span>
+              <div class="seg"><button class="on"><i data-i="dex" class="s"></i>三星 DeX</button><button><i data-i="mirror" class="s"></i>手机屏幕</button><button><i data-i="app" class="s"></i>应用窗口</button><button><i data-i="camera" class="s"></i>摄像头</button></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="sec"><span>手机</span><span class="muted num">4</span><span class="sp"></span>
+          <span style="font-weight:400; display:flex; align-items:center; gap:8px">网络中的其他手机 <span class="sw on"></span></span>
+          <div class="seg" style="font-weight:400"><button class="on">全部</button><button>在线</button></div>
+        </div>
+        <div class="devgrid">
+          <div class="dev">
+            <div class="dev-h"><span class="av" data-dev="samsung|SM-F971U1|我的折叠屏"></span><div class="tx"><div class="n ell">我的折叠屏</div><div class="m ell">Galaxy Z Fold8 · Android 17</div></div><span class="pill ok">已连接</span><button class="ib"><i data-i="more"></i></button></div>
+            <div class="route"><span class="dot ok"></span><span class="ell">USB · 断开后自动切到 Wi-Fi</span><i data-i="chevD" class="s"></i></div>
+            <div class="figs">
+              <div class="fig"><div class="fn">电量</div><div class="fv">88<small>%</small></div><div class="bar"><i style="width:88%; background:var(--ok-dot)"></i></div></div>
+              <div class="fig"><div class="fn">温度</div><div class="fv">33<small>°C</small></div><div class="bar"><i style="width:40%; background:#e8833a"></i></div></div>
+              <div class="fig"><div class="fn">可用存储</div><div class="fv">312<small> GB</small></div><div class="bar"><i style="width:39%; background:#2b88d8"></i></div></div>
+              <div class="fig"><div class="fn">网络</div><div class="fv">Wi-Fi</div><div class="bar"><i style="width:70%; background:#0e9f9f"></i></div></div>
+            </div>
+            <div class="dev-a"><div class="split"><button class="btn pri">三星 DeX</button><button class="btn pri"><i data-i="chevD" class="s"></i></button></div><button class="ib" title="手机屏幕"><i data-i="mirror"></i></button><button class="ib" title="应用窗口"><i data-i="apps"></i></button><button class="ib" title="摄像头"><i data-i="camera"></i></button><button class="ib" title="发送文件"><i data-i="send"></i></button></div>
+          </div>
+
+          <div class="dev">
+            <div class="dev-h"><span class="av" data-dev="Google|Pixel 8 Pro|Pixel 8 Pro"></span><div class="tx"><div class="n ell">Pixel 8 Pro</div><div class="m ell">Android 16</div></div><span class="pill ok">已连接</span><button class="ib"><i data-i="more"></i></button></div>
+            <div class="route warn"><span class="dot warn"></span><span class="ell">跨网络 · 中继 · 48 ms</span><i data-i="chevD" class="s"></i></div>
+            <div class="figs">
+              <div class="fig"><div class="fn">电量</div><div class="fv">41<small>%</small></div><div class="bar"><i style="width:41%; background:var(--ok-dot)"></i></div></div>
+              <div class="fig"><div class="fn">温度</div><div class="fv">29<small>°C</small></div><div class="bar"><i style="width:30%; background:#e8833a"></i></div></div>
+              <div class="fig"><div class="fn">可用存储</div><div class="fv">64<small> GB</small></div><div class="bar"><i style="width:75%; background:#2b88d8"></i></div></div>
+              <div class="fig"><div class="fn">网络</div><div class="fv">5G</div><div class="bar"><i style="width:35%; background:#0e9f9f"></i></div></div>
+            </div>
+            <div class="dev-a"><div class="split"><button class="btn pri">手机屏幕</button><button class="btn pri"><i data-i="chevD" class="s"></i></button></div><button class="ib" title="应用窗口"><i data-i="apps"></i></button><button class="ib" title="摄像头"><i data-i="camera"></i></button><button class="ib" title="发送文件"><i data-i="send"></i></button></div>
+          </div>
+
+          <div class="dev">
+            <div class="dev-h"><span class="av" data-dev="Xiaomi|23127PN0CC|小米 14"></span><div class="tx"><div class="n ell">小米 14</div><div class="m ell">Android 15</div></div><span class="pill">离线</span><button class="ib"><i data-i="more"></i></button></div>
+            <div class="route"><span class="dot ring"></span><span class="ell">上次连接 11 月 25 日 02:23 · Wi-Fi</span></div>
+            <div class="muted" style="font-size:13px">手机在线后自动重连。</div>
+            <div class="dev-a"><button class="btn">连接</button></div>
+          </div>
+
+          <div class="dev">
+            <div class="dev-h"><span class="av" data-dev="x|x|x" data-glyph="vm"></span><div class="tx"><div class="n ell">Android 模拟器</div><div class="m ell">Android 16 · 在这台电脑上运行</div></div><span class="pill ok">已连接</span><button class="ib"><i data-i="more"></i></button></div>
+            <div class="route"><span class="dot ok"></span><span class="ell">这台电脑</span></div>
+            <div class="dev-a"><div class="split"><button class="btn pri">手机屏幕</button><button class="btn pri"><i data-i="chevD" class="s"></i></button></div><button class="ib" title="应用窗口"><i data-i="apps"></i></button></div>
+          </div>
+
+          <div class="dev dash">
+            <div class="dev-h"><span class="av dash" data-dev="samsung|Galaxy S24|Galaxy S24"></span><div class="tx"><div class="n ell">Galaxy S24</div><div class="m ell">在网络「家里」中 · 从未连接过</div></div></div>
+            <div class="route"><span class="dot ok"></span><span class="ell">直连 · 12 ms</span></div>
+            <div class="dev-a"><button class="btn">连接</button></div>
+          </div>
+        </div>
+      </div></div>
+    </section>
+  </main>
+</div>
+</div>
+
+<div class="narrow">
+<p class="cap"><b>820×600 · 深色 · 侧栏收成图标条。</b>上面两张卡改成上下排，手机卡一列。<b>重命名</b>（Kyokai 式）：⋯ › 重命名… 在设备上方打开编辑卡，Enter 保存，Esc 取消，清空就恢复手机自己的名字；名字只存在这台电脑上，侧栏、窗格、托盘、网络页都显示这个名字。厂商标志按 厂商 › 型号 › 名字 的顺序自动匹配，匹配不到就显示名字的首字。</p>
+<div class="win sm dark">
+  <aside class="side rail">
+    <div class="side-top"><button class="ib"><i data-i="sidebar"></i></button></div>
+    <button class="ib"><i data-i="plus"></i></button>
+    <div class="nav on"><span class="mark"></span></div>
+    <div class="nav"><span class="av sm" data-dev="samsung||"></span></div>
+    <div class="nav"><span class="av sm" data-dev="Google||"></span></div>
+    <div class="side-scroll"></div>
+    <div class="side-foot"><button class="ib"><i data-i="search"></i></button><button class="ib"><i data-i="gear"></i></button><span class="dot ok" style="margin:10px"></span></div>
+  </aside>
+  <main class="panes">
+    <section class="pane">
+      <header class="ph">
+        <div class="who"><i data-i="home"></i><div class="names"><div class="n1">主页</div></div></div>
+        <span class="grow"></span>
+        <div class="winbtns"><span><i data-i="min" class="s"></i></span><span><i data-i="max" class="s"></i></span><span class="x"><i data-i="close" class="s"></i></span></div>
+      </header>
+      <div class="pbody pad" style="padding:16px 18px">
+        <div class="sec" style="margin-top:0"><span>手机</span><span class="muted num">4</span></div>
+        <div class="editor">
+          <span class="av lg" data-dev="samsung|SM-F971U1|"></span>
+          <div style="flex:1; min-width:0">
+            <div class="lbl" style="margin-bottom:4px">名字（只在这台电脑上显示）</div>
+            <div class="field focus"><input value="我的折叠屏"></div>
+            <div class="hint">手机自己的名字：Galaxy Z Fold8。清空后恢复。</div>
+          </div>
+          <button class="btn">取消</button><button class="btn pri">保存</button>
+        </div>
+        <div class="dev" style="position:relative">
+          <div class="dev-h"><span class="av" data-dev="samsung|SM-F971U1|我的折叠屏"></span><div class="tx"><div class="n ell">我的折叠屏</div><div class="m ell">Galaxy Z Fold8 · Android 17</div></div><span class="pill ok">已连接</span><button class="ib on"><i data-i="more"></i></button></div>
+          <div class="route"><span class="dot ok"></span><span class="ell">USB · 断开后自动切到 Wi-Fi</span><i data-i="chevD" class="s"></i></div>
+          <div class="dev-a"><div class="split"><button class="btn pri">三星 DeX</button><button class="btn pri"><i data-i="chevD" class="s"></i></button></div><button class="ib"><i data-i="mirror"></i></button><button class="ib"><i data-i="apps"></i></button><button class="ib"><i data-i="camera"></i></button></div>
+          <div class="menu" style="right:8px; bottom:96px; width:248px">
+            <div class="mi"><i data-i="dex" class="s"></i><span class="t">大屏桌面（非三星 DeX）</span></div>
+            <div class="mi"><i data-i="apps" class="s"></i><span class="t">应用窗口…</span></div>
+            <div class="msep"></div>
+            <div class="mi"><i data-i="clip" class="s"></i><span class="t">发送剪贴板</span></div>
+            <div class="mi"><i data-i="send" class="s"></i><span class="t">发送文件…</span></div>
+            <div class="msep"></div>
+            <div class="mi hl"><i data-i="edit" class="s"></i><span class="t">重命名…</span></div>
+            <div class="mi"><i data-i="globe" class="s"></i><span class="t">连接方式…</span></div>
+            <div class="mi"><span class="ck"><i data-i="check" class="s"></i></span><span class="t">自动重连</span></div>
+            <div class="mi"><i data-i="phone" class="s"></i><span class="t">伴侣…</span></div>
+            <div class="msep"></div>
+            <div class="mi" style="color:var(--bad)"><i data-i="trash" class="s"></i><span class="t">忘记这台手机</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+</div>
+</div>
+<script src="logos.js"></script>
+<script src="common.js"></script>
+</body>
+</html>

@@ -6,15 +6,17 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"net"
+
 	"os"
 	"path/filepath"
 	"runtime"
-	"strconv"
+	"slices"
+
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
 	"github.com/YuanZhe-99/AndroFuse/internal/adb"
@@ -84,7 +86,9 @@ type guiRuntime struct {
 	compClient      *companion.Client
 	mcpServer       *mcp.Server
 	meshMgr         *mesh.Manager
-	meshCfg         mesh.Config // the running mesh, with its secret, for handing it to a paired phone
+	meshCfgs        map[string]mesh.Config        // the running networks by instance, with secrets and forwards, for handing one to a paired phone
+	tunnels         map[string]context.CancelFunc // Wireless debugging tunnels through each phone's Companion, by HardwareHash
+	tunnelTried     map[string]time.Time          // last automatic tunnel attempt per phone
 	micUplink       *avbridge.UplinkBridge
 	micUplinkCancel context.CancelFunc
 	recoverRan      bool
@@ -110,40 +114,6 @@ func (a *App) HandleURL(u string) {
 		return
 	}
 	go func() { _ = a.ensureAndroidHost().StartServer() }()
-}
-
-// ConnectCompanion establishes an authenticated TLS 1.3 connection to an optional Android Companion APK.
-func (a *App) ConnectCompanion(addr, token string) {
-	addr = strings.TrimSpace(addr)
-	token = strings.TrimSpace(token)
-	a.update(func() { a.compNotice = "" })
-	if addr == "" || token == "" {
-		a.update(func() { a.compNotice = L.CompanionCardDesc() })
-		return
-	}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		client, err := companion.Dial(ctx, addr, token, "")
-		if err != nil {
-			a.update(func() { a.compNotice = err.Error() })
-			return
-		}
-		st, _ := client.GetStatus(ctx)
-
-		a.rt.coreMu.Lock()
-		old := a.rt.compClient
-		a.rt.compClient = client
-		a.rt.coreMu.Unlock()
-		if old != nil {
-			_ = old.Close()
-		}
-		a.update(func() {
-			a.compConnected = true
-			a.compStatus = st
-			a.compNotice = ""
-		})
-	}()
 }
 
 // DisconnectCompanion closes any active TLS 1.3 connection to the Android Companion APK.
@@ -194,22 +164,6 @@ func (a *App) ContinueCompanionApp() {
 			a.LaunchAppWindow(*target, adb.AppEntry{Package: res.Package, Label: res.Package, Resizeable: true}, OpenDefault)
 		}
 	}()
-}
-
-// ConnectCompanionBeaconADB connects to the TLS wireless ADB port advertised by Companion over VPN/LAN.
-func (a *App) ConnectCompanionBeaconADB() {
-	a.mu.Lock()
-	addr := strings.TrimSpace(a.compAddr)
-	port := a.compStatus.WirelessADBPort
-	a.mu.Unlock()
-	if addr == "" || port <= 0 {
-		return
-	}
-	host, _, err := net.SplitHostPort(addr)
-	if err != nil || host == "" {
-		return
-	}
-	a.ConnectWirelessTLS(net.JoinHostPort(host, strconv.Itoa(port)), false)
 }
 
 // RunCompanionDisplayGuard invokes orphan display cleanup on the connected Companion APK (`INV-03`).
@@ -662,59 +616,8 @@ func (a *App) RefreshDevices() {
 				a.appIcons[path] = bmp
 			}
 		})
-	}()
-}
-
-// ConnectWirelessTLS connects to a discovered mDNS or manual TLS Wireless ADB host:port (`INV-07`).
-// Inputs: installCompanion, the Connect dialog's unticked opt-in (`INV-09`), then installs and
-// pairs the Companion over the new connection.
-func (a *App) ConnectWirelessTLS(addr string, installCompanion bool) {
-	a.update(func() { a.deviceNotice = "" })
-	go func() {
-		client, _, err := a.ensureADBAndLeases()
-		if err != nil {
-			a.update(func() { a.deviceNotice = err.Error() })
-			return
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		serial, err := client.ConnectTLS(ctx, addr, false)
-		if err != nil {
-			a.update(func() { a.deviceNotice = err.Error() })
-			return
-		}
-		a.update(func() { a.connectOpen = false })
-		if installCompanion {
-			a.mu.Lock()
-			join := a.compJoinMesh && a.rt.meshCfg.NetworkName != ""
-			a.mu.Unlock()
-			a.PairCompanionOverADB(serial, adb.MaskEndpoint(addr), join)
-			a.update(func() { a.page = string(pageCompanion) })
-		}
-		a.RefreshDevices()
-	}()
-}
-
-// PairWirelessTLS pairs with a 6-digit Android Wireless Debugging code (`INV-07`).
-func (a *App) PairWirelessTLS(addr, code string) {
-	a.update(func() { a.deviceNotice = "" })
-	go func() {
-		client, _, err := a.ensureADBAndLeases()
-		if err != nil {
-			a.update(func() { a.deviceNotice = err.Error() })
-			return
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
-		defer cancel()
-		if _, err := client.PairTLS(ctx, addr, code); err != nil {
-			a.update(func() { a.deviceNotice = err.Error() })
-			return
-		}
-		a.update(func() {
-			a.pairCode = ""
-			a.deviceNotice = L.PairSuccessHint()
-		})
-		a.RefreshDevices()
+		a.openPending(inspected)
+		a.refreshTray()
 	}()
 }
 
@@ -734,6 +637,7 @@ func (a *App) DisconnectWireless(serial string) {
 
 // LaunchDeX opens an interactive native Samsung DeX window (or virtual desktop fallback if requested/non-Samsung).
 func (a *App) LaunchDeX(d DiscoveredDevice, forceFallback bool, open OpenIn) {
+	sp := a.streamPrefs()
 	devKey := d.HardwareHash
 	if devKey == "" {
 		devKey = d.Target.DeviceHash
@@ -793,10 +697,11 @@ func (a *App) LaunchDeX(d DiscoveredDevice, forceFallback bool, open OpenIn) {
 				SessionID:     sid + "-vid",
 				Serial:        d.Target.Serial,
 				DisplayID:     ready.DisplayID,
-				MaxFPS:        60,
+				MaxFPS:        sp.fps,
+				CodecID:       sp.codec,
 				VideoBitRate:  12_000_000,
 				EnableControl: true,
-				Audio:         true,
+				Audio:         sp.audio,
 				InitialWidth:  uint32(ready.Width),
 				InitialHeight: uint32(ready.Height),
 				OnFrame: func(f core.NV12Frame) {
@@ -847,10 +752,11 @@ func (a *App) LaunchDeX(d DiscoveredDevice, forceFallback bool, open OpenIn) {
 			Serial:        d.Target.Serial,
 			NewDisplay:    "1600x900/160",
 			FlexDisplay:   true,
-			MaxFPS:        60,
+			MaxFPS:        sp.fps,
+			CodecID:       sp.codec,
 			VideoBitRate:  8_000_000,
 			EnableControl: true,
-			Audio:         true,
+			Audio:         sp.audio,
 			InitialWidth:  1600,
 			InitialHeight: 900,
 			OnFrame: func(f core.NV12Frame) {
@@ -878,6 +784,7 @@ func (a *App) LaunchDeX(d DiscoveredDevice, forceFallback bool, open OpenIn) {
 
 // LaunchMirror opens an interactive Phone Mirror window for Display 0.
 func (a *App) LaunchMirror(d DiscoveredDevice, open OpenIn) {
+	sp := a.streamPrefs()
 	devKey := d.HardwareHash
 	if devKey == "" {
 		devKey = d.Target.DeviceHash
@@ -925,11 +832,12 @@ func (a *App) LaunchMirror(d DiscoveredDevice, open OpenIn) {
 			SessionID:     sid,
 			Serial:        d.Target.Serial,
 			DisplayID:     0,
-			MaxSize:       1280,
-			MaxFPS:        60,
+			MaxSize:       sp.size,
+			MaxFPS:        sp.fps,
+			CodecID:       sp.codec,
 			VideoBitRate:  8_000_000,
 			EnableControl: true,
-			Audio:         true,
+			Audio:         sp.audio,
 			InitialWidth:  1080,
 			InitialHeight: 1920,
 			OnFrame: func(f core.NV12Frame) {
@@ -957,6 +865,7 @@ func (a *App) LaunchMirror(d DiscoveredDevice, open OpenIn) {
 
 // LaunchAppWindow opens an isolated chromeless flex-display native window running app on the target device.
 func (a *App) LaunchAppWindow(d DiscoveredDevice, app adb.AppEntry, open OpenIn) {
+	sp := a.streamPrefs()
 	pkg := strings.TrimSpace(app.Package)
 	if pkg == "" {
 		return
@@ -1022,10 +931,11 @@ func (a *App) LaunchAppWindow(d DiscoveredDevice, app adb.AppEntry, open OpenIn)
 			FlexDisplay:           true,
 			HideSystemDecorations: true,
 			StartAppPackage:       startArg,
-			MaxFPS:                60,
+			MaxFPS:                sp.fps,
+			CodecID:               sp.codec,
 			VideoBitRate:          8_000_000,
 			EnableControl:         true,
-			Audio:                 true,
+			Audio:                 sp.audio,
 			InitialWidth:          uint32(appWinInitW),
 			InitialHeight:         uint32(appWinInitH),
 			OnFrame: func(f core.NV12Frame) {
@@ -1129,17 +1039,10 @@ func (a *App) runOnMain(fn func()) {
 	}
 }
 
-// CloseAllSessions tears down every active session window and releases leases (INV-03).
+// CloseAllSessions shuts everything down for quitting or an update: every session (releasing its
+// leases, INV-03), the core with its networks, the Companion link, the assistant and the VM.
 func (a *App) CloseAllSessions() {
-	a.mu.Lock()
-	list := make([]*SessionWindow, 0, len(a.sessions))
-	for _, s := range a.sessions {
-		list = append(list, s)
-	}
-	a.mu.Unlock()
-	for _, s := range list {
-		s.Close()
-	}
+	a.CloseSessions()
 	a.rt.coreMu.Lock()
 	if a.rt.coreLib != nil {
 		a.rt.coreLib.Stop()
@@ -1150,7 +1053,6 @@ func (a *App) CloseAllSessions() {
 	a.rt.compClient = nil
 	aHost := a.rt.androidHost
 	mcpSrv := a.rt.mcpServer
-	meshMgr := a.rt.meshMgr
 	micCancel := a.rt.micUplinkCancel
 	a.rt.micUplinkCancel = nil
 	if a.rt.micUplink != nil {
@@ -1160,12 +1062,6 @@ func (a *App) CloseAllSessions() {
 	a.rt.coreMu.Unlock()
 	if micCancel != nil {
 		micCancel()
-	}
-	if meshMgr != nil {
-		_ = meshMgr.Stop()
-		a.mu.Lock()
-		a.meshStatus = meshMgr.Status()
-		a.mu.Unlock()
 	}
 	if mcpSrv != nil {
 		_ = mcpSrv.EmergencyStop()
@@ -1217,6 +1113,7 @@ func (a *App) ensureMCPServerLocked() *mcp.Server {
 			a.LaunchAppWindow(target, adb.AppEntry{Package: packageName, Label: packageName}, OpenDefault)
 			return map[string]any{"requested": packageName}, nil
 		},
+		Approve: a.requestApproval,
 	}, 30*time.Minute)
 	return a.rt.mcpServer
 }
@@ -1232,20 +1129,20 @@ func (a *App) findDeviceForMCP(id string) (DiscoveredDevice, bool) {
 	return DiscoveredDevice{}, false
 }
 
-// EnableMCP starts or updates the opt-in loopback MCP server with explicit allowlist settings.
-// Side effects: Opens 127.0.0.1 HTTP listener with bounded 30-minute token and updates UI state.
-func (a *App) EnableMCP(allowLaunch bool) {
+// EnableMCP starts (or restarts with the current choices) the opt-in loopback server that lets
+// the local assistant act: the tools in Settings › Security and privacy run without asking, the
+// others ask with a card above the panes each time.
+// Side effects: Opens a 127.0.0.1 HTTP listener with a bounded 30-minute token.
+func (a *App) EnableMCP() {
 	a.rt.coreMu.Lock()
 	srv := a.ensureMCPServerLocked()
 	a.rt.coreMu.Unlock()
 
-	st, err := srv.Enable(mcp.Allowlist{
-		ListDevices:    true,
-		RunDiagnostics: true,
-		LaunchApp:      allowLaunch,
-	})
 	a.mu.Lock()
-	a.mcpAllowLaunch = allowLaunch
+	allow := assistantAllowlist(a.prefs.AssistantAllow)
+	a.mu.Unlock()
+	st, err := srv.Enable(allow)
+	a.mu.Lock()
 	if err != nil {
 		a.mcpNotice = err.Error()
 		a.mcpStatus = srv.Status()
@@ -1379,124 +1276,6 @@ func (a *App) LaunchPhoneCamera(d DiscoveredDevice, facing string, open OpenIn) 
 	}()
 }
 
-// meshDeviceName is the EasyTier hostname the desktop announces on the mesh.
-const meshDeviceName = "androfuse-desktop"
-
-// MeshPrefs is the desktop's EasyTier network, kept in gui.json like Kyokai's networks. The
-// secret is stored only sealed with DPAPI for the current Windows user (`INV-08`); On remembers
-// whether the user left the mesh running, which is off until they start it (`INV-07`).
-type MeshPrefs struct {
-	On          bool   `json:"on"`
-	NetworkName string `json:"network_name"`
-	Peer        string `json:"peer,omitempty"`
-	// Accept lets other devices connect directly, on ListenPort: a random high port chosen the
-	// first time and kept while it stays free, so a paired phone's saved address stays valid.
-	Accept       bool   `json:"accept,omitempty"`
-	ListenPort   int    `json:"listen_port,omitempty"`
-	SealedSecret []byte `json:"sealed_secret,omitempty"`
-}
-
-// StartMesh starts the default-disabled EasyTier mesh embedded in the core (`INV-07`) and
-// remembers the network. An empty secret reuses the saved one of the same network.
-// Inputs: accept opens TCP and UDP listeners on a random high port (see companion.PickPort); off,
-// the desktop only dials out.
-func (a *App) StartMesh(netName, secret, peer string, accept bool) {
-	a.rt.coreMu.Lock()
-	lib, lErr := a.ensureCoreLocked()
-	if lErr == nil && a.rt.meshMgr == nil {
-		a.rt.meshMgr = mesh.NewManager(lib)
-	}
-	mgr := a.rt.meshMgr
-	a.rt.coreMu.Unlock()
-	if lErr != nil {
-		a.update(func() { a.meshNotice = lErr.Error() })
-		return
-	}
-
-	netName, secret, peer = strings.TrimSpace(netName), strings.TrimSpace(secret), strings.TrimSpace(peer)
-	a.mu.Lock()
-	saved := a.prefs.Mesh
-	a.mu.Unlock()
-	if secret == "" && saved != nil && saved.NetworkName == netName && len(saved.SealedSecret) > 0 {
-		if b, err := openSecret(saved.SealedSecret); err == nil {
-			secret = string(b)
-		}
-	}
-
-	cfg := mesh.Config{Enabled: true, NetworkName: netName, NetworkSecret: secret, DeviceName: meshDeviceName}
-	if peer != "" {
-		cfg.Peers = []string{peer}
-	}
-	port := 0
-	if accept {
-		prev := 0
-		if saved != nil {
-			prev = saved.ListenPort
-		}
-		p, pErr := companion.PickPort(prev)
-		if pErr != nil {
-			a.update(func() { a.meshNotice = pErr.Error() })
-			return
-		}
-		port = p
-		cfg.Listeners = []string{fmt.Sprintf("tcp://0.0.0.0:%d", port), fmt.Sprintf("udp://0.0.0.0:%d", port)}
-	}
-	err := mgr.Start(cfg)
-
-	a.mu.Lock()
-	a.meshStatus = mgr.Status()
-	if err != nil {
-		a.meshNotice = err.Error()
-	} else {
-		a.meshNotice = ""
-		a.rt.meshCfg = cfg
-		sealed, sErr := sealSecret([]byte(secret))
-		if sErr != nil {
-			sealed = nil
-		}
-		a.prefs.Mesh = &MeshPrefs{On: true, NetworkName: netName, Peer: peer, Accept: accept, ListenPort: port, SealedSecret: sealed}
-		a.savePrefs()
-	}
-	a.mu.Unlock()
-	a.runOnMain(func() {})
-}
-
-// resumeMesh restarts the remembered mesh at launch when the user left it running.
-func (a *App) resumeMesh() {
-	a.mu.Lock()
-	p := a.prefs.Mesh
-	a.mu.Unlock()
-	if p == nil || !p.On {
-		return
-	}
-	a.StartMesh(p.NetworkName, "", p.Peer, p.Accept)
-}
-
-// StopMesh stops the embedded EasyTier mesh.
-func (a *App) StopMesh() {
-	a.rt.coreMu.Lock()
-	mgr := a.rt.meshMgr
-	a.rt.coreMu.Unlock()
-	if mgr == nil {
-		return
-	}
-	err := mgr.Stop()
-	a.mu.Lock()
-	a.meshStatus = mgr.Status()
-	if err != nil {
-		a.meshNotice = err.Error()
-	} else {
-		a.meshNotice = ""
-		a.rt.meshCfg = mesh.Config{}
-		if a.prefs.Mesh != nil {
-			a.prefs.Mesh.On = false
-			a.savePrefs()
-		}
-	}
-	a.mu.Unlock()
-	a.runOnMain(func() {})
-}
-
 // StartCompanionMicUplink opens Windows WASAPI mic capture and streams 20ms s16le PCM to Android Companion (`INV-09`).
 func (a *App) StartCompanionMicUplink() {
 	a.StopCompanionMicUplink()
@@ -1587,4 +1366,356 @@ func newSessionID(prefix string) string {
 	var b [4]byte
 	_, _ = rand.Read(b[:])
 	return prefix + "-" + hex.EncodeToString(b[:])
+}
+
+// SendClipboardToPhone sends text to the connected Companion's clipboard (Home's ⋯ and the tray).
+func (a *App) SendClipboardToPhone(text string) {
+	a.rt.coreMu.Lock()
+	c := a.rt.compClient
+	a.rt.coreMu.Unlock()
+	if c == nil || text == "" {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		defer cancel()
+		if err := c.SendClipboard(ctx, uint64(time.Now().UnixNano()), text); err != nil {
+			a.toast(err.Error())
+			return
+		}
+		a.toast(L.ClipboardSyncedToDevice())
+	}()
+}
+
+// SendFileToPhone asks for files and pushes them to the connected Companion, which saves them in
+// Downloads.
+// Side effects: opens the system file dialog off the UI thread.
+func (a *App) SendFileToPhone() {
+	a.rt.coreMu.Lock()
+	c := a.rt.compClient
+	a.rt.coreMu.Unlock()
+	if c == nil {
+		return
+	}
+	go func() {
+		paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{Parent: a.mainWindow(), Title: L.ActionSendFile(), Multiple: true})
+		if err != nil || len(paths) == 0 {
+			return
+		}
+		for _, p := range paths {
+			data, err := os.ReadFile(p)
+			if err != nil {
+				a.toast(err.Error())
+				return
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			_, err = c.PushFile(ctx, filepath.Base(p), data)
+			cancel()
+			if err != nil {
+				a.toast(err.Error())
+				return
+			}
+		}
+		a.toast(L.FilesSent(len(paths)))
+	}()
+}
+
+// toast shows a short message at the foot of the main window.
+func (a *App) toast(msg string) {
+	a.update(func() { a.toastMsg = msg })
+}
+
+// Local assistant tools, as Settings › Security and privacy names them.
+const (
+	toolStatus = "list_devices"
+	toolChecks = "run_diagnostics"
+	toolLaunch = "launch_app"
+)
+
+// assistantAllowlist turns the tools chosen to run without asking into the server's allowlist.
+func assistantAllowlist(tools []string) mcp.Allowlist {
+	return mcp.Allowlist{
+		ListDevices:    slices.Contains(tools, toolStatus),
+		RunDiagnostics: slices.Contains(tools, toolChecks),
+		LaunchApp:      slices.Contains(tools, toolLaunch),
+	}
+}
+
+// requestApproval shows a card above the panes asking about one call of the local assistant's
+// tool and waits for the answer (Deny when ctx ends first), INV-07.
+func (a *App) requestApproval(ctx context.Context, tool, detail string) bool {
+	id := newSessionID("ap")
+	ch := make(chan bool, 1)
+	title := L.ApprovalTitle(assistantToolWords(tool))
+	a.update(func() { a.approvals = append(a.approvals, approval{ID: id, Title: title, Detail: detail, answer: ch}) })
+	if n := mygo.NewNotification(mygo.NotificationOptions{Title: title, Body: L.ApprovalNotify()}); n != nil {
+		_ = n.Show()
+	}
+	defer a.update(func() {
+		a.approvals = slices.DeleteFunc(a.approvals, func(x approval) bool { return x.ID == id })
+	})
+	wait, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	select {
+	case ok := <-ch:
+		return ok
+	case <-wait.Done():
+		return false
+	}
+}
+
+// answerApproval answers the card id.
+func (a *App) answerApproval(id string, ok bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, ap := range a.approvals {
+		if ap.ID == id {
+			select {
+			case ap.answer <- ok:
+			default:
+			}
+		}
+	}
+}
+
+// assistantToolWords names a local assistant tool for people.
+func assistantToolWords(tool string) string {
+	switch tool {
+	case toolStatus:
+		return L.ToolStatus()
+	case toolChecks:
+		return L.ToolChecks()
+	case toolLaunch:
+		return L.ToolLaunch()
+	}
+	return tool
+}
+
+// CloseSessions closes every open picture (DeX, phone screens, app windows, cameras), releasing
+// their leases (INV-03), and leaves the rest running.
+func (a *App) CloseSessions() {
+	a.mu.Lock()
+	list := make([]*SessionWindow, 0, len(a.sessions))
+	for _, s := range a.sessions {
+		list = append(list, s)
+	}
+	a.mu.Unlock()
+	for _, s := range list {
+		s.Close()
+	}
+}
+
+// ScreenshotPhone saves the phone's screen to Pictures\AndroFuse without opening a picture
+// (the tray's Screenshot).
+func (a *App) ScreenshotPhone(d DiscoveredDevice) {
+	client, _, err := a.ensureADBAndLeases()
+	if err != nil {
+		a.notify(err.Error())
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	png, err := client.ExecOut(ctx, d.Target.Serial, "screencap", "-p")
+	if err != nil || len(png) == 0 {
+		a.notify(L.ScreenshotFailed())
+		return
+	}
+	home, _ := os.UserHomeDir()
+	dir := filepath.Join(home, "Pictures", "AndroFuse")
+	_ = os.MkdirAll(dir, 0o755)
+	path := filepath.Join(dir, fmt.Sprintf("%s-%s.png", strings.ReplaceAll(a.phoneName(d), " ", "_"), time.Now().Format("20060102-150405")))
+	if err := os.WriteFile(path, png, 0o644); err != nil {
+		a.notify(err.Error())
+		return
+	}
+	a.notify(L.ScreenshotSaved(filepath.Base(path)))
+}
+
+// PhoneScreenOff puts the phone's screen to sleep (the tray's Turn phone screen off).
+func (a *App) PhoneScreenOff(d DiscoveredDevice) {
+	client, _, err := a.ensureADBAndLeases()
+	if err != nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	_, _ = client.Shell(ctx, d.Target.Serial, "input keyevent KEYCODE_SLEEP")
+}
+
+// notify shows a Windows notification from AndroFuse (for actions taken from the tray, when the
+// main window may be closed).
+func (a *App) notify(msg string) {
+	_ = mygo.NewNotification(mygo.NotificationOptions{Title: L.AppName(), Body: msg}).Show()
+}
+
+// streamPrefs is the picture the user asked for (Settings › Phones and picture): a size limit (0
+// follows the phone), a frame-rate limit, the video format and whether the phone's sound plays.
+// They are targets; the header shows what is measured (`INV-05`).
+type streamPrefs struct {
+	size  int
+	fps   float64
+	codec uint32
+	audio bool
+}
+
+func (a *App) streamPrefs() streamPrefs {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	sp := streamPrefs{size: a.prefs.MaxSize, fps: 60, codec: scrcpy.CodecH264, audio: !a.prefs.MuteSound}
+	if a.prefs.MaxFPS > 0 {
+		sp.fps = float64(a.prefs.MaxFPS)
+	}
+	if a.prefs.Codec == "h265" {
+		sp.codec = scrcpy.CodecH265
+	}
+	return sp
+}
+
+// handoffOn reports whether a DeX session moves to Wi-Fi when USB is unplugged (Settings ›
+// Phones and picture).
+func (a *App) handoffOn() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return !a.prefs.NoUSBHandoff
+}
+
+// watchDevices notices phones plugged in, unplugged or reconnected: every 10 s it lists adb's
+// targets (cheap) and scans fully only when that list changed; every minute it scans when a
+// remembered phone with automatic reconnect is offline, which tries to reconnect it.
+func (a *App) watchDevices(ctx context.Context) {
+	last := ""
+	tick := time.NewTicker(10 * time.Second)
+	defer tick.Stop()
+	n := 0
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+		}
+		n++
+		client, _, err := a.ensureADBAndLeases()
+		if err != nil {
+			continue
+		}
+		lctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		devs, err := client.Devices(lctx)
+		cancel()
+		if err != nil {
+			continue
+		}
+		var parts []string
+		for _, d := range devs {
+			parts = append(parts, d.Serial+"="+d.State)
+		}
+		slices.Sort(parts)
+		now := strings.Join(parts, ",")
+		changed := now != last
+		last = now
+		if changed || (n%6 == 0 && a.wantsReconnect(devs)) {
+			a.RefreshDevices()
+		}
+	}
+}
+
+// wantsReconnect reports whether a remembered phone with automatic reconnect is not among devs.
+func (a *App) wantsReconnect(devs []adb.Device) bool {
+	online := a.onlineHashes(devs)
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, r := range a.remembered {
+		if r.AutoReconnect && !online[r.HardwareHash] {
+			return true
+		}
+	}
+	return false
+}
+
+// LaunchShare shows a remembered phone's screen through its Companion when Wireless debugging
+// cannot run (mobile data): the phone asks its user (Android's capture consent), then streams
+// H.264 in scrcpy framing over the Companion's TLS link, which the same decoder shows. Back, Home
+// and Recents go through the Companion's accessibility service; taps are not available.
+// Side effects: may add a mesh forward to reach the Companion; opens a session.
+func (a *App) LaunchShare(hash string, open OpenIn) {
+	r, ok := a.RememberedFor(hash)
+	if !ok || r.Companion == nil {
+		a.notify(L.CompanionNotPaired())
+		return
+	}
+	b := *r.Companion
+	go func() {
+		tok, err := openSecret(b.SealedToken)
+		if err != nil {
+			a.notify(err.Error())
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+		defer cancel()
+		addr, err := a.companionRoute(ctx, hash, b)
+		if err != nil {
+			a.notify(err.Error())
+			return
+		}
+		a.toast(L.ShareAsking(r.displayName()))
+		stream, err := companion.DialShare(ctx, addr, string(tok), b.Fingerprint)
+		if err != nil {
+			a.notify(err.Error())
+			return
+		}
+		keys, _ := companion.Dial(ctx, addr, string(tok), b.Fingerprint)
+		a.rt.coreMu.Lock()
+		lib, lErr := a.ensureCoreLocked()
+		a.rt.coreMu.Unlock()
+		if lErr != nil {
+			_ = stream.Close()
+			a.notify(lErr.Error())
+			return
+		}
+		sid := newSessionID("share")
+		sw := newSessionWindow(a, SessionSpec{
+			ID:           sid,
+			DeviceKey:    hash,
+			Title:        r.displayName(),
+			Mode:         SessionModeShare,
+			Open:         open,
+			Transport:    "Companion",
+			BackendLabel: L.KindShare(),
+			TargetSpec:   "1280 · 30 fps",
+			OnClose: func() {
+				if keys != nil {
+					_ = keys.Close()
+				}
+			},
+		})
+		if keys != nil {
+			sw.shareKey = func(action string) {
+				kctx, kcancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer kcancel()
+				if err := keys.Key(kctx, action); err != nil {
+					sw.flashNote(err.Error())
+				}
+			}
+		}
+		var vSess *scrcpy.Session
+		vSess, err = scrcpy.StartFromConns(lib, nil, nil, 0, 0, nil, stream, nil, false, scrcpy.LaunchConfig{
+			SessionID:     sid,
+			InitialWidth:  720,
+			InitialHeight: 1280,
+			OnFrame: func(f core.NV12Frame) {
+				if vSess != nil {
+					st := vSess.Stats()
+					sw.PushNV12(f, st.MeasuredFPS, st.AvgDecodeUs)
+				} else {
+					sw.PushNV12(f, 0, int64(f.DecodeUs))
+				}
+			},
+		})
+		if err != nil {
+			_ = stream.Close()
+			a.notify(err.Error())
+			return
+		}
+		a.addSession(sw)
+		a.runOnMain(func() { sw.attachScrcpy(vSess, nil, mirrorDefW, mirrorDefH) })
+	}()
 }

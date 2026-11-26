@@ -1,171 +1,344 @@
 package gui
 
 import (
-	"fmt"
 	"runtime"
 	"strconv"
 	"strings"
 
-	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
-	"github.com/YuanZhe-99/AndroFuse/internal/adb"
 	"github.com/YuanZhe-99/AndroFuse/internal/androidhost"
-	"github.com/YuanZhe-99/AndroFuse/internal/dex"
-	"github.com/YuanZhe-99/AndroFuse/internal/version"
 	L "github.com/YuanZhe-99/AndroFuse/locales"
 )
 
-// Settings categories (V2.1: six icon-led categories with a breadcrumb).
-const (
-	setGeneral  = "general"
-	setWindows  = "windows"
-	setNetwork  = "network"
-	setLocal    = "local"
-	setSecurity = "security"
-	setAbout    = "about"
-)
+// pageHome is the main window's Home pane; sessions show as "pane:<id>" or pageSplit.
+const pageHome = "home"
 
-// view builds the main window: on Android the Companion; on desktops the sidebar (an icon rail
-// below railBreak) beside the main pane, whose page is a list page or docked sessions.
+// view builds the main window (design/README.md, "Shell"): on Android the Companion; on desktops
+// the sidebar on the window's material beside the panes — cards that need a decision above them,
+// then Home or the open sessions — with Settings, search and the + picker over them.
 func (a *App) view(c *ui.Context) {
 	if runtime.GOOS == "android" {
 		androidhost.RenderCompanionView(c, a.ensureAndroidHost())
 		return
 	}
-	t := c.Theme()
 	k := tok(c)
 	if c.Vibrancy() {
 		c.Root().Background(ui.Transparent)
 	} else {
 		c.Root().Background(k.canvas)
 	}
+	c.OnWindowShortcut(ui.Cmd, ui.KeyK, func() { a.toggleSearch() })
+	c.OnWindowShortcut(ui.Cmd, ui.KeyComma, func() { a.openSettings("") })
+
 	w, _ := c.Size()
+	a.mu.Lock()
+	rail := a.prefs.SidebarRail || w < railBreak
+	hidden := w < mobileBreak
+	a.mu.Unlock()
 
-	if w < mobileBreak {
-		ui.Column(c.Key("mobile-shell")).Fill().Background(t.Background).Children(func() {
-			ui.Scroll(c.Key("mobile-content")).Grow(1).FillWidth().Padding(16).Children(func() {
-				a.pageBody(c, k)
-			})
-			a.bottomNav(c, k)
-		})
-		a.connectDialog(c, k)
-		return
-	}
-
-	ui.Row(c.Key("desktop-shell")).Fill().AlignItems(ui.Stretch).Children(func() {
-		a.sidebar(c, k, w < railBreak)
-		ui.Column(c.Key("main-pane-wrap")).Grow(1).MinWidth(0).MinHeight(0).Padding(paneMargin, paneMargin, paneMargin, 0).Children(func() {
-			ui.Column(c.Key("main-pane")).Grow(1).FillWidth().MinHeight(0).Radius(paneRadius).Clip().
-				Background(t.Background).Border(1, t.Border).Shadow(0, 6, 18, 0, paneShadow).Children(func() {
-				a.mainHeader(c)
-				ui.Column(c.Key("main-body")).Grow(1).FillWidth().MinHeight(0).Children(func() {
-					if !a.paneArea(c) {
-						ui.Scroll(c.Key("pane-scroll")).Grow(1).FillWidth().Padding(20).Children(func() {
-							a.pageBody(c, k)
-						})
-					}
-				})
-			})
+	ui.Row(c.Key("shell")).Fill().AlignItems(ui.Stretch).Children(func() {
+		if !hidden {
+			a.sidebar(c, k, rail)
+		}
+		left := float32(0)
+		if hidden {
+			left = paneMargin
+		}
+		ui.Column(c.Key("panes")).Grow(1).MinWidth(0).MinHeight(0).Gap(paneMargin).
+			Padding(paneMargin, paneMargin, paneMargin, left).Children(func() {
+			a.noticeCards(c, k)
+			if !a.paneArea(c) {
+				a.homePane(c, k)
+			}
 		})
 	})
-	a.connectDialog(c, k)
+	a.settingsSheet(c, k)
+	a.searchPalette(c, k)
 }
 
-// navCounts returns how many devices are online and how many apps the Apps page can list.
-func (a *App) navCounts() (devices, apps int) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	for _, d := range a.devices {
-		if d.Target.State == "device" {
-			devices++
-		}
-		apps += len(d.Apps)
-	}
-	return devices, apps
-}
-
-// badgeText caps a counter at "99+"; zero hides it.
-func badgeText(n int) string {
-	if n > navBadgeMax {
-		return strconv.Itoa(navBadgeMax) + "+"
-	}
-	return strconv.Itoa(n)
-}
-
-// sidebar is the navigation column: brand, the one tinted Connect action, Devices / Apps /
-// Companion, the open sessions, Settings and the readiness footer that opens Diagnostics.
+// sidebar is Kyokai's sidebar: hide, + (the picker), Home, the open panes grouped as they show,
+// separate windows, and at its foot the networks' state, search, appearance and Settings.
 func (a *App) sidebar(c *ui.Context, k tokens, rail bool) {
 	width := sidebarW
 	if rail {
 		width = railW
 	}
 	a.mu.Lock()
-	selected := a.page
+	page := a.page
 	a.mu.Unlock()
-	devCount, appCount := a.navCounts()
-
-	ui.Column(c.Key("sidebar")).Width(width).Shrink(0).FillHeight().Padding(14, 10).Gap(10).Children(func() {
-		ui.Row(c.Key("brand-row")).Gap(10).AlignItems(ui.Center).Padding(4, 4).DragWindow().Children(func() {
-			if appIconBitmap != nil {
-				ui.Image(c, appIconBitmap).Size(28, 28).Radius(7)
+	align := ui.Stretch
+	if rail {
+		align = ui.Center
+	}
+	ui.Column(c.Key("sidebar")).Width(width).Shrink(0).FillHeight().Padding(paneMargin).Gap(2).AlignItems(align).Children(func() {
+		ui.Row(c.Key("side-top")).Height(paneHeaderH).Shrink(0).AlignItems(ui.Center).Gap(4).DragWindow().Children(func() {
+			if iconBtn(c, "side-toggle", iconSidebar, L.SidebarToggle(), false).Clicked() {
+				a.mu.Lock()
+				a.prefs.SidebarRail = !a.prefs.SidebarRail
+				a.savePrefs()
+				a.mu.Unlock()
 			}
 			if !rail {
-				ui.Column(c.Key("brand-text")).Gap(1).Children(func() {
-					ui.Text(c, L.AppName()).Bold().FontSize(sizeHeading)
-					ui.Text(c, "v"+version.Version).FontSize(sizeSmall).TextColor(k.text3)
-				})
+				ui.Box(c.Key("side-drag")).Grow(1).FillHeight().DragWindow()
+				a.plusButton(c, "side-plus")
 			}
 		})
+		if rail {
+			a.plusButton(c, "side-plus")
+		}
+		a.navRow(c, k, "nav-home", rail, page == pageHome, func() { appMark(c, 20) }, L.NavHome(), "", func() { a.choosePage(pageHome) })
 
-		conn := ui.ButtonBase(c.Key("btn-connect")).FillWidth().Height(36).Radius(radiusMD).Background(k.brandSoft).
-			Center().Label(L.ConnectDevice()).Tooltip(L.ConnectDevice())
-		conn.Children(func() {
-			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-				ui.Icon(c, iconPlus).Size(navIconSize, navIconSize).TextColor(k.brandSoftText)
-				if !rail {
-					ui.Text(c, L.ConnectDevice()).Bold().FontSize(sizeBody).TextColor(k.brandSoftText)
-				}
+		ui.Scroll(c.Key("side-scroll")).Grow(1).FillWidth().Children(func() {
+			ui.Column(c.Key("side-open")).FillWidth().Gap(2).AlignItems(align).Children(func() {
+				a.openEntries(c, k, rail, page)
 			})
 		})
-		if conn.Clicked() {
-			a.mu.Lock()
-			a.connectOpen = true
-			a.mu.Unlock()
-		}
-
-		if rail {
-			a.railNav(c, k, selected)
-		} else {
-			sb := ui.Sidebar(c.Key("nav-sidebar"), &selected, func() {
-				ui.SidebarSection(c.Key("nav-main"), "", nil, func() {
-					ui.SidebarItem(c, string(pageDevices), iconDevices, L.NavDevices()).Children(func() {
-						if devCount > 0 {
-							ui.Badge(c, badgeText(devCount))
-						}
-					})
-					ui.SidebarItem(c, string(pageApps), iconApps, L.NavApps()).Children(func() {
-						if appCount > 0 {
-							ui.Badge(c, badgeText(appCount))
-						}
-					})
-					ui.SidebarItem(c, string(pageCompanion), iconLink, L.NavCompanion())
-				})
-				a.openSidebarItems(c)
-				ui.SidebarSection(c.Key("nav-app"), "", nil, func() {
-					ui.SidebarItem(c, string(pageSettings), iconSettings, L.NavSettings())
-				})
-			}).Grow(1).FillWidth().Background(ui.Transparent)
-			if sb.Changed() {
-				a.choosePage(selected)
-			}
-		}
-		a.readinessFooter(c, k, rail)
+		a.sidebarFoot(c, k, rail)
 	})
 }
 
-// choosePage follows a sidebar choice: a popped-out session raises its window, anything else
-// becomes the page.
+// plusButton opens the + picker below it.
+func (a *App) plusButton(c *ui.Context, key string) {
+	a.mu.Lock()
+	open := a.picker.Open
+	a.mu.Unlock()
+	b := iconBtn(c, key, iconPlus, L.PickerOpen(), open)
+	if b.Clicked() {
+		a.openPicker(a.picker.Kind, "")
+	}
+	a.pickerPopover(c, b)
+}
+
+// navRow is one sidebar entry: an icon (or avatar), a title and a muted word after it.
+func (a *App) navRow(c *ui.Context, k tokens, key string, rail, selected bool, icon func(), title, sub string, onClick func()) {
+	t := c.Theme()
+	b := ui.ButtonBase(c.Key(key)).Radius(radiusMD).Label(title).Tooltip(title)
+	if rail {
+		b.Size(touchTargetMin+4, touchTargetMin).Center()
+	} else {
+		b.FillWidth().Height(36).Padding(0, 10)
+	}
+	switch {
+	case selected:
+		b.Background(t.Surface).Border(1, t.Border)
+	case b.Hovered():
+		b.Background(t.SurfaceHover)
+	}
+	b.Children(func() {
+		row := ui.Row(c).FillHeight().Gap(10).AlignItems(ui.Center)
+		if !rail {
+			row.FillWidth()
+		}
+		row.Children(func() {
+			icon()
+			if !rail {
+				ui.Text(c, title).FontSize(sizeBody).SingleLine().Grow(1).MinWidth(0)
+				if sub != "" {
+					ui.Text(c, sub).FontSize(sizeSmall).TextColor(k.text3).SingleLine().Shrink(0)
+				}
+			}
+		})
+	})
+	if b.Clicked() {
+		onClick()
+	}
+}
+
+// appMark draws AndroFuse's mark at size.
+func appMark(c *ui.Context, size float32) {
+	if appIconBitmap != nil {
+		ui.Image(c, appIconBitmap).Size(size, size).Radius(size / 4)
+	}
+}
+
+// openEntries lists the open sessions: a split as a card titled with its phones over its two rows,
+// a pane alone as a row, then the sessions in windows of their own.
+func (a *App) openEntries(c *ui.Context, k tokens, rail bool, page string) {
+	a.mu.Lock()
+	split := a.split
+	a.mu.Unlock()
+	var docked, popped []*SessionWindow
+	for _, s := range a.sessionsSorted() {
+		if s.Docked() {
+			docked = append(docked, s)
+		} else {
+			popped = append(popped, s)
+		}
+	}
+	if len(docked) > 0 && !rail {
+		ui.Row(c.Key("side-open-label")).FillWidth().Padding(12, 10, 4, 10).Children(func() {
+			ui.Text(c, L.NavOpen()).FontSize(sizeSmall).TextColor(k.text3).Grow(1)
+			ui.Text(c, strconv.Itoa(len(docked))).FontSize(sizeSmall).TextColor(k.text3).FontFeatures("tnum")
+		})
+	}
+	inSplit := map[string]bool{}
+	if split != nil {
+		sa, sb := a.session(split.A), a.session(split.B)
+		if sa != nil && sb != nil {
+			inSplit[sa.spec.ID], inSplit[sb.spec.ID] = true, true
+			group := func() {
+				for _, s := range []*SessionWindow{sa, sb} {
+					a.sessionRow(c, k, s, rail, page == pageSplit, pageSplit)
+				}
+			}
+			if rail {
+				group()
+			} else {
+				t := c.Theme()
+				ui.Column(c.Key("side-group")).FillWidth().Padding(4).Radius(radiusLG).Background(t.SurfaceHover.Alpha(0.6)).Gap(2).Children(func() {
+					ui.Text(c, a.groupTitle(sa, sb)).FontSize(sizeSmall).TextColor(k.text3).SingleLine().Padding(2, 8)
+					group()
+				})
+			}
+		}
+	}
+	for _, s := range docked {
+		if !inSplit[s.spec.ID] {
+			a.sessionRow(c, k, s, rail, page == panePrefix+s.spec.ID, panePrefix+s.spec.ID)
+		}
+	}
+	if len(popped) > 0 {
+		if !rail {
+			ui.Text(c.Key("side-win-label"), L.NavWindows()).FontSize(sizeSmall).TextColor(k.text3).Padding(12, 10, 4, 10)
+		}
+		for _, s := range popped {
+			a.sessionRow(c, k, s, rail, false, windowPrefix+s.spec.ID)
+		}
+	}
+}
+
+// groupTitle names a split group by its phones ("My Fold + Pixel 8 Pro", or one name).
+func (a *App) groupTitle(x, y *SessionWindow) string {
+	nx, ny := a.sessionPhone(x), a.sessionPhone(y)
+	if nx == ny {
+		return nx
+	}
+	return nx + " + " + ny
+}
+
+// sessionRow is a session's sidebar entry: the phone's avatar or the app, its name, and the kind.
+func (a *App) sessionRow(c *ui.Context, k tokens, s *SessionWindow, rail, selected bool, target string) {
+	title, kind := a.sessionPhone(s), s.kindWord()
+	if s.spec.Mode == SessionModeApp && s.spec.Title != "" {
+		title, kind = s.spec.Title, a.sessionPhone(s)
+	}
+	a.navRow(c, k, "side-"+s.spec.ID, rail, selected, func() { a.sessionIcon(c, s, avatarSmall) }, title, kind, func() { a.choosePage(target) })
+}
+
+// sessionIcon is a session's small icon: the app's icon, else the phone's avatar.
+func (a *App) sessionIcon(c *ui.Context, s *SessionWindow, size float32) {
+	if s.spec.Mode == SessionModeApp && s.spec.AppIcon != nil {
+		ui.Image(c, s.spec.AppIcon).Size(size, size).Radius(size / 4)
+		return
+	}
+	logo, glyph, name := a.phoneMark(s.spec.DeviceKey)
+	phoneAvatar(c, size, logo, glyph, name)
+}
+
+// sidebarFoot holds the networks' state (opens Settings › Network), search, appearance and Settings.
+func (a *App) sidebarFoot(c *ui.Context, k tokens, rail bool) {
+	dot, words := a.networkSummary(k)
+	footAlign := ui.Stretch
+	if rail {
+		footAlign = ui.Center
+	}
+	ui.Column(c.Key("side-foot")).FillWidth().Gap(2).AlignItems(footAlign).Children(func() {
+		if !rail {
+			t := c.Theme()
+			b := ui.ButtonBase(c.Key("side-net")).FillWidth().Height(32).Padding(0, 10).Radius(radiusMD).Label(L.NetSidebar(words)).Tooltip(L.SettingsNetwork())
+			if b.Hovered() {
+				b.Background(t.SurfaceHover)
+			}
+			b.Children(func() {
+				ui.Row(c).FillHeight().FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
+					ui.Box(c).Size(8, 8).Radius(4).Background(dot).Shrink(0)
+					ui.Text(c, L.NetSidebar(words)).FontSize(sizeSmall).TextColor(k.text2).SingleLine().MinWidth(0)
+				})
+			})
+			if b.Clicked() {
+				a.openSettings(setNetwork)
+			}
+		}
+		dir := ui.Row
+		if rail {
+			dir = ui.Column
+		}
+		dir(c.Key("side-icons")).Gap(2).AlignItems(ui.Center).Children(func() {
+			if iconBtn(c, "side-search", iconSearch, L.SearchOpen(), false).Clicked() {
+				a.toggleSearch()
+			}
+			a.mu.Lock()
+			theme := a.prefs.Theme
+			a.mu.Unlock()
+			icon, tip := iconAuto, L.ThemeSystem()
+			switch theme {
+			case "light":
+				icon, tip = iconSun, L.ThemeLight()
+			case "dark":
+				icon, tip = iconMoon, L.ThemeDark()
+			}
+			if iconBtn(c, "side-theme", icon, tip, false).Clicked() {
+				next := map[string]string{"system": "light", "light": "dark", "dark": "system", "": "light"}[theme]
+				a.setTheme(next)
+			}
+			if iconBtn(c, "side-settings", iconSettings, L.NavSettings(), false).Clicked() {
+				a.openSettings("")
+			}
+			if rail {
+				ui.Box(c.Key("side-net-dot")).Size(8, 8).Radius(4).Background(dot).Margin(10, 0).Tooltip(words)
+			}
+		})
+	})
+}
+
+// networkSummary is the networks' state as a dot color and a few words.
+func (a *App) networkSummary(k tokens) (ui.Color, string) {
+	nets := a.networks()
+	a.mu.Lock()
+	views := make(map[string]netView, len(a.netViews))
+	for id, v := range a.netViews {
+		views[id] = v
+	}
+	a.mu.Unlock()
+	joined, up, failed := 0, 0, 0
+	for _, n := range nets {
+		if !n.Join {
+			continue
+		}
+		joined++
+		v := views[n.ID]
+		switch {
+		case v.Status.Running:
+			up++
+		case v.Err != "" || v.Status.LastError != "":
+			failed++
+		}
+	}
+	switch {
+	case joined == 0:
+		return k.text3, L.NetSummaryOff()
+	case up == joined:
+		return k.good, L.NetSummaryConnected()
+	case failed > 0 && up == 0:
+		return k.bad, L.NetSummaryFailed()
+	default:
+		return k.warn, L.NetSummaryConnecting()
+	}
+}
+
+// setTheme saves and applies the appearance ("system", "light" or "dark").
+func (a *App) setTheme(theme string) {
+	a.mu.Lock()
+	a.prefs.Theme = theme
+	a.savePrefs()
+	a.syncControlIndices()
+	a.mu.Unlock()
+	ApplyTheme(theme)
+}
+
+// choosePage follows a sidebar choice: a session in its own window comes forward, anything else
+// becomes the main window's page.
 func (a *App) choosePage(id string) {
 	if wid, ok := strings.CutPrefix(id, windowPrefix); ok {
 		if sw := a.session(wid); sw != nil {
@@ -178,800 +351,90 @@ func (a *App) choosePage(id string) {
 	a.mu.Unlock()
 }
 
-// railNav is the sidebar as 40-DIP icon buttons with tooltips, for windows below railBreak.
-func (a *App) railNav(c *ui.Context, k tokens, selected string) {
-	type item struct {
-		id    string
-		icon  *ui.SVG
-		label string
-	}
-	items := []item{
-		{string(pageDevices), iconDevices, L.NavDevices()},
-		{string(pageApps), iconApps, L.NavApps()},
-		{string(pageCompanion), iconLink, L.NavCompanion()},
-	}
-	for _, s := range a.sessionsSorted() {
-		id := panePrefix + s.spec.ID
-		if !s.Docked() {
-			id = windowPrefix + s.spec.ID
-		}
-		items = append(items, item{id, modeIcon(s.spec.Mode), s.shortTitle()})
-	}
-	ui.Column(c.Key("rail")).Grow(1).FillWidth().Gap(4).AlignItems(ui.Center).Children(func() {
-		for _, it := range items {
-			b := ui.ButtonBase(c.Key("rail-"+it.id)).Size(touchTargetMin, touchTargetMin).Radius(radiusMD).Center().
-				Label(it.label).Tooltip(it.label)
-			fg := k.text2
-			if it.id == selected {
-				b.Background(k.brandSoft)
-				fg = k.brandSoftText
-			}
-			b.Children(func() { ui.Icon(c, it.icon).Size(navIconSize+2, navIconSize+2).TextColor(fg) })
-			if b.Clicked() {
-				a.choosePage(it.id)
-			}
-		}
-		ui.Box(c.Key("rail-gap")).Grow(1)
-		s := ui.ButtonBase(c.Key("rail-settings")).Size(touchTargetMin, touchTargetMin).Radius(radiusMD).Center().
-			Label(L.NavSettings()).Tooltip(L.NavSettings())
-		s.Children(func() { ui.Icon(c, iconSettings).Size(navIconSize+2, navIconSize+2).TextColor(k.text2) })
-		if s.Clicked() {
-			a.choosePage(string(pageSettings))
-		}
-	})
-}
-
-// readinessFooter summarizes the host check in one line and opens Diagnostics, where the
-// technical details live.
-func (a *App) readinessFooter(c *ui.Context, k tokens, rail bool) {
-	t := c.Theme()
-	a.mu.Lock()
-	ready, d := a.diagReady, a.diag
-	a.mu.Unlock()
-	ok := ready && d.CoreLoaded && d.ADBFound
-	title, sub, dot := L.ReadyChecking(), "", k.text3
-	switch {
-	case ok:
-		title, dot = L.ReadyOK(), k.good
-		if d.SelfCheck.H264HWDecoder {
-			sub = L.ReadyHWDecode()
-		}
-	case ready:
-		title, sub, dot = L.ReadyAttention(), L.ReadySeeDiagnostics(), k.warn
-	}
-	b := ui.ButtonBase(c.Key("ready-footer")).FillWidth().Padding(8, 10).Radius(radiusLG).Background(t.Surface).
-		Border(1, t.Border).Label(title).Tooltip(L.NavDiagnostics())
-	b.Children(func() {
-		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-			ui.Box(c).Size(8, 8).Radius(4).Background(dot).Shrink(0)
-			if !rail {
-				ui.Column(c).Grow(1).MinWidth(0).Gap(1).Children(func() {
-					ui.Text(c, title).FontSize(sizeSmall).Bold().SingleLine()
-					if sub != "" {
-						ui.Text(c, sub).FontSize(sizeSmall).TextColor(k.text3).SingleLine()
-					}
-				})
-			}
-		})
-	})
-	if b.Clicked() {
-		a.choosePage(string(pageDiagnostics))
-	}
-}
-
-// bottomNav is the navigation of very narrow windows.
-func (a *App) bottomNav(c *ui.Context, k tokens) {
-	t := c.Theme()
-	a.mu.Lock()
-	cur := a.page
-	a.mu.Unlock()
-	items := []struct {
-		id    navPage
-		icon  *ui.SVG
-		label string
-	}{
-		{pageDevices, iconDevices, L.NavDevices()},
-		{pageApps, iconApps, L.NavApps()},
-		{pageCompanion, iconLink, L.NavCompanion()},
-		{pageSettings, iconSettings, L.NavSettings()},
-	}
-	ui.Row(c.Key("mobile-bottom-nav")).FillWidth().Padding(8, 12).Gap(6).
-		Background(t.Surface).Border(1, t.Border).AlignItems(ui.Center).Children(func() {
-		for _, it := range items {
-			active := cur == string(it.id)
-			b := ui.ButtonBase(c.Key("mnav-"+string(it.id))).Grow(1).Radius(10).Padding(8, 6).Center().Label(it.label)
-			fg := k.text2
-			if active {
-				b.Background(k.brandSoft)
-				fg = k.brandSoftText
-			}
-			b.Children(func() {
-				ui.Column(c).Gap(3).AlignItems(ui.Center).Children(func() {
-					ui.Icon(c, it.icon).Size(16, 16).TextColor(fg)
-					ui.Text(c, it.label).FontSize(sizeSmall).TextColor(fg).SingleLine()
-				})
-			})
-			if b.Clicked() {
-				a.choosePage(string(it.id))
-			}
-		}
-	})
-}
-
-// mainHeader is the main pane's title bar: the page title (a breadcrumb in Settings), the drag
-// area and, on Windows, the window buttons.
-func (a *App) mainHeader(c *ui.Context) {
+// iconBtn is a 32-DIP icon button with a tooltip; on draws it in the accent's tint.
+func iconBtn(c *ui.Context, key string, icon *ui.SVG, tip string, on bool) ui.Element {
 	t := c.Theme()
 	k := tok(c)
-	title, crumb := a.currentTitle()
-	ui.Row(c.Key("main-head")).Height(paneHeaderH).Shrink(0).FillWidth().Padding(0, 8, 0, 18).Gap(6).
-		AlignItems(ui.Center).Children(func() {
-		ui.Text(c, title).Bold().FontSize(sizeHeading).DragWindow()
-		if crumb != "" {
-			ui.Icon(c, iconChevron).Size(12, 12).TextColor(k.text3)
-			ui.Text(c, crumb).FontSize(sizeBody).TextColor(k.text2).DragWindow()
-		}
-		ui.Box(c.Key("main-drag")).Grow(1).FillHeight().DragWindow()
-		a.windowButtons(c)
-	})
-	ui.Box(c.Key("main-divider")).Height(1).FillWidth().Background(t.Border)
+	b := ui.ButtonBase(c.Key(key)).Size(iconButton, iconButton).Shrink(0).Radius(radiusSM).Center().Label(tip).Tooltip(tip)
+	fg := k.text2
+	switch {
+	case on:
+		b.Background(k.brandSoft)
+		fg = k.brandSoftText
+	case b.Hovered():
+		b.Background(t.SurfaceHover)
+		fg = t.Text
+	}
+	b.Children(func() { ui.Icon(c, icon).Size(18, 18).TextColor(fg) })
+	return b
 }
 
-// windowButtons draws minimize, maximize and close for the frameless Windows main window.
+// windowButtons draws minimize, maximize and close for the frameless main window, at the end of
+// the top-right pane's header (Kyokai: the system's would sit half outside the pane).
 func (a *App) windowButtons(c *ui.Context) {
 	if runtime.GOOS != "windows" {
 		return
 	}
+	drawWindowButtons(c, a.mainWindow(), nil)
+}
+
+// noticeCards are the cards above the panes for what waits on the user: a pairing to confirm on
+// the phone, a local assistant's request.
+func (a *App) noticeCards(c *ui.Context, k tokens) {
+	a.mu.Lock()
+	pairCode, pairModel := a.pairingCode, a.pairingModel
+	approvals := append([]approval(nil), a.approvals...)
+	a.mu.Unlock()
+	a.firstConnectCard(c, k)
+	if pairCode != "" {
+		noticeCard(c, k, "notice-pair", iconShield, false, L.PairOnPhoneTitle(pairModel), L.PairOnPhoneSub(), func() {
+			ui.Text(c, pairCode).Bold().FontSize(sizeTitle).FontFeatures("tnum")
+		})
+	}
+	for _, ap := range approvals {
+		ap := ap
+		noticeCard(c, k, "notice-ap-"+ap.ID, iconSpark, false, ap.Title, ap.Detail, func() {
+			if ui.Button(c.Key("ap-deny-"+ap.ID), L.ApprovalDeny()).Clicked() {
+				a.answerApproval(ap.ID, false)
+			}
+			if ui.PrimaryButton(c.Key("ap-allow-"+ap.ID), L.ApprovalAllowOnce()).Clicked() {
+				a.answerApproval(ap.ID, true)
+			}
+		})
+	}
+}
+
+// noticeCard is one card above the panes: an accent edge (or the warning color), an icon tile, a
+// title and one sentence, and its controls.
+func noticeCard(c *ui.Context, k tokens, key string, icon *ui.SVG, warn bool, title, sub string, controls func()) {
 	t := c.Theme()
-	win := a.mainWindow()
-	btn := func(name string, glyph *ui.SVG) ui.Element {
-		b := ui.ButtonBase(c.Key("win-"+name)).Size(winButtonW, winButtonH).Radius(radiusSM).Center().Shrink(0).Label(name)
-		fg := t.TextMuted
-		if b.Hovered() {
-			if name == "close" {
-				b.Background(closeHover)
-				fg = closeHoverText
-			} else {
-				b.Background(t.SurfaceHover)
-				fg = t.Text
-			}
-		}
-		b.Children(func() { ui.Icon(c, glyph).Size(winGlyph, winGlyph).TextColor(fg) })
-		return b
+	edge := k.brand
+	if warn {
+		edge = k.warn
 	}
-	if btn("min", winMinimize).Clicked() && win != nil {
-		win.Minimize()
-	}
-	maximized := win != nil && win.IsMaximized()
-	maxGlyph := winMaximize
-	if maximized {
-		maxGlyph = winRestore
-	}
-	if btn("max", maxGlyph).MaximizeButton().Clicked() && win != nil {
-		if maximized {
-			win.Unmaximize()
-		} else {
-			win.Maximize()
-		}
-	}
-	if btn("close", winClose).Clicked() && win != nil {
-		win.Close()
-	}
-}
-
-// currentTitle returns the main pane's title and, in Settings, its category.
-func (a *App) currentTitle() (string, string) {
-	a.mu.Lock()
-	p, split, cat := a.page, a.split, a.settingsTab
-	a.mu.Unlock()
-	if p == pageSplit && split != nil {
-		if sa, sb := a.session(split.A), a.session(split.B); sa != nil && sb != nil {
-			return sa.shortTitle() + " + " + sb.shortTitle(), ""
-		}
-	}
-	if id, ok := strings.CutPrefix(p, panePrefix); ok {
-		if sw := a.session(id); sw != nil {
-			return sw.shortTitle(), ""
-		}
-	}
-	switch navPage(p) {
-	case pageApps:
-		return L.NavApps(), ""
-	case pageCompanion:
-		return L.NavCompanion(), ""
-	case pageDiagnostics:
-		return L.DiagTitle(), ""
-	case pageSettings:
-		return L.NavSettings(), settingsLabel(cat)
-	default:
-		return L.NavDevices(), ""
-	}
-}
-
-// pageBody builds the list page the sidebar chose.
-func (a *App) pageBody(c *ui.Context, k tokens) {
-	a.mu.Lock()
-	p := navPage(a.page)
-	a.mu.Unlock()
-	switch p {
-	case pageApps:
-		a.appsPage(c, k)
-	case pageCompanion:
-		a.companionPage(c, k)
-	case pageDiagnostics:
-		a.diagnosticsPage(c, k)
-	case pageSettings:
-		a.settingsPage(c, k)
-	default:
-		a.devicesPage(c, k)
-	}
-}
-
-// deviceName is what the interface calls a device.
-func deviceName(d DiscoveredDevice) string {
-	for _, s := range []string{d.Profile.Model, d.Target.Model, d.Target.MaskedID} {
-		if s != "" {
-			return s
-		}
-	}
-	return "Android"
-}
-
-// devicesPage lists the online devices with their launch actions, the local Android
-// environment and the remembered phones that are offline.
-func (a *App) devicesPage(c *ui.Context, k tokens) {
-	a.mu.Lock()
-	scanning := a.scanningDevices
-	devs := append([]DiscoveredDevice(nil), a.devices...)
-	notice := a.deviceNotice
-	vmSt := a.vmStatus
-	a.mu.Unlock()
-	offline := a.offlineRemembered(devs)
-
-	ui.Column(c.Key("page-devices")).Gap(14).FillWidth().Children(func() {
-		ui.Row(c.Key("devices-topbar")).FillWidth().AlignItems(ui.Center).Gap(10).Children(func() {
-			ui.Text(c, L.DevicesCount(len(devs))).FontSize(sizeBody).TextColor(k.text2).Grow(1)
-			rb := ui.Button(c.Key("btn-scan-devices"), "").Label(L.DevicesRefresh()).Tooltip(L.DevicesRefresh()).Disabled(scanning).Children(func() {
-				if scanning {
-					ui.Spinner(c).Size(14, 14)
-				} else {
-					ui.Icon(c, iconRefresh).Size(14, 14)
+	ui.Row(c.Key(key)).FillWidth().Shrink(0).Radius(paneRadius).Background(t.Background).Border(1, t.Border).Clip().Children(func() {
+		ui.Box(c).Width(noticeEdge).FillHeight().Background(edge)
+		ui.Row(c).Grow(1).MinWidth(0).Padding(12, 14).Gap(12).AlignItems(ui.Center).Children(func() {
+			ui.Box(c).Size(tileSize, tileSize).Radius(radiusMD).Background(k.brandSoft).Center().Shrink(0).Children(func() {
+				ui.Icon(c, icon).Size(16, 16).TextColor(k.brandSoftText)
+			})
+			ui.Column(c).Grow(1).MinWidth(0).Gap(2).Children(func() {
+				ui.Text(c, title).Bold().FontSize(sizeBody).SingleLine()
+				if sub != "" {
+					ui.Text(c, sub).FontSize(sizeSmall).TextColor(k.text2).SingleLine()
 				}
 			})
-			if rb.Clicked() {
-				a.RefreshDevices()
-			}
-		})
-
-		if notice != "" {
-			ui.Text(c, notice).FontSize(sizeSmall).TextColor(k.warn)
-		}
-
-		if len(devs) == 0 && len(offline) == 0 {
-			a.devicesEmpty(c, k)
-		}
-		for _, d := range devs {
-			a.deviceCard(c, k, d)
-		}
-		if len(devs) > 0 {
-			ui.Text(c, L.OpenHint()).FontSize(sizeSmall).TextColor(k.text3)
-		}
-
-		a.vmCard(c, k, vmSt)
-
-		if len(offline) > 0 {
-			ui.Row(c.Key("remembered-head")).FillWidth().AlignItems(ui.Center).Gap(8).Children(func() {
-				ui.Text(c, L.RememberedTitle()).Bold().FontSize(sizeBody)
-				ui.Text(c, L.RememberedOffline(len(offline))).FontSize(sizeSmall).TextColor(k.text3)
-			})
-			card(c.Key("remembered-card")).Gap(0).Padding(4, cardPad).Children(func() {
-				for i, r := range offline {
-					if i > 0 {
-						ui.Box(c.Key("rem-line-" + r.HardwareHash)).Height(1).FillWidth().Background(k.hairline)
-					}
-					a.rememberedRow(c, k, r)
-				}
-			})
-		}
-	})
-}
-
-// devicesEmpty is the first-run state: one icon, one line, one primary action.
-func (a *App) devicesEmpty(c *ui.Context, k tokens) {
-	ui.Column(c.Key("devices-empty")).FillWidth().Padding(36, 16).Gap(12).AlignItems(ui.Center).Children(func() {
-		ui.Icon(c, iconDevices).Size(36, 36).TextColor(k.brand)
-		ui.Text(c, L.DevicesEmptyTitle()).Bold().FontSize(sizeHeading)
-		ui.Text(c, L.DevicesEmptyLine()).FontSize(sizeBody).TextColor(k.text2)
-		if ui.PrimaryButton(c.Key("empty-connect"), L.ConnectDevice()).Clicked() {
-			a.mu.Lock()
-			a.connectOpen = true
-			a.mu.Unlock()
-		}
-	})
-}
-
-// deviceCard shows one online device: name, transports and route, then the split button that
-// opens its main mode (in a pane, beside the current one, or in a window) and its other modes.
-func (a *App) deviceCard(c *ui.Context, k tokens, d DiscoveredDevice) {
-	hwKey := d.HardwareHash
-	if hwKey == "" {
-		hwKey = d.Target.DeviceHash
-	}
-	devKey := "dev-" + hwKey
-	transports := d.Transports
-	if len(transports) == 0 {
-		transports = []adb.Device{d.Target}
-	}
-	used, limit, atLimit, nearLimit := EncoderHeadroom(d.Profile, a.activeStreamCountFor(hwKey))
-	route := d.Route
-	if route.Label == "" {
-		route = dex.SelectRoute(d.Profile, d.DexProbe, d.Target.Transport, a.dexRoutePref(hwKey))
-	}
-	var wirelessSerial string
-	var labels []string
-	for _, tr := range transports {
-		labels = append(labels, transportLabel(tr.Transport))
-		if tr.State == "device" && (tr.Transport == adb.TransportTLSWiFi || tr.Transport == adb.TransportTCP) {
-			wirelessSerial = tr.Serial
-		}
-	}
-	icon := iconUsb
-	if d.Target.Transport == adb.TransportTLSWiFi || d.Target.Transport == adb.TransportTCP {
-		icon = iconWifi
-	}
-
-	card(c.Key(devKey)).Children(func() {
-		ui.Row(c.Key(devKey + "-head")).FillWidth().AlignItems(ui.Center).Gap(12).Children(func() {
-			iconTile(c, k, icon)
-			ui.Column(c.Key(devKey + "-name")).Grow(1).MinWidth(0).Gap(2).Children(func() {
-				ui.Text(c, deviceName(d)).Bold().FontSize(sizeHeading).SingleLine()
-				ui.Text(c, strings.Join(labels, " · ")).FontSize(sizeSmall).TextColor(k.text2).SingleLine()
-			})
-			if len(transports) > 1 {
-				chip(c, devKey+"-handoff", L.TransportHandoffReady(), k.good)
-			}
-			if d.Probed && (nearLimit || atLimit) {
-				chip(c, devKey+"-enc", L.EncoderStreamsBadge(used, limit), k.warn)
-			}
-		})
-
-		if d.Target.State != "device" {
-			ui.Text(c, d.Target.State).FontSize(sizeSmall).TextColor(k.warn)
-			return
-		}
-		if d.ProbeErr != "" && !d.Probed {
-			ui.Text(c, d.ProbeErr).FontSize(sizeSmall).TextColor(k.warn)
-		}
-		if d.Probed {
-			// The route label names the real backend: Samsung DeX, or a large-screen mode that is
-			// not DeX (`INV-06`).
-			ui.Text(c, route.Label).FontSize(sizeSmall).TextColor(k.text3)
-		}
-
-		genuineDeX := route.Backend == dex.BackendADBLoopback && route.IsGenuineDeX && d.Target.Transport != adb.TransportEmulator
-		ui.Row(c.Key(devKey + "-modes")).Gap(8).Wrap().AlignItems(ui.Center).Children(func() {
-			main := L.ActionLaunchMirror()
-			launch := func(open OpenIn) { a.LaunchMirror(d, open) }
-			if genuineDeX {
-				main = L.ActionLaunchDeX()
-				launch = func(open OpenIn) { a.LaunchDeX(d, false, open) }
-			}
-			sb := ui.PrimarySplitButton(c.Key(devKey+"-main"), main)
-			sb.Arrow.PopoverMenuButton(func(m *ui.Menu) {
-				if m.Item(L.OpenInPane()).Chosen() {
-					launch(OpenPane)
-				}
-				if m.Item(L.OpenBeside()).Chosen() {
-					launch(OpenSplit)
-				}
-				if m.Item(L.OpenInWindow()).Chosen() {
-					launch(OpenWindow)
-				}
-			}, ui.PopoverMenuButtonOptions{At: ui.AnchorBottomStart, Self: ui.AnchorTopStart})
-			if sb.Button.Clicked() {
-				launch(OpenDefault)
-			}
-			if genuineDeX && ui.Button(c.Key(devKey+"-mirror"), L.ActionLaunchMirror()).Clicked() {
-				a.LaunchMirror(d, OpenDefault)
-			}
-			if len(d.Apps) > 0 && ui.Button(c.Key(devKey+"-apps"), L.NavApps()).Clicked() {
-				a.mu.Lock()
-				a.appsDevice = hwKey
-				a.page = string(pageApps)
-				a.mu.Unlock()
-			}
-			ui.Button(c.Key(devKey+"-more"), "").Label(L.PaneMore()).Children(func() {
-				ui.Icon(c, iconMore).Size(14, 14)
-			}).PopoverMenuButton(func(m *ui.Menu) {
-				if d.Target.Transport != adb.TransportEmulator && m.Item(L.ActionLaunchCamera()).Chosen() {
-					a.mu.Lock()
-					back := a.cameraFacingIdx == 0
-					a.mu.Unlock()
-					facing := "front"
-					if back {
-						facing = "back"
-					}
-					a.LaunchPhoneCamera(d, facing, OpenDefault)
-				}
-				if m.Item(L.ActionLaunchFallback()).Chosen() {
-					a.LaunchDeX(d, true, OpenDefault)
-				}
-				if route.CanUseNativeDeX && d.Target.Transport != adb.TransportEmulator {
-					pref := a.dexRoutePref(hwKey)
-					m.Submenu(L.DeXRouteLabel(), func(m *ui.Menu) {
-						for _, r := range []struct {
-							p     dex.RoutePreference
-							label string
-						}{{dex.RouteAuto, L.DeXRouteAuto()}, {dex.RouteNativeDeX, L.DeXRouteNative()}, {dex.RouteVirtualFallback, L.DeXRouteFallback()}} {
-							if m.Item(r.label).Radio(pref == r.p).Chosen() {
-								a.setDexRoutePref(hwKey, r.p)
-							}
-						}
-					})
-				}
-				if wirelessSerial != "" && m.Item(L.ActionDisconnect()).Chosen() {
-					a.DisconnectWireless(wirelessSerial)
-				}
-			})
+			controls()
 		})
 	})
 }
 
-// rememberedRow is an offline remembered phone: when it was last seen, automatic reconnect,
-// Companion reconnect over the mesh when paired, and Forget with Undo.
-func (a *App) rememberedRow(c *ui.Context, k tokens, r RememberedDevice) {
-	key := "rem-" + r.HardwareHash
-	ui.Row(c.Key(key)).FillWidth().Padding(10, 0).Gap(12).AlignItems(ui.Center).Children(func() {
-		iconTile(c, k, iconDevices)
-		ui.Column(c.Key(key + "-text")).Grow(1).MinWidth(0).Gap(2).Children(func() {
-			ui.Text(c, r.Name).Bold().FontSize(sizeBody).SingleLine()
-			ui.Text(c, L.RememberedLastSeen(r.LastSeen.Local().Format("01-02 15:04"))).FontSize(sizeSmall).TextColor(k.text3).
-				FontFeatures("tnum").SingleLine()
-		})
-		if r.Companion != nil {
-			if ui.Button(c.Key(key+"-comp"), L.RememberedCompanion()).Tooltip(L.RememberedCompanionTip()).Clicked() {
-				a.ReconnectCompanion(r.HardwareHash)
-				a.choosePage(string(pageCompanion))
-			}
-		}
-		auto := r.AutoReconnect
-		ui.Text(c, L.RememberedAuto()).FontSize(sizeSmall).TextColor(k.text2)
-		if ui.Switch(c.Key(key+"-auto"), &auto).Label(L.RememberedAuto()).Changed() {
-			a.SetAutoReconnect(r.HardwareHash, auto)
-		}
-		if ui.Button(c.Key(key+"-forget"), L.RememberedForget()).Clicked() {
-			if gone, ok := a.ForgetDevice(r.HardwareHash); ok {
-				c.ToastAction(L.RememberedForgotten(gone.Name), L.ActionUndo(), func() { a.RestoreDevice(gone) })
-			}
-		}
-	})
-}
-
-// appsPage lists the launchable apps of one online device; a device selector shows when there
-// are several.
-func (a *App) appsPage(c *ui.Context, k tokens) {
-	a.mu.Lock()
-	var devs []DiscoveredDevice
-	for _, d := range a.devices {
-		if d.Target.State == "device" && len(d.Apps) > 0 {
-			devs = append(devs, d)
-		}
+// badgeText caps a counter at "99+"; zero hides it.
+func badgeText(n int) string {
+	if n > navBadgeMax {
+		return strconv.Itoa(navBadgeMax) + "+"
 	}
-	sel := a.appsDevice
-	a.mu.Unlock()
-
-	ui.Column(c.Key("page-apps")).Gap(14).FillWidth().Children(func() {
-		if len(devs) == 0 {
-			ui.Column(c.Key("apps-empty")).FillWidth().Padding(36, 16).Gap(10).AlignItems(ui.Center).Children(func() {
-				ui.Icon(c, iconApps).Size(32, 32).TextColor(k.brand)
-				ui.Text(c, L.AppsEmpty()).FontSize(sizeBody).TextColor(k.text2)
-			})
-			return
-		}
-		idx := 0
-		names := make([]string, len(devs))
-		for i, d := range devs {
-			names[i] = deviceName(d)
-			if d.HardwareHash == sel {
-				idx = i
-			}
-		}
-		if len(devs) > 1 {
-			if ui.Segmented(c.Key("apps-device"), &idx, names...).Changed() {
-				a.mu.Lock()
-				a.appsDevice = devs[idx].HardwareHash
-				a.mu.Unlock()
-			}
-		}
-		d := devs[idx]
-		ui.Text(c, L.AppsHint()).FontSize(sizeSmall).TextColor(k.text3)
-		a.appLauncherSection(c, k, "apps-"+d.HardwareHash, d)
-	})
-}
-
-// companionPage holds the phone collaboration: the paired Companion, camera and microphone.
-func (a *App) companionPage(c *ui.Context, k tokens) {
-	a.mu.Lock()
-	connected, st, notice := a.compConnected, a.compStatus, a.compNotice
-	a.mu.Unlock()
-	ui.Column(c.Key("page-companion")).Gap(14).FillWidth().Children(func() {
-		a.companionCard(c, k, connected, st, notice)
-		a.avBridgeCard(c, k)
-	})
-}
-
-// settingsLabel names a Settings category.
-func settingsLabel(cat string) string {
-	switch cat {
-	case setWindows:
-		return L.SettingsWindows()
-	case setNetwork:
-		return L.SettingsNetwork()
-	case setLocal:
-		return L.SettingsLocal()
-	case setSecurity:
-		return L.SettingsSecurity()
-	case setAbout:
-		return L.NavAbout()
-	default:
-		return L.SettingsGeneral()
-	}
-}
-
-// settingsPage lists the six categories beside the chosen one's settings, or above them in a
-// narrow pane.
-func (a *App) settingsPage(c *ui.Context, k tokens) {
-	t := c.Theme()
-	a.mu.Lock()
-	cat := a.settingsTab
-	a.mu.Unlock()
-	if cat == "" {
-		cat = setGeneral
-	}
-	cats := []struct {
-		id   string
-		icon *ui.SVG
-	}{
-		{setGeneral, iconSettings}, {setWindows, iconSplitRight}, {setNetwork, iconGlobe},
-		{setLocal, iconDevices}, {setSecurity, iconShield}, {setAbout, iconInfo},
-	}
-	w, _ := c.Size()
-	narrow := w < railBreak
-
-	body := func() {
-		ui.Column(c.Key("settings-" + cat)).Grow(1).MinWidth(0).Gap(14).Children(func() {
-			switch cat {
-			case setWindows:
-				a.windowsSettings(c, k)
-			case setNetwork:
-				a.meshSettingsCard(c, k)
-			case setLocal:
-				a.mu.Lock()
-				st := a.vmStatus
-				a.mu.Unlock()
-				a.vmCard(c, k, st)
-			case setSecurity:
-				a.mcpSettingsCard(c, k)
-				ui.Text(c, L.SettingsSecurityBody()).FontSize(sizeSmall).TextColor(k.text3)
-			case setAbout:
-				a.aboutSection(c, k)
-			default:
-				a.generalSettings(c, k)
-			}
-		})
-	}
-	choose := func(id string) {
-		a.mu.Lock()
-		a.settingsTab = id
-		a.mu.Unlock()
-	}
-
-	if narrow {
-		ui.Column(c.Key("page-settings")).FillWidth().Gap(14).Children(func() {
-			idx := 0
-			labels := make([]string, len(cats))
-			for i, s := range cats {
-				labels[i] = settingsLabel(s.id)
-				if s.id == cat {
-					idx = i
-				}
-			}
-			if ui.Segmented(c.Key("settings-seg"), &idx, labels...).Changed() {
-				choose(cats[idx].id)
-			}
-			body()
-		})
-		return
-	}
-	ui.Row(c.Key("page-settings")).FillWidth().Gap(20).AlignItems(ui.Start).Children(func() {
-		ui.Column(c.Key("settings-cats")).Width(200).Shrink(0).Gap(2).Children(func() {
-			for _, s := range cats {
-				b := ui.ButtonBase(c.Key("set-"+s.id)).FillWidth().Height(36).Padding(0, 10).Radius(radiusMD).Label(settingsLabel(s.id))
-				fg := k.text2
-				if s.id == cat {
-					b.Background(t.SurfaceHover)
-					fg = t.Text
-				}
-				b.Children(func() {
-					ui.Row(c).FillWidth().FillHeight().Gap(10).AlignItems(ui.Center).Children(func() {
-						ui.Icon(c, s.icon).Size(navIconSize, navIconSize).TextColor(fg)
-						ui.Text(c, settingsLabel(s.id)).FontSize(sizeBody).TextColor(fg).SingleLine()
-					})
-				})
-				if b.Clicked() {
-					choose(s.id)
-				}
-			}
-		})
-		body()
-	})
-}
-
-// settingRow is one labeled setting: a title, a muted line and its control on the right.
-func settingRow(c *ui.Context, k tokens, key, title, sub string, control func()) {
-	ui.Row(c.Key(key)).FillWidth().Gap(16).AlignItems(ui.Center).Padding(4, 0).Children(func() {
-		ui.Column(c.Key(key + "-text")).Grow(1).MinWidth(0).Gap(2).Children(func() {
-			ui.Text(c, title).Bold().FontSize(sizeBody)
-			if sub != "" {
-				ui.Text(c, sub).FontSize(sizeSmall).TextColor(k.text3)
-			}
-		})
-		control()
-	})
-}
-
-// generalSettings holds appearance and language, which apply at once.
-func (a *App) generalSettings(c *ui.Context, k tokens) {
-	card(c.Key("settings-general-card")).Children(func() {
-		settingRow(c, k, "set-theme", L.SettingsAppearance(), L.SettingsAppearanceSub(), func() {
-			if ui.Segmented(c.Key("theme-seg"), &a.themeIndex, L.ThemeSystem(), L.ThemeLight(), L.ThemeDark()).Changed() {
-				themes := []string{"system", "light", "dark"}
-				a.mu.Lock()
-				a.prefs.Theme = themes[a.themeIndex]
-				a.savePrefs()
-				a.mu.Unlock()
-				ApplyTheme(a.prefs.Theme)
-			}
-		})
-		settingRow(c, k, "set-lang", L.SettingsLanguage(), L.SettingsLanguageSub(), func() {
-			if ui.Segmented(c.Key("lang-seg"), &a.langIndex, L.LangSystem(), L.LangZhHans(), L.LangEnglish()).Changed() {
-				langs := []string{"", "zh-Hans", "en"}
-				a.mu.Lock()
-				a.prefs.Language = langs[a.langIndex]
-				a.savePrefs()
-				a.mu.Unlock()
-				mygo.App.SetLocale(a.prefs.Language)
-			}
-		})
-	})
-}
-
-// windowsSettings chooses where sessions open by default: a main-window pane or their own window.
-func (a *App) windowsSettings(c *ui.Context, k tokens) {
-	a.mu.Lock()
-	streams, apps := 0, 0
-	if a.prefs.StreamsInWindow {
-		streams = 1
-	}
-	if a.prefs.AppsInWindow {
-		apps = 1
-	}
-	a.mu.Unlock()
-	card(c.Key("settings-windows-card")).Children(func() {
-		settingRow(c, k, "set-streams-open", L.SettingsStreamsOpen(), L.SettingsStreamsOpenSub(), func() {
-			if ui.Segmented(c.Key("streams-open-seg"), &streams, L.OpenPaneShort(), L.OpenWindowShort()).Changed() {
-				a.mu.Lock()
-				a.prefs.StreamsInWindow = streams == 1
-				a.savePrefs()
-				a.mu.Unlock()
-			}
-		})
-		settingRow(c, k, "set-apps-open", L.SettingsAppsOpen(), L.SettingsAppsOpenSub(), func() {
-			if ui.Segmented(c.Key("apps-open-seg"), &apps, L.OpenPaneShort(), L.OpenWindowShort()).Changed() {
-				a.mu.Lock()
-				a.prefs.AppsInWindow = apps == 1
-				a.savePrefs()
-				a.mu.Unlock()
-			}
-		})
-	})
-}
-
-// aboutSection is the version, license, acknowledgments and trademark notice.
-func (a *App) aboutSection(c *ui.Context, k tokens) {
-	card(c.Key("about-card")).Children(func() {
-		ui.Row(c).Gap(14).AlignItems(ui.Center).Children(func() {
-			if appIconBitmap != nil {
-				ui.Image(c, appIconBitmap).Size(56, 56).Radius(radiusLG)
-			}
-			ui.Column(c).Gap(4).Grow(1).Children(func() {
-				ui.Text(c, L.AppName()).Bold().FontSize(sizeTitle)
-				ui.Text(c, L.AboutVersion(version.Version)).FontSize(sizeBody).TextColor(k.brand)
-				ui.Text(c, L.AppTagline()).FontSize(sizeBody).TextColor(k.text2)
-			})
-		})
-		ui.Text(c, L.AboutLicense()).FontSize(sizeBody)
-		ui.Text(c, L.AboutTrademarks()).FontSize(sizeSmall).TextColor(k.text3)
-	})
-}
-
-// connectDialog is the Connect device modal: a wireless phone (mDNS, address or pairing code)
-// or the Companion, with the optional, unticked Companion install (`INV-09`).
-func (a *App) connectDialog(c *ui.Context, k tokens) {
-	a.mu.Lock()
-	open := a.connectOpen
-	a.mu.Unlock()
-	if !open {
-		return
-	}
-	ui.Modal(c.Key("connect-dialog"), &a.connectOpen, func() {
-		ui.Column(c.Key("connect-body")).Width(520).Gap(14).Padding(6).Children(func() {
-			ui.Text(c, L.ConnectDevice()).Bold().FontSize(sizeHeading)
-			ui.Tabs(c.Key("connect-tabs"), &a.connectTab, L.ConnectTabWireless(), L.ConnectTabCompanion())
-			if a.connectTab == 1 {
-				a.mu.Lock()
-				connected, st, notice := a.compConnected, a.compStatus, a.compNotice
-				a.mu.Unlock()
-				a.companionCard(c, k, connected, st, notice)
-				return
-			}
-			a.wirelessForm(c, k)
-		})
-	})
-}
-
-// wirelessForm connects a TLS Wireless Debugging phone: found by mDNS, by address, or paired
-// with its 6-digit code first (`INV-07`).
-func (a *App) wirelessForm(c *ui.Context, k tokens) {
-	a.mu.Lock()
-	mdns := append([]adb.MDNSService(nil), a.mdnsServices...)
-	notice := a.deviceNotice
-	install := a.installCompanion
-	a.mu.Unlock()
-
-	ui.Text(c, L.WirelessCardDesc()).FontSize(sizeSmall).TextColor(k.text2)
-	if len(mdns) > 0 {
-		ui.Row(c.Key("mdns-chips")).Gap(8).Wrap().Children(func() {
-			for i, s := range mdns {
-				if s.CanConnect {
-					if ui.Button(c.Key(fmt.Sprintf("mdns-conn-%d", i)), L.WirelessMdnsConnect(s.MaskedAddr)).Clicked() {
-						a.ConnectWirelessTLS(s.Addr, install)
-					}
-				} else if s.CanPair {
-					if ui.Button(c.Key(fmt.Sprintf("mdns-pair-%d", i)), L.WirelessMdnsPairFound(s.MaskedAddr)).Clicked() {
-						a.mu.Lock()
-						a.pairAddr = s.Addr
-						a.mu.Unlock()
-					}
-				}
-			}
-		})
-	}
-	ui.Row(c.Key("manual-tls-row")).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
-		ui.TextInput(c.Key("manual-addr"), &a.manualAddr).Placeholder(L.WirelessManualAddrHint()).Grow(1).MinWidth(0)
-		if ui.Button(c.Key("btn-manual-tls"), L.WirelessConnectBtn()).Disabled(strings.TrimSpace(a.manualAddr) == "").Clicked() {
-			a.ConnectWirelessTLS(a.manualAddr, install)
-		}
-	})
-	ui.Row(c.Key("pair-tls-row")).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
-		ui.TextInput(c.Key("pair-addr"), &a.pairAddr).Placeholder(L.WirelessPairAddrHint()).Grow(2).MinWidth(0)
-		ui.TextInput(c.Key("pair-code"), &a.pairCode).Placeholder(L.WirelessPairCodeHint()).Grow(1).MinWidth(0)
-		code := strings.TrimSpace(a.pairCode)
-		if ui.Button(c.Key("btn-pair-tls"), L.WirelessPairBtn()).Disabled(!validPairCode(code) || strings.TrimSpace(a.pairAddr) == "").Clicked() {
-			a.PairWirelessTLS(a.pairAddr, code)
-		}
-	})
-	if code := strings.TrimSpace(a.pairCode); code != "" && !validPairCode(code) {
-		ui.Text(c, L.PairCodeError()).FontSize(sizeSmall).TextColor(k.bad)
-	}
-	if ui.Checkbox(c.Key("connect-install"), &install, L.ConnectInstallCompanion()).Changed() {
-		a.mu.Lock()
-		a.installCompanion = install
-		a.mu.Unlock()
-	}
-	if notice != "" {
-		ui.Text(c, notice).FontSize(sizeSmall).TextColor(k.warn)
-	}
+	return strconv.Itoa(n)
 }
 
 // validPairCode reports whether s is a 6-digit Wireless Debugging pairing code.
@@ -983,17 +446,48 @@ func validPairCode(s string) bool {
 	return err == nil
 }
 
-// chip is a tinted status pill: tinted fill and deep same-hue text.
-func chip(c *ui.Context, key, text string, fg ui.Color) {
-	k := tok(c)
-	ui.Row(c.Key(key)).Padding(badgePadV, badgePadH).Radius(pillRadius).Background(k.brandSoft).Shrink(0).Children(func() {
-		ui.Text(c, text).FontSize(sizeSmall).TextColor(fg).Bold().SingleLine()
+// pill is a small rounded label: tinted fill and same-hue words.
+func pill(c *ui.Context, key, text string, bg, fg ui.Color) {
+	ui.Row(c.Key(key)).Height(24).Padding(0, 9).Radius(pillRadius).Background(bg).AlignItems(ui.Center).Shrink(0).Children(func() {
+		ui.Text(c, text).FontSize(sizeSmall).TextColor(fg).SingleLine()
 	})
 }
 
-// iconTile is a row's fixed-size icon container.
-func iconTile(c *ui.Context, k tokens, icon *ui.SVG) {
-	ui.Box(c).Size(tileSize, tileSize).Shrink(0).Radius(radiusMD).Background(k.brandSoft).Center().Children(func() {
-		ui.Icon(c, icon).Size(navIconSize, navIconSize).TextColor(k.brandSoftText)
+// statusDot is an 8-DIP status dot.
+func statusDot(c *ui.Context, color ui.Color) {
+	ui.Box(c).Size(8, 8).Radius(4).Background(color).Shrink(0)
+}
+
+// firstConnectCard offers, for a phone connected over USB for the first time, to install the
+// Companion and join the network new phones join; nothing happens without Continue (`INV-11`).
+func (a *App) firstConnectCard(c *ui.Context, k tokens) {
+	a.mu.Lock()
+	fc := a.firstConnect
+	a.mu.Unlock()
+	if fc == nil {
+		return
+	}
+	netName := a.pairNetworkName()
+	noticeCard(c, k, "notice-first", iconUsb, false, L.FirstConnectTitle(fc.Name), L.FirstConnectSub(), func() {
+		install, join := fc.Install, fc.Join
+		if ui.Checkbox(c.Key("fc-install"), &install, L.FirstConnectInstall()).Changed() {
+			a.mu.Lock()
+			a.firstConnect.Install = install
+			a.mu.Unlock()
+		}
+		if netName != "" && ui.Checkbox(c.Key("fc-join"), &join, L.FirstConnectJoin(netName)).Changed() {
+			a.mu.Lock()
+			a.firstConnect.Join = join
+			a.mu.Unlock()
+		}
+		if ui.Button(c.Key("fc-later"), L.FirstConnectLater()).Clicked() {
+			a.update(func() { a.firstConnect = nil })
+		}
+		if ui.PrimaryButton(c.Key("fc-go"), L.FirstConnectContinue()).Clicked() {
+			a.update(func() { a.firstConnect = nil })
+			if fc.Install {
+				a.PairCompanionOverADB(fc.Serial, fc.Name, fc.Join && netName != "")
+			}
+		}
 	})
 }

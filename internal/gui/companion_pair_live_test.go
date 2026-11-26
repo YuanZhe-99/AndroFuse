@@ -56,10 +56,10 @@ func TestLiveCompanionPairAndMeshJoin(t *testing.T) {
 	if err := desk.Start(cfg); err != nil {
 		t.Fatalf("desktop mesh: %v", err)
 	}
-	if st := desk.Status(); st.LastError != "" {
+	if st := desk.Status(""); st.LastError != "" {
 		t.Fatalf("desktop mesh reports: %s", st.LastError)
 	}
-	defer desk.Stop()
+	defer desk.Stop("")
 
 	client, err := adb.FindClient()
 	if err != nil {
@@ -67,7 +67,7 @@ func TestLiveCompanionPairAndMeshJoin(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	c, addr, res, err := pairOverADB(ctx, client, serial, apk, func(s string) { t.Log(s) })
+	c, addr, res, err := pairOverADB(ctx, client, serial, apk, func(s string) { t.Log(s) }, nil)
 	if err != nil {
 		t.Fatalf("pairOverADB: %v", err)
 	}

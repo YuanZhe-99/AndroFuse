@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>AndroFuse V3 · 手机上的伴侣</title>
+<link rel="stylesheet" href="common.css">
+<style>
+  .pscr { font-size: 15px; }
+  .mh { font-size: 13px; font-weight: 600; color: var(--tx2); margin: 4px 4px -4px; }
+  .big { font-size: 18px; font-weight: 600; }
+  .pc { display: flex; align-items: center; gap: 12px; }
+  .pc .tx { flex: 1; min-width: 0; }
+  .pc .t2 { font-size: 13px; color: var(--tx2); }
+  .mcard .t2 { font-size: 13px; }
+  .foldcols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 0 16px 16px; flex: 1; overflow: hidden; }
+  .foldcols > div { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  .dlg-acts { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+</style>
+</head>
+<body>
+<div class="stagehead"><a href="index.html">← 目录</a><b>手机上的 AndroFuse 伴侣</b><span class="sp"></span><button data-theme-toggle>浅色 / 深色</button></div>
+<div class="artboards">
+<div>
+<p class="cap"><b>主页。</b>连着哪台电脑、在哪个网络里、无线调试端口（伴侣自己发现并告诉电脑，换 Wi-Fi 后自动更新，不用再手动填）。</p>
+<div class="phone"><div class="pscr">
+  <div class="pstatus"><span class="num">10:42</span><span>5G ▮▮▮ 88%</span></div>
+  <div class="ptop"><h1>AndroFuse</h1><div class="sub">伴侣已开启 · 电脑可以连接</div></div>
+  <div class="pbody2">
+    <div class="mcard"><div class="pc"><span class="tile acc" style="width:40px;height:40px;border-radius:12px"><i data-i="dex"></i></span><div class="tx"><div class="big">YUANZHE-PC</div><div class="t2">已连接 · 跨网络</div></div><button class="mbtn text">断开</button></div></div>
+    <div class="mh">跨网络</div>
+    <div class="mcard">
+      <div class="row"><span class="tile"><i data-i="mesh" class="s"></i></span><div class="tx"><div class="t1">家里</div><div class="t2 num">已连接 · 100.64.0.13 · 中继 48 ms</div></div></div>
+      <div class="row"><span class="tile"><i data-i="battery" class="s"></i></span><div class="tx"><div class="t1">省电模式</div><div class="t2">连接慢一点，手机被唤醒更少</div></div><span class="sw on"></span></div>
+      <div class="row" style="min-height:0; padding-bottom:0"><button class="mbtn text" style="padding:0">退出这个网络</button></div>
+    </div>
+    <div class="mh">无线调试</div>
+    <div class="mcard">
+      <div class="row"><span class="tile"><i data-i="wifi" class="s"></i></span><div class="tx"><div class="t1">移动网络下不可用</div><div class="t2">连上 Wi-Fi 后，伴侣会把新端口告诉电脑</div></div><span class="pill">等待 Wi-Fi</span></div>
+    </div>
+    <div class="mcard">
+      <div class="row"><span class="tile"><i data-i="power" class="s"></i></span><div class="tx"><div class="t1">后台待机</div><div class="t2">关掉应用后电脑仍能连接，会显示一条安静的通知</div></div><span class="sw on"></span></div>
+    </div>
+  </div>
+  <div class="ptabs"><div class="ptab on"><span class="pi"><i data-i="home"></i></span>主页</div><div class="ptab"><span class="pi"><i data-i="shield"></i></span>权限</div><div class="ptab"><span class="pi"><i data-i="key"></i></span>安全</div></div>
+</div></div>
+</div>
+
+<div>
+<p class="cap"><b>深色 · 在 Wi-Fi 下。</b>端口由伴侣自动发现（41235），并已告诉电脑；不再需要在这里手动填写端口。</p>
+<div class="phone dark"><div class="pscr">
+  <div class="pstatus"><span class="num">10:50</span><span>Wi-Fi 88%</span></div>
+  <div class="ptop"><h1>AndroFuse</h1><div class="sub">伴侣已开启 · 电脑可以连接</div></div>
+  <div class="pbody2">
+    <div class="mcard"><div class="pc"><span class="tile" style="width:40px;height:40px;border-radius:12px"><i data-i="dex"></i></span><div class="tx"><div class="big">等待电脑连接</div><div class="t2">已配对 1 台电脑</div></div></div></div>
+    <div class="mh">无线调试</div>
+    <div class="mcard">
+      <div class="row"><span class="tile acc"><i data-i="wifi" class="s"></i></span><div class="tx"><div class="t1 num">端口 41235</div><div class="t2">自动发现，已告诉 YUANZHE-PC</div></div><span class="pill ok">已更新</span></div>
+    </div>
+    <div class="mh">跨网络</div>
+    <div class="mcard">
+      <div class="row"><span class="tile"><i data-i="mesh" class="s"></i></span><div class="tx"><div class="t1">家里</div><div class="t2 num">已连接 · 100.64.0.13 · 直连 4 ms</div></div></div>
+    </div>
+  </div>
+  <div class="ptabs"><div class="ptab on"><span class="pi"><i data-i="home"></i></span>主页</div><div class="ptab"><span class="pi"><i data-i="shield"></i></span>权限</div><div class="ptab"><span class="pi"><i data-i="key"></i></span>安全</div></div>
+</div></div>
+</div>
+
+<div>
+<p class="cap"><b>权限。</b>分两组，每项一句话说明电脑能用它做什么；默认关闭的项写明。移动网络下的屏幕共享和控制在这里单独开。</p>
+<div class="phone"><div class="pscr">
+  <div class="pstatus"><span class="num">10:42</span><span>5G 88%</span></div>
+  <div class="ptop"><h1>权限</h1><div class="sub">电脑可以用这台手机做什么</div></div>
+  <div class="pbody2">
+    <div class="mh">日常</div>
+    <div class="mcard">
+      <div class="row"><span class="tile"><i data-i="battery" class="s"></i></span><div class="tx"><div class="t1">电量和温度</div><div class="t2">在电脑上显示</div></div><span class="sw on"></span></div>
+      <div class="row"><span class="tile"><i data-i="clip" class="s"></i></span><div class="tx"><div class="t1">剪贴板</div><div class="t2">复制的内容两边共享</div></div><span class="sw on"></span></div>
+      <div class="row"><span class="tile"><i data-i="bell" class="s"></i></span><div class="tx"><div class="t1">通知</div><div class="t2">在电脑上查看和回复</div></div><span class="sw on"></span></div>
+      <div class="row"><span class="tile"><i data-i="file" class="s"></i></span><div class="tx"><div class="t1">接收文件</div><div class="t2">只存到「下载」</div></div><span class="sw on"></span></div>
+      <div class="row"><span class="tile"><i data-i="app" class="s"></i></span><div class="tx"><div class="t1">接力</div><div class="t2">在电脑上继续当前应用</div></div><span class="sw on"></span></div>
+    </div>
+    <div class="mh">画面与控制</div>
+    <div class="mcard">
+      <div class="row"><span class="tile"><i data-i="mirror" class="s"></i></span><div class="tx"><div class="t1">移动网络下共享屏幕</div><div class="t2">没有 Wi-Fi 时让电脑看到屏幕；每次开始系统都会询问</div></div><span class="sw on"></span></div>
+      <div class="row"><span class="tile"><i data-i="hand" class="s"></i></span><div class="tx"><div class="t1">移动网络下允许控制</div><div class="t2">默认关闭 · 需要在系统「无障碍」里打开</div></div><button class="mbtn tonal" style="height:34px">去打开</button></div>
+      <div class="row"><span class="tile"><i data-i="mic" class="s"></i></span><div class="tx"><div class="t1">接收电脑麦克风</div><div class="t2">默认关闭</div></div><span class="sw"></span></div>
+      <div class="row"><span class="tile"><i data-i="refresh" class="s"></i></span><div class="tx"><div class="t1">断开后恢复屏幕</div><div class="t2">清理电脑断开时留下的虚拟屏幕</div></div><span class="sw on"></span></div>
+    </div>
+  </div>
+  <div class="ptabs"><div class="ptab"><span class="pi"><i data-i="home"></i></span>主页</div><div class="ptab on"><span class="pi"><i data-i="shield"></i></span>权限</div><div class="ptab"><span class="pi"><i data-i="key"></i></span>安全</div></div>
+</div></div>
+</div>
+
+<div>
+<p class="cap"><b>安全。</b>配对过的电脑（可移除）、这台手机的指纹（与电脑上显示的逐组比对）、最近的操作记录。</p>
+<div class="phone"><div class="pscr">
+  <div class="pstatus"><span class="num">10:42</span><span>5G 88%</span></div>
+  <div class="ptop"><h1>安全</h1><div class="sub">配对和最近的操作</div></div>
+  <div class="pbody2">
+    <div class="mh">配对的电脑</div>
+    <div class="mcard">
+      <div class="row"><span class="tile"><i data-i="dex" class="s"></i></span><div class="tx"><div class="t1">YUANZHE-PC</div><div class="t2">11 月 25 日配对 · 已连接</div></div><button class="mbtn text">移除</button></div>
+    </div>
+    <div class="mh">这台手机的指纹</div>
+    <div class="mcard"><div class="num" style="font-family:var(--mono); font-size:16px; letter-spacing:.04em; line-height:1.7">8C21 F04A 9B3E 71D2<br>0A6F 33C8 E915 4B70</div><div class="t2 sub" style="margin-top:6px">和电脑上显示的逐组一致，才说明连的是这台手机</div></div>
+    <div class="mh">最近的操作</div>
+    <div class="mcard">
+      <div class="row"><div class="tx"><div class="t1">电脑开始共享屏幕</div><div class="t2 num">10:41 · YUANZHE-PC</div></div></div>
+      <div class="row"><div class="tx"><div class="t1">收到文件 report.pdf</div><div class="t2 num">10:30 · 存到「下载」</div></div></div>
+      <div class="row"><div class="tx"><div class="t1">加入网络「家里」</div><div class="t2 num">11 月 25 日</div></div></div>
+    </div>
+  </div>
+  <div class="ptabs"><div class="ptab"><span class="pi"><i data-i="home"></i></span>主页</div><div class="ptab"><span class="pi"><i data-i="shield"></i></span>权限</div><div class="ptab on"><span class="pi"><i data-i="key"></i></span>安全</div></div>
+</div></div>
+</div>
+
+<div>
+<p class="cap"><b>配对与屏幕共享的询问。</b>第一次 USB 连接时手机上核对代码；移动网络下电脑要看屏幕时，伴侣先说明原因，再由 Android 系统询问一次。</p>
+<div style="display:flex; gap:28px">
+<div class="phone"><div class="pscr">
+  <div class="pstatus"><span class="num">10:20</span><span>Wi-Fi 90%</span></div>
+  <div class="ptop"><h1>AndroFuse</h1></div>
+  <div class="scrim"></div>
+  <div class="dialog">
+    <div class="big">与这台电脑配对？</div>
+    <div class="sub" style="margin-top:8px">YUANZHE-PC 通过 USB 连接。电脑上应显示同样的代码。</div>
+    <div class="code" style="text-align:center; margin:18px 0 4px; font-size:30px">482 913</div>
+    <div class="dlg-acts"><button class="mbtn text">拒绝</button><button class="mbtn">允许</button></div>
+  </div>
+</div></div>
+<div class="phone"><div class="pscr">
+  <div class="pstatus"><span class="num">10:41</span><span>5G 88%</span></div>
+  <div class="ptop"><h1>AndroFuse</h1></div>
+  <div class="scrim"></div>
+  <div class="dialog">
+    <div class="big">让 YUANZHE-PC 查看屏幕？</div>
+    <div class="sub" style="margin-top:8px">手机在移动网络上，无法使用无线调试，所以由伴侣共享屏幕。接下来 Android 会再询问一次；通知栏可以随时停止。</div>
+    <div class="dlg-acts"><button class="mbtn text">拒绝</button><button class="mbtn">继续</button></div>
+  </div>
+</div></div>
+</div>
+</div>
+
+<div>
+<p class="cap"><b>Galaxy Z Fold8 展开（≥ 680 dp）。</b>两列：左边主页内容，右边权限。</p>
+<div class="phone fold"><div class="pscr">
+  <div class="pstatus"><span class="num">10:42</span><span>Wi-Fi 88%</span></div>
+  <div class="ptop"><h1>AndroFuse</h1><div class="sub">伴侣已开启 · 电脑可以连接</div></div>
+  <div class="foldcols">
+    <div>
+      <div class="mcard"><div class="pc"><span class="tile acc" style="width:40px;height:40px;border-radius:12px"><i data-i="dex"></i></span><div class="tx"><div class="big">YUANZHE-PC</div><div class="t2">已连接 · USB</div></div><button class="mbtn text">断开</button></div></div>
+      <div class="mcard">
+        <div class="row"><span class="tile acc"><i data-i="wifi" class="s"></i></span><div class="tx"><div class="t1 num">无线调试 · 端口 41235</div><div class="t2">自动发现，已告诉电脑</div></div><span class="pill ok">已更新</span></div>
+        <div class="row"><span class="tile"><i data-i="mesh" class="s"></i></span><div class="tx"><div class="t1">跨网络 · 家里</div><div class="t2 num">已连接 · 100.64.0.12</div></div></div>
+        <div class="row"><span class="tile"><i data-i="power" class="s"></i></span><div class="tx"><div class="t1">后台待机</div></div><span class="sw on"></span></div>
+      </div>
+    </div>
+    <div>
+      <div class="mcard">
+        <div class="row"><span class="tile"><i data-i="clip" class="s"></i></span><div class="tx"><div class="t1">剪贴板</div><div class="t2">复制的内容两边共享</div></div><span class="sw on"></span></div>
+        <div class="row"><span class="tile"><i data-i="bell" class="s"></i></span><div class="tx"><div class="t1">通知</div><div class="t2">在电脑上查看和回复</div></div><span class="sw on"></span></div>
+        <div class="row"><span class="tile"><i data-i="file" class="s"></i></span><div class="tx"><div class="t1">接收文件</div><div class="t2">只存到「下载」</div></div><span class="sw on"></span></div>
+        <div class="row"><span class="tile"><i data-i="mirror" class="s"></i></span><div class="tx"><div class="t1">移动网络下共享屏幕</div><div class="t2">每次开始系统都会询问</div></div><span class="sw on"></span></div>
+      </div>
+    </div>
+  </div>
+</div></div>
+</div>
+</div>
+<script src="logos.js"></script>
+<script src="common.js"></script>
+</body>
+</html>

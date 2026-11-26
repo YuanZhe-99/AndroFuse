@@ -18,6 +18,7 @@ AndroFuse is licensed under **GNU General Public License v3.0 only** (`GPL-3.0-o
 | `adirh3/DeXDesk` (protocol/Miracast insights) | MIT | Active (M1a) | Reference for WFD Sink / RTSP / RTP-TS / UIBC & MF DXVA decoder |
 | `Aureliano021/ScrcpyDex` (loopback DeX activator) | Apache-2.0 | Active (M1a) | Reference for clean-room `SemWifiDisplayConfig` loopback DeX helper |
 | `maze-mei/DX-Manager` | MIT | Reference / Active | Multi-session lifecycle & initial DPI ≥ 160 bootstrap reference |
+| Phone makers' marks from [Simple Icons](https://simpleicons.org/) (`samsung`, `google`, `xiaomi`, `huawei`, `sony`, `lg`, `lenovo`, `asus`) | CC0 1.0 | Active (V3) | Drawn in a phone's avatar only to name its maker (nominative use; trademarks of their owners, removed on request); files and sources in `internal/gui/assets/logos/SOURCES.md`, the same set Kyokai and EasyTier MyGo use |
 | `AndroMeld` (`catchingnow`) | Proprietary | UX inspiration only | Strictly forbidden to copy, decompile, or redistribute code/APK/assets |
 
 ## Trademarks

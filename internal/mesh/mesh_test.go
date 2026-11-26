@@ -44,7 +44,7 @@ func freePort(t *testing.T) int {
 func TestEmbeddedMeshLifecycle(t *testing.T) {
 	m := NewManager(openBuiltCore(t))
 
-	if st := m.Status(); st.Running || st.Engine == "" {
+	if st := m.Status(""); st.Running || st.Engine == "" {
 		t.Fatalf("fresh mesh must be stopped with an engine label, got %+v", st)
 	}
 	if err := m.Start(Config{NetworkName: "n"}); err == nil {
@@ -65,7 +65,7 @@ func TestEmbeddedMeshLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	if st := m.Status(); !st.Running {
+	if st := m.Status(""); !st.Running {
 		t.Fatalf("mesh not running after Start: %+v", st)
 	}
 	addr := "127.0.0.1:" + strconv.Itoa(port)
@@ -80,15 +80,64 @@ func TestEmbeddedMeshLifecycle(t *testing.T) {
 	}
 	conn.Close()
 
-	if err := m.Stop(); err != nil {
+	if err := m.Stop(""); err != nil {
 		t.Fatalf("Stop: %v", err)
 	}
-	if st := m.Status(); st.Running {
+	if st := m.Status(""); st.Running {
 		t.Fatalf("mesh still running after Stop: %+v", st)
 	}
 	time.Sleep(300 * time.Millisecond)
 	if c, err := net.DialTimeout("tcp", addr, 500*time.Millisecond); err == nil {
 		c.Close()
 		t.Fatalf("port forward %s still listening after Stop", addr)
+	}
+}
+
+// lanIPv4 returns this machine's outbound IPv4 address (nothing is sent), or skips.
+func lanIPv4(t *testing.T) string {
+	t.Helper()
+	c, err := net.Dial("udp", "192.0.2.1:9")
+	if err != nil {
+		t.Skipf("no IPv4 route: %v", err)
+	}
+	defer c.Close()
+	return c.LocalAddr().(*net.UDPAddr).IP.String()
+}
+
+// TestTwoNetworksSideBySide runs two instances of one network in this process, the second
+// dialling the first on the LAN address (EasyTier binds outbound sockets to physical interfaces),
+// and checks that each runs on its own and Info reports the other as a direct peer.
+func TestTwoNetworksSideBySide(t *testing.T) {
+	m := NewManager(openBuiltCore(t))
+	port := freePort(t)
+	base := Config{Enabled: true, NetworkName: "androfuse-two-" + strconv.Itoa(port), NetworkSecret: "two-networks"}
+	a, b := base, base
+	a.Instance, a.DeviceName, a.Listeners = "net-a", "node-a", []string{"tcp://0.0.0.0:" + strconv.Itoa(port)}
+	b.Instance, b.DeviceName, b.Peers = "net-b", "node-b", []string{"tcp://" + net.JoinHostPort(lanIPv4(t), strconv.Itoa(port))}
+	if err := m.Start(a); err != nil {
+		t.Fatalf("Start a: %v", err)
+	}
+	t.Cleanup(func() { _ = m.Stop("net-a"); _ = m.Stop("net-b") })
+	if err := m.Start(b); err != nil {
+		t.Fatalf("Start b: %v", err)
+	}
+	var peer Peer
+	for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline) && peer.Hostname == ""; time.Sleep(250 * time.Millisecond) {
+		if info, ok := m.Info("net-b"); ok {
+			for _, p := range info.Peers {
+				if p.Hostname == "node-a" {
+					peer = p
+				}
+			}
+		}
+	}
+	if peer.Hostname == "" || !peer.Direct {
+		t.Fatalf("net-b does not see node-a directly: %+v", peer)
+	}
+	if err := m.Stop("net-a"); err != nil {
+		t.Fatal(err)
+	}
+	if m.Status("net-a").Running || !m.Status("net-b").Running {
+		t.Fatal("stopping net-a must leave net-b running")
 	}
 }

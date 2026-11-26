@@ -42,6 +42,9 @@ type Handlers struct {
 	ListDevices    func(ctx context.Context) (any, error)
 	RunDiagnostics func(ctx context.Context) (any, error)
 	LaunchApp      func(ctx context.Context, deviceID, packageName string) (any, error)
+	// Approve asks the user about one call of a tool the Allowlist does not let run on its own;
+	// it blocks until they answer or ctx ends. Nil refuses such calls.
+	Approve func(ctx context.Context, tool, detail string) bool
 }
 
 // AuditEntry captures one scrubbed MCP lifecycle or request decision without secrets.
@@ -266,7 +269,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "tools/list":
 		s.recordAudit("tools/list", "", true, "ok")
 		writeRPCResult(w, req.ID, map[string]any{
-			"tools": allowedToolDescriptors(allow),
+			"tools": allowedToolDescriptors(s.listed(allow)),
 		})
 	case "tools/call":
 		s.handleToolCall(w, r.Context(), req, allow)
@@ -291,7 +294,7 @@ func (s *Server) handleToolCall(w http.ResponseWriter, ctx context.Context, req 
 
 	switch call.Name {
 	case "list_devices":
-		if !allow.ListDevices || s.handlers.ListDevices == nil {
+		if s.handlers.ListDevices == nil || !s.permit(ctx, allow.ListDevices, call.Name, "") {
 			s.recordAudit("tools/call", call.Name, false, "not_allowlisted")
 			writeRPCError(w, req.ID, -32003, "tool disabled by allowlist")
 			return
@@ -305,7 +308,7 @@ func (s *Server) handleToolCall(w http.ResponseWriter, ctx context.Context, req 
 		s.recordAudit("tools/call", call.Name, true, "ok")
 		writeToolContent(w, req.ID, res)
 	case "run_diagnostics":
-		if !allow.RunDiagnostics || s.handlers.RunDiagnostics == nil {
+		if s.handlers.RunDiagnostics == nil || !s.permit(ctx, allow.RunDiagnostics, call.Name, "") {
 			s.recordAudit("tools/call", call.Name, false, "not_allowlisted")
 			writeRPCError(w, req.ID, -32003, "tool disabled by allowlist")
 			return
@@ -319,11 +322,6 @@ func (s *Server) handleToolCall(w http.ResponseWriter, ctx context.Context, req 
 		s.recordAudit("tools/call", call.Name, true, "ok")
 		writeToolContent(w, req.ID, res)
 	case "launch_app":
-		if !allow.LaunchApp || s.handlers.LaunchApp == nil {
-			s.recordAudit("tools/call", call.Name, false, "not_allowlisted")
-			writeRPCError(w, req.ID, -32003, "tool disabled by allowlist")
-			return
-		}
 		deviceID, _ := call.Arguments["device_id"].(string)
 		packageName, _ := call.Arguments["package_name"].(string)
 		deviceID = strings.TrimSpace(deviceID)
@@ -331,6 +329,11 @@ func (s *Server) handleToolCall(w http.ResponseWriter, ctx context.Context, req 
 		if deviceID == "" || packageName == "" {
 			s.recordAudit("tools/call", call.Name, false, "invalid_args")
 			writeRPCError(w, req.ID, -32602, "device_id and package_name are required")
+			return
+		}
+		if s.handlers.LaunchApp == nil || !s.permit(ctx, allow.LaunchApp, call.Name, packageName) {
+			s.recordAudit("tools/call", call.Name, false, "not_allowlisted")
+			writeRPCError(w, req.ID, -32003, "tool disabled by allowlist")
 			return
 		}
 		res, err := s.handlers.LaunchApp(ctx, deviceID, packageName)
@@ -475,4 +478,31 @@ func idValue(raw json.RawMessage) any {
 		return nil
 	}
 	return raw
+}
+
+// permit reports whether one call of tool may run: always when allowed (the Allowlist), else only
+// when the user allows this call (Handlers.Approve), which is audited either way.
+func (s *Server) permit(ctx context.Context, allowed bool, tool, detail string) bool {
+	if allowed {
+		return true
+	}
+	if s.handlers.Approve == nil {
+		return false
+	}
+	ok := s.handlers.Approve(ctx, tool, detail)
+	outcome := "user_denied"
+	if ok {
+		outcome = "user_allowed_once"
+	}
+	s.recordAudit("approval", tool, ok, outcome)
+	return ok
+}
+
+// listed is the tools tools/list shows: all of them while calls can be approved one by one,
+// else only the allowlisted ones.
+func (s *Server) listed(allow Allowlist) Allowlist {
+	if s.handlers.Approve != nil {
+		return Allowlist{ListDevices: true, RunDiagnostics: true, LaunchApp: true}
+	}
+	return allow
 }

@@ -18,6 +18,7 @@ AndroFuse 基于 **GNU General Public License v3.0 only**（`GPL-3.0-only`，见
 | `adirh3/DeXDesk`（Miracast 协议与实现参考） | MIT | 已启用（M1a） | 参考 WFD Sink / RTSP / RTP-TS / UIBC 与 MF DXVA 解码 |
 | `Aureliano021/ScrcpyDex`（回环 DeX 激活） | Apache-2.0 | 已启用（M1a） | 参考并采用洁净室重写的 `SemWifiDisplayConfig` 回环辅助器 |
 | `maze-mei/DX-Manager` | MIT | 参考 / 已启用 | 参考多会话管理与初始 DPI ≥ 160 引导规则 |
+| 来自 [Simple Icons](https://simpleicons.org/) 的手机厂商标志（`samsung`、`google`、`xiaomi`、`huawei`、`sony`、`lg`、`lenovo`、`asus`） | CC0 1.0 | 已启用（V3） | 仅在手机头像中用于标明厂商（指称性使用；商标归各自所有者，应要求即移除）；文件与来源见 `internal/gui/assets/logos/SOURCES.md`，与 Kyokai 和 EasyTier MyGo 所用相同 |
 | `AndroMeld`（`catchingnow`） | 专有商业软件 | 仅作交互参考 | 严禁复制、反编译或重新分发其源码、APK 或任何资源 |
 
 ## 商标声明

@@ -5,6 +5,7 @@ package androidhost
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/YuanZhe-99/AndroFuse/internal/adb"
 	"github.com/YuanZhe-99/AndroFuse/internal/androidbridge"
 	"github.com/YuanZhe-99/AndroFuse/internal/companion"
 	L "github.com/YuanZhe-99/AndroFuse/locales"
@@ -56,6 +58,8 @@ type Host struct {
 	pair         *pairPrompt
 	tab          string // Companion tab shown on phones (tabHome when "")
 	beaconCheck  string // outcome of the last wireless debugging port check
+	a11yOn       bool   // the Companion's accessibility service is on (checked in the background)
+	a11yChecked  time.Time
 	mesh         meshRuntime
 }
 
@@ -153,6 +157,51 @@ func (h *Host) StartServer() error {
 		},
 		GetStatus: func() companion.DeviceStatus {
 			return h.Status()
+		},
+		OnShare: func() (net.Conn, error) {
+			if err := androidbridge.StartShare(1280, 4_000_000); err != nil {
+				return nil, err
+			}
+			var c net.Conn
+			var err error
+			for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(200 * time.Millisecond) {
+				if c, err = net.Dial("unix", "@androfuse-share"); err == nil {
+					break
+				}
+			}
+			if err == nil {
+				h.mu.Lock()
+				h.appendAuditLocked("computer started screen sharing")
+				h.mu.Unlock()
+				h.notify()
+			}
+			return c, err
+		},
+		OnKey: func(action string) error {
+			if !androidbridge.GlobalAction(action) {
+				return errors.New(L.ShareNeedsAccessibility())
+			}
+			return nil
+		},
+		OnTunnel: func(port int) (net.Conn, error) {
+			h.mu.Lock()
+			allowed := h.cfg.WirelessADBPort
+			h.mu.Unlock()
+			if allowed <= 0 || port != allowed {
+				return nil, fmt.Errorf("port %d is not this phone's Wireless debugging port", port)
+			}
+			// Only a port that answers as Wireless debugging (STLS) is joined (`INV-07`).
+			if ans, err := probeLocalADB(port); ans != adb.AnswerTLS {
+				return nil, fmt.Errorf("Wireless debugging does not answer on port %d: %v", port, err)
+			}
+			c, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)), 3*time.Second)
+			if err == nil {
+				h.mu.Lock()
+				h.appendAuditLocked("computer opened Wireless debugging through the Companion")
+				h.mu.Unlock()
+				h.notify()
+			}
+			return c, err
 		},
 		OnClipboard: func(msg companion.ClipboardMessage) error {
 			androidbridge.TouchActive()
@@ -267,8 +316,19 @@ func (h *Host) StartServer() error {
 		h.mu.Unlock()
 		h.notify()
 	})
+	// The Wireless debugging port is found automatically (NsdManager); the phone's user no longer
+	// types it. A port is kept only once it answers as Wireless debugging (SaveWirelessADBPort).
+	stopADB := androidbridge.WatchWirelessDebugging(func(port int) {
+		if port > 0 {
+			h.SaveWirelessADBPort(port)
+			return
+		}
+		h.SetWirelessADBPort(0)
+		h.notify()
+	})
+	stopBoth := func() { stopNet(); stopADB() }
 	h.mu.Lock()
-	h.stopNetWatch = stopNet
+	h.stopNetWatch = stopBoth
 	h.mu.Unlock()
 	go h.resumeMesh()
 	androidbridge.SyncCompanionWidget(true, wPort, readDeviceTelemetry().BatteryPct)
@@ -424,6 +484,8 @@ func (h *Host) SetPermission(name string, enabled bool) {
 		h.cfg.Permissions.ADBBeacon = enabled
 	case "media_bridge":
 		h.cfg.Permissions.MediaBridge = enabled
+	case "screen_share":
+		h.cfg.Permissions.ScreenShare = enabled
 	}
 	h.appendAuditLocked(fmt.Sprintf("permission %s=%v", name, enabled))
 	h.saveConfigLocked()

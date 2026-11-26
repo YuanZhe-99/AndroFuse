@@ -97,6 +97,19 @@ struct CallRequest {
     params: serde_json::Value,
 }
 
+/// `mesh.stop` / `mesh.status` parameters: the instance (network) they refer to. No instance
+/// means every instance for `mesh.stop` and the default one for `mesh.status`.
+#[derive(Debug, Default, Deserialize)]
+struct MeshRef {
+    #[serde(default)]
+    instance: Option<String>,
+}
+
+/// Reads a MeshRef from optional call parameters; missing or malformed parameters mean none.
+fn mesh_ref(params: &serde_json::Value) -> MeshRef {
+    serde_json::from_value(params.clone()).unwrap_or_default()
+}
+
 #[derive(Debug, Serialize)]
 struct StatusResult {
     version: String,
@@ -290,11 +303,16 @@ pub unsafe extern "C" fn androfuse_call(
                 },
                 Err(e) => err_json(&format!("invalid mesh config: {e}")),
             },
-            "mesh.stop" => match mesh::stop() {
-                Ok(()) => ok_json(mesh::status()),
-                Err(e) => err_json(&e),
-            },
-            "mesh.status" => ok_json(mesh::status()),
+            "mesh.stop" => {
+                let r = mesh_ref(&req.params);
+                match mesh::stop(r.instance.as_deref()) {
+                    Ok(()) => ok_json(mesh::status(r.instance.as_deref().unwrap_or(""))),
+                    Err(e) => err_json(&e),
+                }
+            }
+            "mesh.status" => ok_json(mesh::status(
+                mesh_ref(&req.params).instance.as_deref().unwrap_or(""),
+            )),
             "status" => {
                 let guard = match state_lock().lock() {
                     Ok(g) => g,
@@ -342,7 +360,7 @@ pub unsafe extern "C" fn androfuse_free(ptr: *mut u8, len: usize) {
 /// Stops the core, destroys active decoders, and clears in-memory state.
 #[unsafe(no_mangle)]
 pub extern "C" fn androfuse_stop() {
-    let _ = mesh::stop();
+    let _ = mesh::stop(None);
     if let Ok(mut d) = decoders_map().lock() {
         d.clear();
     }
@@ -882,6 +900,9 @@ mod tests {
 
     #[test]
     fn abi_start_status_diag_stop_roundtrip() {
+        let _serial = mesh::TEST_INSTANCES
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         assert_eq!(androfuse_abi_version(), ABI_VERSION);
 
         let start_req = br#"{"version":"0.1.0","state_dir":"C:\\tmp","profile":"test"}"#;

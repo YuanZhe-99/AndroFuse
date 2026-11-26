@@ -24,7 +24,7 @@ const (
 	tileSize    float32 = 32 // icon container of a list row
 	navBadgeMax         = 99 // badge counters cap at "99+"
 	paneMargin  float32 = 8
-	paneRadius  float32 = 12 // V2.1: panes and cards share --r-lg; dialogs use radiusXL
+	paneRadius  float32 = 4 // a pane corner that meets the window's (Kyokai paneTightRadius); Windows rounds the window at 8
 	paneHeaderH float32 = 44
 	cardRadius  float32 = 12
 	cardPad     float32 = 16
@@ -92,61 +92,74 @@ var (
 	closeHoverText = ui.RGB(255, 255, 255)
 )
 
-// tokens holds semantic colors for the active theme, matching design/common.css (V2.1).
-// brand is the single accent reserved for one primary action per area; text2/text3 are the
-// secondary and tertiary text tiers (≥ 7:1 and ≥ 4.5:1 on surface).
+// tokens holds semantic colors for the active theme (design/common.css, V3). brand is the system
+// accent (Kyokai: one accent per area); text2/text3 are the secondary and tertiary text tiers
+// (≥ 7:1 and ≥ 4.5:1 on the pane); status colors as words are a shade deeper than as dots.
 type tokens struct {
 	brand, onBrand  ui.Color
-	brandSoft       ui.Color // tint surface
-	brandSoftText   ui.Color // deep shade text on brandSoft
-	good, warn, bad ui.Color
+	brandSoft       ui.Color // accent tint surface
+	brandSoftText   ui.Color // accent as words
+	good, warn, bad ui.Color // dots, edges, tints
+	goodText        ui.Color // status colors as words
+	warnText        ui.Color
+	badText         ui.Color
 	onBad           ui.Color
 	muted, hairline ui.Color
 	text2, text3    ui.Color
 	disabledBg      ui.Color
 	disabledText    ui.Color
 	surface, canvas ui.Color
+	sunk            ui.Color // fields, row hover, sub-rows
 }
 
 func tok(c *ui.Context) tokens {
 	t := c.Theme()
+	acc := t.Accent
 	if t.Dark {
 		return tokens{
-			brand:         ui.Hex("#5CD6A0"),
-			onBrand:       ui.Hex("#0A1F17"),
-			brandSoft:     ui.Hex("#16382B"),
-			brandSoftText: ui.Hex("#A6F0CE"),
-			text2:         ui.Hex("#B0B6C0"),
-			text3:         ui.Hex("#8E95A0"),
-			disabledBg:    ui.Hex("#2A2E35"),
-			disabledText:  ui.Hex("#6B717C"),
-			good:          t.Success,
-			warn:          t.Warning,
-			bad:           t.Danger,
+			brand:         acc,
+			onBrand:       t.AccentText,
+			brandSoft:     acc.Alpha(0.16),
+			brandSoftText: acc.Mix(ui.Hex("#ffffff"), 0.35),
+			text2:         ui.Hex("#C9CDD4"),
+			text3:         ui.Hex("#A0A6B0"),
+			disabledBg:    ui.Hex("#2F3238"),
+			disabledText:  ui.Hex("#7A808A"),
+			good:          ui.Hex("#4CBB4C"),
+			warn:          ui.Hex("#F0B429"),
+			bad:           ui.Hex("#F2554A"),
+			goodText:      ui.Hex("#7FD67F"),
+			warnText:      ui.Hex("#FFC95C"),
+			badText:       ui.Hex("#FF9A90"),
 			onBad:         ui.Hex("#ffffff"),
 			muted:         t.TextMuted,
 			hairline:      t.Border,
 			surface:       t.Surface,
-			canvas:        ui.Hex("#131D22"),
+			canvas:        ui.Hex("#1D1F23"),
+			sunk:          ui.Hex("#2F3238"),
 		}
 	}
 	return tokens{
-		brand:         ui.Hex("#146C4B"),
-		onBrand:       ui.Hex("#ffffff"),
-		brandSoft:     ui.Hex("#E3F5ED"),
-		brandSoftText: ui.Hex("#0D4E35"),
-		text2:         ui.Hex("#4F5764"),
-		text3:         ui.Hex("#6A7280"),
+		brand:         acc,
+		onBrand:       t.AccentText,
+		brandSoft:     acc.Alpha(0.12),
+		brandSoftText: acc.Mix(ui.Hex("#000000"), 0.3),
+		text2:         ui.Hex("#4A505C"),
+		text3:         ui.Hex("#646B78"),
 		disabledBg:    ui.Hex("#EEF1F4"),
-		disabledText:  ui.Hex("#9AA1AB"),
-		good:          t.Success,
-		warn:          t.Warning,
-		bad:           t.Danger,
+		disabledText:  ui.Hex("#8A919C"),
+		good:          ui.Hex("#2AA52A"),
+		warn:          ui.Hex("#E8A200"),
+		bad:           ui.Hex("#D93A2F"),
+		goodText:      ui.Hex("#0F7B0F"),
+		warnText:      ui.Hex("#8A5100"),
+		badText:       ui.Hex("#B3261E"),
 		onBad:         ui.Hex("#ffffff"),
 		muted:         t.TextMuted,
 		hairline:      t.Border,
 		surface:       t.Surface,
-		canvas:        t.Surface,
+		canvas:        ui.Hex("#EEF0F3"),
+		sunk:          ui.Hex("#F5F6F8"),
 	}
 }
 
@@ -160,3 +173,25 @@ func card(c *ui.Context) ui.Element {
 		FillWidth().
 		Border(1, t.Border)
 }
+
+// V3 shell tokens (design/README.md: Kyokai's structure).
+const (
+	homeMaxW      float32 = 1120 // Home's content never grows wider
+	pageMaxW      float32 = 720  // a Settings page's content
+	devCardMinW   float32 = 300  // a phone card on Home
+	avatarSize    float32 = 36
+	avatarSmall   float32 = 22
+	avatarLarge   float32 = 44
+	sheetMarginX  float32 = 64 // the Settings sheet's distance from the window's sides
+	sheetMarginT  float32 = 48
+	sheetMarginB  float32 = 32
+	sheetNavW     float32 = 232
+	paletteW      float32 = 620
+	paletteTop    float32 = 72
+	pickerW       float32 = 420
+	rowMinH       float32 = 60
+	subRowIndent  float32 = 58
+	iconButton    float32 = 32
+	telemetryPopW float32 = 340
+	noticeEdge    float32 = 3
+)

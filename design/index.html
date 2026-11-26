@@ -2,113 +2,47 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AndroFuse UI 重新设计草稿总览</title>
+<title>AndroFuse V3 界面设计草稿</title>
+<link rel="stylesheet" href="common.css">
 <style>
-:root { --bg:#EEF2F5; --surface:#FFFFFF; --ink:#1B1D21; --ink2:#4A5260; --line:#DCE2E8; --acc:#146C4B; --tint:#E3F5ED; --tint-tx:#0D4E35; }
-@media (prefers-color-scheme: dark) {
-  :root { --bg:#14171B; --surface:#20242B; --ink:#EDEFF2; --ink2:#A9AFBA; --line:#323741; --acc:#5CD6A0; --tint:#16382B; --tint-tx:#A6F0CE; }
-}
-* { box-sizing: border-box; }
-body { margin:0; background:var(--bg); color:var(--ink); font-family:"Segoe UI Variable Text","Segoe UI","PingFang SC","Microsoft YaHei UI",system-ui,sans-serif; }
-header, main { max-width:1420px; margin:0 auto; padding:0 24px; }
-header { padding-top:26px; padding-bottom:14px; }
-h1 { margin:0 0 6px; font-size:24px; font-weight:700; }
-header p { margin:0; color:var(--ink2); font-size:13px; max-width:78ch; line-height:1.55; }
-main { padding-bottom:44px; display:flex; flex-direction:column; gap:28px; }
-section h2 { margin:0 0 12px; font-size:16px; font-weight:700; display:flex; align-items:center; gap:10px; }
-.badge { font-size:12px; font-weight:600; padding:2px 10px; border-radius:999px; background:var(--tint); color:var(--tint-tx); }
-.row { display:flex; flex-wrap:wrap; gap:18px; align-items:flex-start; }
-figure { margin:0; display:flex; flex-direction:column; gap:7px; min-width:0; }
-.frame { position:relative; overflow:hidden; border-radius:12px; border:1px solid var(--line); background:var(--surface); box-shadow:0 4px 14px rgba(15,22,32,0.08); }
-.frame iframe { position:absolute; left:0; top:0; border:0; transform-origin:0 0; }
-figcaption { display:flex; justify-content:space-between; align-items:center; gap:8px; font-size:12px; color:var(--ink2); }
-figcaption strong { color:var(--ink); font-weight:600; }
-figcaption a { color:var(--acc); text-decoration:none; font-weight:600; white-space:nowrap; }
-figcaption a:hover { text-decoration:underline; }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 8px 24px 48px; }
+  .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+  a.card { color: inherit; text-decoration: none; display: flex; gap: 14px; align-items: flex-start; }
+  a.card:hover { border-color: var(--accent); }
+  .fb { margin: 28px 0 10px; font-weight: 600; }
+  .fbt { border-collapse: collapse; width: 100%; font-size: 13px; background: var(--pane); border-radius: 12px; overflow: hidden; }
+  .fbt td { padding: 10px 14px; border-top: 1px solid var(--divider); vertical-align: top; }
+  .fbt tr:first-child td { border-top: 0; }
+  .fbt td:first-child { width: 34%; color: var(--tx2); }
 </style>
 </head>
 <body>
-<header>
-  <h1>AndroFuse UI 重新设计草稿 V2.1（主窗口内嵌窗格 + 精简图标化 + 设计词汇规范）</h1>
-  <p>参考 Kyokai 与 Windows-ARM64.apk：投屏、三星 DeX 与独立应用默认在主窗口内以窗格打开并支持分屏，可随时点 ↗ 弹出为独立窗口或点 ◧ 放回主窗口；全界面采用图标引导并精简说明文字。V2.1 按 topinspo.design/vocabulary 统一了圆角、细线、分层阴影、三级文字色、等宽数字、动效曲线与按钮层级，并新增命令面板与交互状态规范两张画板（对照表见 README）。点“打开原图”可全尺寸预览。</p>
-</header>
-<main id="gallery"></main>
-<script>
-const sections = [
-  {
-    title: '电脑端（主窗口窗格、分屏、独立窗口与设置）',
-    badge: '14 张画板 · 最低宽度 820px',
-    boards: [
-      { file: 'DesktopDevices.html', title: '设备主页（分屏按钮 + 已记住设备）', w: 1280, h: 800 },
-      { file: 'DesktopOpenMenu.html', title: '打开方式下拉菜单', w: 1280, h: 800 },
-      { file: 'DesktopPaneDeX.html', title: '主窗口内嵌 DeX（深色）', w: 1280, h: 800 },
-      { file: 'DesktopPaneSplit.html', title: '主窗口双窗格分屏 + ⋯ 收纳', w: 1280, h: 800 },
-      { file: 'DesktopStandalone.html', title: '独立窗口（含放回主窗口）', w: 1280, h: 800 },
-      { file: 'DesktopDevicesNarrow.html', title: '820px 最小宽度（64px 图标栏）', w: 820, h: 600 },
-      { file: 'DesktopDevicesEmpty.html', title: '未连接引导', w: 1280, h: 800 },
-      { file: 'DesktopApps.html', title: '应用启动器', w: 1280, h: 800 },
-      { file: 'DesktopCompanion.html', title: '手机协同（含一键装伴侣）', w: 1280, h: 800 },
-      { file: 'DesktopConnectDialog.html', title: '连接与可选安装伴侣 APK', w: 1280, h: 800 },
-      { file: 'DesktopSettings.html', title: '设置（主窗口窗格 + 面包屑）', w: 1280, h: 800 },
-      { file: 'DesktopDiagnostics.html', title: '本机诊断（Bento 实测面板）', w: 1280, h: 800 },
-      { file: 'DesktopCommandPalette.html', title: '命令面板（Ctrl K）', w: 1280, h: 800 },
-      { file: 'DesktopStates.html', title: '交互状态规范（设计词汇）', w: 1280, h: 900 },
-    ]
-  },
-  {
-    title: '手机端（Android 伴侣 · 常规、折叠屏与 340dp 外屏）',
-    badge: '4 张画板 · 最低 320dp',
-    boards: [
-      { file: 'MobileHome.html', title: '伴侣主页', w: 410, h: 820 },
-      { file: 'MobilePermissions.html', title: '功能权限（图标行）', w: 410, h: 820 },
-      { file: 'MobileSecurity.html', title: '安全与最近记录', w: 410, h: 820 },
-      { file: 'MobileFoldAndNarrow.html', title: 'Fold 8 双栏 (704dp) + 340dp 外屏', w: 1120, h: 820 },
-    ]
-  }
-];
+<div class="stagehead"><b>AndroFuse V3 界面设计草稿</b><span class="sp"></span><button data-theme-toggle>浅色 / 深色</button></div>
+<div class="wrap">
+  <p class="cap" style="max-width:none">参照 Kyokai 的结构和逻辑重新设计。草稿只用于评审，确认后再改原生 MyGo 界面、文案目录和文档。规格见 <a href="README.md">README.md</a>。</p>
+  <div class="grid">
+    <a class="card" href="Home.html"><span class="tile acc"><i data-i="home"></i></span><div><div style="font-weight:600">主页 · 设备</div><div class="sub" style="font-size:13px">这台电脑、连接手机（只填 IP）、手机卡片（厂商标志、改名、实时状态），820 宽深色</div></div></a>
+    <a class="card" href="Connect.html"><span class="tile acc"><i data-i="link"></i></span><div><div style="font-weight:600">连接手机</div><div class="sub" style="font-size:13px">打开选择器，只知道 IP 时的查找流程、配对、第一次 USB 连接</div></div></a>
+    <a class="card" href="Panes.html"><span class="tile acc"><i data-i="splitR"></i></span><div><div style="font-weight:600">窗格 · 分屏</div><div class="sub" style="font-size:13px">单层标题栏、画面信息、需要决定的卡片、移动网络下的伴侣共享屏幕</div></div></a>
+    <a class="card" href="Settings.html"><span class="tile acc"><i data-i="gear"></i></span><div><div style="font-weight:600">设置</div><div class="sub" style="font-size:13px">网络（Kyokai 式多网络）、常规、手机与画面、摄像头、电脑上的 Android、安全、关于与更新</div></div></a>
+    <a class="card" href="Tray.html"><span class="tile acc"><i data-i="tray"></i></span><div><div style="font-weight:600">托盘 · 通知</div><div class="sub" style="font-size:13px">每台手机的子菜单、已打开、网络开关、手机通知回复</div></div></a>
+    <a class="card" href="Search.html"><span class="tile acc"><i data-i="search"></i></span><div><div style="font-weight:600">搜索（Ctrl K）</div><div class="sub" style="font-size:13px">画面、手机、应用、操作和设置</div></div></a>
+    <a class="card" href="Phone.html"><span class="tile acc"><i data-i="phone"></i></span><div><div style="font-weight:600">手机上的伴侣</div><div class="sub" style="font-size:13px">主页、权限、安全、配对与共享询问、折叠屏展开</div></div></a>
+  </div>
 
-const root = document.getElementById('gallery');
-for (const sec of sections) {
-  const el = document.createElement('section');
-  const h2 = document.createElement('h2');
-  h2.innerHTML = `${sec.title}<span class="badge">${sec.badge}</span>`;
-  const row = document.createElement('div');
-  row.className = 'row';
-
-  for (const b of sec.boards) {
-    const scale = b.w > 900 ? 0.35 : 0.60;
-    const fig = document.createElement('figure');
-    const frame = document.createElement('div');
-    frame.className = 'frame';
-    frame.style.width = Math.round(b.w * scale) + 'px';
-    frame.style.height = Math.round(b.h * scale) + 'px';
-
-    const iframe = document.createElement('iframe');
-    iframe.src = b.file;
-    iframe.title = b.title;
-    iframe.loading = 'lazy';
-    iframe.width = b.w;
-    iframe.height = b.h;
-    iframe.style.transform = `scale(${scale})`;
-    frame.appendChild(iframe);
-
-    const cap = document.createElement('figcaption');
-    const lbl = document.createElement('span');
-    lbl.innerHTML = `<strong>${b.title}</strong> · ${b.w}×${b.h}`;
-    const link = document.createElement('a');
-    link.href = b.file;
-    link.target = '_blank';
-    link.rel = 'noopener';
-    link.textContent = '打开 ↗';
-    cap.append(lbl, link);
-
-    fig.append(frame, cap);
-    row.appendChild(fig);
-  }
-  el.append(h2, row);
-  root.appendChild(el);
-}
-</script>
+  <div class="fb">这一版对应的反馈</div>
+  <table class="fbt">
+    <tr><td>1. 简陋，到处是 M5 之类的内部代号</td><td>界面文字只写用户能懂的话：不出现里程碑代号、ABI、scrcpy、MJPEG、TLS、ADB 等词；技术信息只放在「关于与更新 › 技术详情」。</td></tr>
+    <tr><td>2. 连接强制要 host:port，用户只知道 IP</td><td>只填 IP、域名或手机名称就能连；端口由 AndroFuse 自己找（记住的端口 → 问伴侣 → 常用范围查找），都不行才请用户填，且填的只是端口。见「连接手机」。</td></tr>
+    <tr><td>3. 有重叠</td><td>每个窗格只有一个标题栏，画面信息不再盖在画面上；窄窗格把工具收进 ⋯；文字超长一律截断，不压住按钮。820×600 也逐页检查过。</td></tr>
+    <tr><td>4. EasyTier 设置太简陋</td><td>照 Kyokai：多个网络，每个有加入开关、状态、本机地址、可直连程度、网络里的手机（直连/中继和延迟），添加和编辑用同一个表单（服务器每行一个、密钥只写不读、弱密钥提示）。</td></tr>
+    <tr><td>5. 没做的全部做完</td><td>本版画出了：经网络投屏、伴侣自动发现无线调试端口、移动网络下的伴侣共享屏幕、自动更新、给其他应用用的手机摄像头、Ctrl K 搜索、本机助手的逐次允许。</td></tr>
+    <tr><td>6. 设计参考 Kyokai</td><td>侧栏在窗口材质上、窗格浮在上面；打开选择器；设置是盖住窗口的面板；行 = 图标 + 标题 + 一句话 + 控件；手机卡片带实时状态。</td></tr>
+    <tr><td>7. 托盘菜单要丰富</td><td>每台手机一个子菜单（DeX、屏幕、最近应用、剪贴板、文件、截图、熄屏），已打开、网络开关、电脑上的 Android，以及助手的紧急停止。</td></tr>
+    <tr><td>另外：大小写、模拟器代号、改名与标志、「顺便安装（可选）」</td><td>英文用句首大写（Sentence case），Host、Port 等不再出现；模拟器显示「Android 模拟器 · Android 16」；手机可以改名（只存在这台电脑上），厂商标志自动匹配；勾选框只写「安装 AndroFuse 伴侣」。</td></tr>
+  </table>
+</div>
+<script src="logos.js"></script>
+<script src="common.js"></script>
 </body>
 </html>

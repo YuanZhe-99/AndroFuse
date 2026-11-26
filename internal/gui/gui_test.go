@@ -2,6 +2,7 @@ package gui
 
 import (
 	"bytes"
+	"fmt"
 	"image"
 	"image/color"
 	"image/png"
@@ -55,7 +56,13 @@ func testApp(t *testing.T) *App {
 		},
 	}
 	a.cameraBridgeURL = "http://127.0.0.1:27190/camera/test.mjpeg"
-	a.meshStatus = mesh.Status{Running: true, Engine: "easytier 2.7.1 (embedded, no TUN)"}
+	a.compHash = "0123456789abcdef"
+	a.prefs.Mesh = &MeshPrefs{Networks: []MeshNetwork{{ID: "net-home", Label: "Home", NetworkName: "home-mesh", Join: true, ListenPort: 31452}, {ID: "net-office", NetworkName: "office"}}, Accept: true, PairNetwork: "net-home"}
+	a.netViews["net-home"] = netView{Status: mesh.Status{Running: true}, Info: mesh.Info{IPv4: "10.126.126.1", NAT: "FullCone", Peers: []mesh.Peer{{Hostname: "SM-F971U1", IPv4: "10.126.126.12", Direct: true, Latency: 3}, {Hostname: "Pixel 8 Pro", IPv4: "10.126.126.13", Latency: 48}}}}
+	a.remembered = []RememberedDevice{
+		{HardwareHash: "0123456789abcdef", Name: "Galaxy Z Fold8", Alias: "My Fold", Maker: "samsung", Model: "SM-F971U1", Android: "17", AutoReconnect: true, Companion: &CompanionBinding{MeshHost: "SM-F971U1"}},
+		{HardwareHash: "xiaomi-14", Name: "Xiaomi 14", Maker: "Xiaomi", Model: "23127PN0CC", Android: "15", AutoReconnect: true},
+	}
 	a.diagReady = true
 	a.diag = HostDiagnostics{
 		CoreLoaded: true,
@@ -117,7 +124,8 @@ func testApp(t *testing.T) *App {
 			Profile: adb.DeviceProfile{
 				HardwareHash:   "0123456789abcdef",
 				Manufacturer:   "samsung",
-				Model:          "Galaxy Fold",
+				Model:          "SM-F971U1",
+				MarketName:     "Galaxy Z Fold8",
 				AndroidRelease: "17",
 				SDKInt:         37,
 				OneUIVersion:   "90000",
@@ -167,7 +175,8 @@ func testApp(t *testing.T) *App {
 			Profile: adb.DeviceProfile{
 				HardwareHash:   "fedcba9876543210",
 				Manufacturer:   "Google",
-				Model:          "Pixel_9a_API_36",
+				Model:          "sdk_gphone64_arm64",
+				Emulator:       true,
 				AndroidRelease: "16",
 				SDKInt:         36,
 			},
@@ -203,37 +212,67 @@ func TestEncoderHeadroom(t *testing.T) {
 	}
 }
 
+// TestViewsRender builds every view — Home, each Settings page, search, the + picker, one pane
+// and a split — in both languages, both appearances, at the default size, the minimum size (the
+// rail) and a narrow window. With SCREENSHOT_DIR set it writes each frame there as a PNG.
 func TestViewsRender(t *testing.T) {
-	pages := []string{string(pageDevices), string(pageApps), string(pageCompanion), string(pageDiagnostics),
-		string(pageSettings), "settings/" + setWindows, "settings/" + setNetwork, "settings/" + setLocal,
-		"settings/" + setSecurity, "settings/" + setAbout, panePrefix + "s1", pageSplit}
+	views := []string{"home", "search", "picker", "pane", "split"}
+	for _, p := range []string{setGeneral, setPhones, setCamera, setNetwork, setVM, setSecurity, setAbout} {
+		views = append(views, "settings-"+p)
+	}
 	sizes := []struct {
 		name string
 		w, h int
 	}{
 		{"desktop", mainDefW, mainDefH},
 		{"rail", mainMinW, mainMinH},
-		{"mobile", 412, 915},
+		{"narrow", 600, 800},
 	}
-
+	dir := os.Getenv("SCREENSHOT_DIR")
 	for _, lang := range []string{"en", "zh-Hans"} {
 		i18n.SetLocaleFunc(func() string { return lang })
 		for _, sz := range sizes {
 			for _, dark := range []bool{false, true} {
-				for _, pg := range pages {
+				for _, v := range views {
 					a := testApp(t)
-					a.page = pg
-					if cat, ok := strings.CutPrefix(pg, "settings/"); ok {
-						a.page, a.settingsTab = string(pageSettings), cat
-					}
-					a.connectOpen = pg == string(pageDevices) && dark
 					dockTestSessions(a)
+					a.split = nil
+					switch {
+					case v == "search":
+						a.searchOpen, a.searchQuery = true, "set"
+					case v == "picker":
+						a.picker.Open = true
+					case v == "pane":
+						a.page = panePrefix + "s1"
+					case v == "split":
+						a.split = &paneSplit{A: "s1", B: "s2", Percent: 50}
+						a.page = pageSplit
+					case strings.HasPrefix(v, "settings-"):
+						a.settingsOpen, a.settingsPage = true, strings.TrimPrefix(v, "settings-")
+						a.netForm = &netForm{ID: "net-office", NetworkName: "office", Servers: "tcp://relay.example.com:11010"}
+					default:
+						a.renaming, a.renameText = "0123456789abcdef", "My Fold"
+						a.connect = connectFlow{Input: "100.64.0.12", Phase: connectNoAnswer, Host: "100.64.0.12"}
+					}
 					tt := ui.NewTester(a.view, sz.w, sz.h)
 					tt.SetDark(dark)
 					tt.Frame()
+					tt.Frame()
 					img := tt.Image()
 					if img.Bounds().Dx() != sz.w || img.Bounds().Dy() != sz.h {
-						t.Fatalf("unexpected frame bounds for %s/%s/%s: %v", lang, sz.name, pg, img.Bounds())
+						t.Fatalf("unexpected frame bounds for %s/%s/%s: %v", lang, sz.name, v, img.Bounds())
+					}
+					if dir != "" {
+						mode := "light"
+						if dark {
+							mode = "dark"
+						}
+						f, err := os.Create(filepath.Join(dir, fmt.Sprintf("%s_%s_%s_%s.png", lang, sz.name, mode, v)))
+						if err != nil {
+							t.Fatal(err)
+						}
+						_ = png.Encode(f, img)
+						f.Close()
 					}
 				}
 			}
@@ -294,7 +333,7 @@ func TestSessionWindowRenderAndInputMapping(t *testing.T) {
 	}
 
 	// Render SessionWindow UI across en / zh-Hans and light / dark with an uploaded NV12 frame.
-	sw := newSessionWindow(nil, SessionSpec{
+	sw := newSessionWindow(testApp(t), SessionSpec{
 		ID:           "sess-test",
 		Title:        "Galaxy Fold · Samsung DeX (TLS Wi-Fi)",
 		Mode:         SessionModeDeX,
@@ -351,7 +390,7 @@ func TestSessionWindowRenderAndInputMapping(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ui.DecodeBitmap: %v", err)
 	}
-	appWin := newSessionWindow(nil, SessionSpec{
+	appWin := newSessionWindow(testApp(t), SessionSpec{
 		ID:           "app-test",
 		Title:        "Calculator",
 		Mode:         SessionModeApp,
@@ -388,7 +427,7 @@ func TestSessionWindowRenderAndInputMapping(t *testing.T) {
 // dockTestSessions opens two docked sessions, s1 and s2, split side by side for pageSplit.
 func dockTestSessions(a *App) {
 	for _, id := range []string{"s1", "s2"} {
-		sw := newSessionWindow(a, SessionSpec{ID: id, Mode: SessionModeMirror, Title: "Pixel " + id, Transport: "USB", BackendLabel: "Phone mirror"})
+		sw := newSessionWindow(a, SessionSpec{ID: id, DeviceKey: "0123456789abcdef", Mode: SessionModeMirror, Title: "Pixel " + id, Transport: "USB", BackendLabel: "Phone mirror"})
 		sw.docked = true
 		sw.negotiatedW, sw.negotiatedH, sw.measuredFPS = 1080, 2400, 59.8
 		a.sessions[id] = sw
@@ -415,7 +454,7 @@ func TestPaneDocking(t *testing.T) {
 		t.Fatalf("pop out s1: page = %q split = %+v", a.page, a.split)
 	}
 	a.removeSession("s2")
-	if a.page != string(pageDevices) {
+	if a.page != pageHome {
 		t.Fatalf("close s2: page = %q", a.page)
 	}
 }

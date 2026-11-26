@@ -49,12 +49,20 @@ type Device struct {
 // DeviceProfile describes real Android/One UI capabilities queried from the
 // target via `--user 0` safe shell inspection.
 type DeviceProfile struct {
-	MaskedID         string `json:"masked_id"`
-	DeviceHash       string `json:"device_hash"`
-	HardwareSerial   string `json:"-"`
-	HardwareHash     string `json:"hardware_hash,omitempty"`
-	Manufacturer     string `json:"manufacturer"`
-	Model            string `json:"model"`
+	MaskedID       string `json:"masked_id"`
+	DeviceHash     string `json:"device_hash"`
+	HardwareSerial string `json:"-"`
+	HardwareHash   string `json:"hardware_hash,omitempty"`
+	Manufacturer   string `json:"manufacturer"`
+	Model          string `json:"model"`
+	// MarketName is the product name the maker sells it under (ro.product.marketname), when set.
+	MarketName string `json:"market_name,omitempty"`
+	// Brand is ro.product.brand (for example "google" or "redmi"), used to pick the vendor mark.
+	Brand string `json:"brand,omitempty"`
+	// DeviceName is the name set in the phone's own settings (Settings › About phone).
+	DeviceName string `json:"device_name,omitempty"`
+	// Emulator is true for an Android emulator or virtual device (ro.kernel.qemu).
+	Emulator         bool   `json:"emulator,omitempty"`
 	AndroidRelease   string `json:"android_release"`
 	SDKInt           int    `json:"sdk_int"`
 	OneUIVersion     string `json:"oneui_version,omitempty"`
@@ -176,6 +184,23 @@ func (c *Client) Run(ctx context.Context, args ...string) (string, error) {
 		return strings.TrimSpace(stdout.String()), fmt.Errorf("adb %s: %s", strings.Join(args, " "), errTxt)
 	}
 	return strings.TrimSpace(stdout.String()), nil
+}
+
+// ExecOut runs `adb -s <serial> exec-out <args>` and returns its raw output (for example a PNG from
+// screencap -p), without the newline translation of `adb shell`.
+func (c *Client) ExecOut(ctx context.Context, serial string, args ...string) ([]byte, error) {
+	if c == nil || c.Path == "" {
+		return nil, errors.New("adb client uninitialized")
+	}
+	cmd := exec.CommandContext(ctx, c.Path, append([]string{"-s", serial, "exec-out"}, args...)...)
+	sysproc.HideConsole(cmd)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("adb exec-out: %s", strings.TrimSpace(stderr.String()))
+	}
+	return stdout.Bytes(), nil
 }
 
 // Devices returns all targets reported by `adb devices -l`.
@@ -499,6 +524,10 @@ func (c *Client) ProbeDevice(ctx context.Context, serial string) (DeviceProfile,
 		`echo "HWSER=$(getprop ro.serialno)"`,
 		`echo "MFR=$(getprop ro.product.manufacturer)"`,
 		`echo "MOD=$(getprop ro.product.model)"`,
+		`echo "MKT=$(getprop ro.product.marketname)$(getprop ro.product.vendor.marketname)"`,
+		`echo "BRAND=$(getprop ro.product.brand)"`,
+		`echo "QEMU=$(getprop ro.kernel.qemu)$(getprop ro.boot.qemu)"`,
+		`echo "DNAME=$(settings get global device_name 2>/dev/null)"`,
 		`echo "REL=$(getprop ro.build.version.release)"`,
 		`echo "SDK=$(getprop ro.build.version.sdk)"`,
 		`echo "ONEUI=$(getprop ro.build.version.oneui)"`,
@@ -539,6 +568,16 @@ func ParseDeviceProbe(serial, raw string) DeviceProfile {
 			prof.Manufacturer = strings.TrimPrefix(line, "MFR=")
 		case strings.HasPrefix(line, "MOD="):
 			prof.Model = strings.TrimPrefix(line, "MOD=")
+		case strings.HasPrefix(line, "MKT="):
+			prof.MarketName = strings.TrimSpace(strings.TrimPrefix(line, "MKT="))
+		case strings.HasPrefix(line, "BRAND="):
+			prof.Brand = strings.TrimSpace(strings.TrimPrefix(line, "BRAND="))
+		case strings.HasPrefix(line, "QEMU="):
+			prof.Emulator = strings.Contains(line, "1")
+		case strings.HasPrefix(line, "DNAME="):
+			if n := strings.TrimSpace(strings.TrimPrefix(line, "DNAME=")); n != "null" {
+				prof.DeviceName = n
+			}
 		case strings.HasPrefix(line, "REL="):
 			prof.AndroidRelease = strings.TrimPrefix(line, "REL=")
 		case strings.HasPrefix(line, "SDK="):

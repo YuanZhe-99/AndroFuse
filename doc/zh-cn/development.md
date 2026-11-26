@@ -52,6 +52,12 @@ $env:CGO_ENABLED="0"; $env:ANDROFUSE_LIVE_DEVICE="1"; go test -v -run TestLiveDe
 # First pairing over adb + mesh hand-over against a phone or emulator (tap Allow when prompted; PowerShell)
 $env:CGO_ENABLED="0"; $env:ANDROFUSE_LIVE_COMPANION="emulator-5554"; go test -v -run TestLiveCompanionPairAndMeshJoin ./internal/gui
 
+# Companion screen sharing end to end (pairs, turns the permission on, answers the consent dialogs with uiautomator; PowerShell)
+$env:CGO_ENABLED="0"; $env:ANDROFUSE_LIVE_SHARE="emulator-5554"; go test -v -run TestLiveCompanionScreenShare ./internal/gui
+
+# Render every view in both languages and appearances and keep the frames as PNGs
+$env:CGO_ENABLED="0"; $env:SCREENSHOT_DIR="$PWD\.dev\shots"; go test -run TestViewsRender ./internal/gui
+
 # Run full offline verification gate
 gofmt -l cmd internal tools
 go vet ./...

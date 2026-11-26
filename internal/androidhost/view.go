@@ -3,11 +3,11 @@ package androidhost
 import (
 	"fmt"
 	"net"
-	"strconv"
-	"strings"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 
+	"github.com/YuanZhe-99/AndroFuse/internal/androidbridge"
 	L "github.com/YuanZhe-99/AndroFuse/locales"
 )
 
@@ -113,7 +113,7 @@ func (h *Host) pairPrompt(c *ui.Context) {
 func (h *Host) homeTab(c *ui.Context, wide bool) {
 	t := c.Theme()
 	h.mu.Lock()
-	running, port, cfg, lastErr := h.running, h.ListenPortLocked(), h.cfg, h.lastErr
+	running, cfg, lastErr := h.running, h.cfg, h.lastErr
 	h.mu.Unlock()
 
 	card(c.Key("comp-service-card")).Children(func() {
@@ -141,22 +141,7 @@ func (h *Host) homeTab(c *ui.Context, wide bool) {
 		}
 	})
 
-	card(c.Key("comp-code-card")).Children(func() {
-		sectionTitle(c, L.CompanionTokenLabel())
-		ui.Row(c.Key("comp-code-row")).FillWidth().Gap(8).AlignItems(ui.Center).Wrap().Children(func() {
-			ui.Text(c, cfg.Token).Bold().FontSize(22).FontFeatures("tnum").Grow(1)
-			if ui.Button(c.Key("comp-code-copy"), L.ActionCopy()).Clicked() {
-				c.WriteClipboard(cfg.Token)
-				c.Toast(L.Copied())
-			}
-			if ui.Button(c.Key("comp-btn-rotate"), L.PhoneNewCode()).Clicked() {
-				go func() { _, _ = h.RotateToken() }()
-			}
-		})
-		if running {
-			ui.Text(c, net.JoinHostPort(lanIPv4(), strconv.Itoa(port))).FontSize(12).TextColor(t.TextMuted).FontFeatures("tnum")
-		}
-	})
+	h.adbCard(c)
 
 	on := 0
 	for _, v := range []bool{cfg.Permissions.Telemetry, cfg.Permissions.Clipboard, cfg.Permissions.Notifications, cfg.Permissions.FileTransfer,
@@ -261,6 +246,7 @@ func (h *Host) permissionsTab(c *ui.Context) {
 			{"app_continuity", L.PermAppContinuity(), L.PermAppContinuitySub(), iconHandoff, p.AppContinuity},
 		}},
 		{L.PhonePermsScreen(), []perm{
+			{"screen_share", L.PermScreenShare(), L.PermScreenShareSub(), iconScreen, p.ScreenShare},
 			{"media_bridge", L.PermMediaBridge(), L.PermMediaBridgeSub(), iconMic, p.MediaBridge},
 			{"display_guard", L.PermDisplayGuard(), L.PermDisplayGuardSub(), iconScreen, p.DisplayGuard},
 			{"adb_beacon", L.PermADBBeacon(), L.PermADBBeaconSub(), iconGlobe, p.ADBBeacon},
@@ -276,6 +262,9 @@ func (h *Host) permissionsTab(c *ui.Context) {
 					switchRow(c, "perm-"+pm.key, pm.title, pm.sub, &on, func() { h.SetPermission(pm.key, on) })
 				})
 			}
+			if gi == 1 {
+				h.accessibilityRow(c)
+			}
 		})
 	}
 }
@@ -288,31 +277,6 @@ func (h *Host) securityTab(c *ui.Context) {
 	fp := h.FingerprintLocked()
 	audit := append([]string(nil), h.audit...)
 	h.mu.Unlock()
-
-	card(c.Key("comp-beacon-card")).Children(func() {
-		ui.Text(c, L.CompanionBeaconTitle()).Bold().FontSize(14)
-		ui.Text(c, L.PhoneBeaconSub()).FontSize(12).TextColor(t.TextMuted)
-		ui.Row(c.Key("comp-beacon-row")).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, lanIPv4()+":").FontSize(13).TextColor(t.TextMuted).FontFeatures("tnum")
-			ui.TextInput(c.Key("comp-beacon-input"), &h.beaconInput).Placeholder(L.CompanionBeaconHint()).Grow(1).MinWidth(0)
-			p, err := strconv.Atoi(strings.TrimSpace(h.beaconInput))
-			valid := err == nil && p >= 1024 && p <= 65535
-			if ui.Button(c.Key("comp-beacon-save"), L.CompanionBeaconSave()).Disabled(!valid).Clicked() {
-				h.SaveWirelessADBPort(p)
-			}
-		})
-		h.mu.Lock()
-		check := h.beaconCheck
-		h.mu.Unlock()
-		if check != "" {
-			ui.Text(c, check).FontSize(12).TextColor(t.TextMuted)
-		}
-		if s := strings.TrimSpace(h.beaconInput); s != "" {
-			if p, err := strconv.Atoi(s); err != nil || p < 1024 || p > 65535 {
-				ui.Text(c, L.PortRangeError()).FontSize(12).TextColor(t.Danger)
-			}
-		}
-	})
 
 	card(c.Key("comp-fp-card")).Children(func() {
 		ui.Text(c, L.CompanionFingerprintLabel()).Bold().FontSize(14)
@@ -415,4 +379,71 @@ func lanIPv4() string {
 		return a.IP.String()
 	}
 	return ""
+}
+
+// adbCard shows this phone's Wireless debugging port, which the Companion finds on its own
+// (NsdManager) and gives the paired computer, or why there is none.
+func (h *Host) adbCard(c *ui.Context) {
+	t := c.Theme()
+	h.mu.Lock()
+	port, network, check := h.cfg.WirelessADBPort, h.network, h.beaconCheck
+	h.mu.Unlock()
+	title, sub := L.PhoneADBOff(), L.PhoneADBOffSub()
+	switch {
+	case port > 0:
+		title, sub = L.PhoneADBPort(port), L.PhoneADBPortSub()
+	case network != "" && network != "wifi" && network != "ethernet":
+		title, sub = L.PhoneADBNoWifi(), L.PhoneADBNoWifiSub()
+	}
+	card(c.Key("comp-adb-card")).Children(func() {
+		sectionTitle(c, L.PhoneADBTitle())
+		ui.Row(c.Key("comp-adb-row")).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
+			tile(c, iconGlobe)
+			ui.Column(c).Grow(1).MinWidth(0).Gap(2).Children(func() {
+				ui.Text(c, title).Bold().FontSize(14).FontFeatures("tnum")
+				ui.Text(c, sub).FontSize(12).TextColor(t.TextMuted)
+			})
+		})
+		if check != "" && port > 0 {
+			ui.Text(c, check).FontSize(12).TextColor(t.TextMuted)
+		}
+	})
+}
+
+// accessibilityRow shows whether the Companion's accessibility service is on (Back, Home and
+// Recents while sharing the screen) and opens Android's settings to turn it on.
+func (h *Host) accessibilityRow(c *ui.Context) {
+	t := c.Theme()
+	h.mu.Lock()
+	on, stale := h.a11yOn, time.Since(h.a11yChecked) > 3*time.Second
+	if stale {
+		h.a11yChecked = time.Now()
+	}
+	h.mu.Unlock()
+	if stale {
+		go func() {
+			now := androidbridge.AccessibilityOn()
+			h.mu.Lock()
+			changed := now != h.a11yOn
+			h.a11yOn = now
+			h.mu.Unlock()
+			if changed {
+				h.notify()
+			}
+		}()
+	}
+	ui.Row(c.Key("perm-row-a11y")).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
+		tile(c, iconHand)
+		ui.Column(c).Grow(1).MinWidth(0).Gap(2).Children(func() {
+			ui.Text(c, L.PermA11y()).Bold().FontSize(14)
+			sub := L.PermA11ySubOff()
+			if on {
+				sub = L.PermA11ySubOn()
+			}
+			ui.Text(c, sub).FontSize(12).TextColor(t.TextMuted)
+		})
+		if !on && ui.Button(c.Key("perm-a11y-open"), L.PermA11yOpen()).Clicked() {
+			go androidbridge.OpenAccessibilitySettings()
+		}
+	})
 }

@@ -47,3 +47,54 @@ func WatchNetwork(fn func(kind string)) (stop func()) {
 	_ = callPower("watchNetwork", nil)
 	return off
 }
+
+// WatchWirelessDebugging calls fn with this phone's Wireless debugging port whenever the system
+// advertises it (NsdManager discovery of its own _adb-tls-connect._tcp service), and with 0 when
+// the advertisement goes away (Wireless debugging off, or Wi-Fi lost).
+// Returns: a function that stops delivering events.
+func WatchWirelessDebugging(fn func(port int)) (stop func()) {
+	off := power.On("adbPort", func(data []byte) {
+		var port int
+		if json.Unmarshal(data, &port) == nil {
+			fn(port)
+		}
+	})
+	_ = callPower("watchWirelessDebugging", nil)
+	return off
+}
+
+// StartShare asks Android for screen-capture consent and, when the user allows it, starts the
+// Companion's screen sharing (android/Share.kt): an H.264 stream at most maxSize pixels on its
+// longest side, served in scrcpy framing on the abstract socket "androfuse-share".
+// Returns: an error when the user declines or capture cannot start.
+func StartShare(maxSize, bitRate int) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	return power.Call(ctx, "startShare", map[string]int{"maxSize": maxSize, "bitRate": bitRate}, nil)
+}
+
+// StopShare ends screen sharing.
+func StopShare() { _ = callPower("stopShare", nil) }
+
+// GlobalAction runs Back, Home or Recents ("back", "home", "recents") through the Companion's
+// accessibility service; false when that service is off.
+func GlobalAction(action string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var ok bool
+	_ = power.Call(ctx, "globalAction", map[string]string{"action": action}, &ok)
+	return ok
+}
+
+// AccessibilityOn reports whether the user turned the Companion's accessibility service on.
+func AccessibilityOn() bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var ok bool
+	_ = power.Call(ctx, "accessibilityOn", nil, &ok)
+	return ok
+}
+
+// OpenAccessibilitySettings opens Android's accessibility settings, where the user turns the
+// Companion's service on.
+func OpenAccessibilitySettings() { _ = callPower("openAccessibility", nil) }
