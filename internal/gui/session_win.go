@@ -49,7 +49,19 @@ type SessionSpec struct {
 	AppIcon      *ui.Bitmap
 	AppPackage   string
 	OnClose      func()
+	// Open says where the session first shows (OpenDefault follows Settings › Windows).
+	Open OpenIn
 }
+
+// OpenIn says where a new session shows.
+type OpenIn int
+
+const (
+	OpenDefault OpenIn = iota // Settings › Windows: a main-window pane unless set otherwise
+	OpenPane                  // a pane of the main window
+	OpenSplit                 // a pane beside the one showing now
+	OpenWindow                // its own window
+)
 
 type nv12Slot struct {
 	buf      []byte
@@ -109,6 +121,11 @@ type SessionWindow struct {
 	lastResizeBox  ui.Rect
 	resizeTimer    *time.Timer
 	closing        bool
+	// docked sessions draw in a main-window pane; docking is set while their own window
+	// closes to dock, so closing it does not end the session.
+	docked     bool
+	docking    bool
+	paneHandle ui.Handle // the main-window pane, for its committed size
 }
 
 func newSessionWindow(app *App, spec SessionSpec) *SessionWindow {
@@ -124,6 +141,74 @@ func newSessionWindow(app *App, spec SessionSpec) *SessionWindow {
 	return sw
 }
 
+// show puts a newly attached session where spec.Open (or Settings › Windows) says: a pane of
+// the main window, beside the pane showing now, or its own window of size w×h.
+func (sw *SessionWindow) show(w, h int) {
+	open := sw.spec.Open
+	if open == OpenDefault {
+		open = OpenPane
+		if sw.app.opensInWindow(sw.spec.Mode) {
+			open = OpenWindow
+		}
+	}
+	if open == OpenWindow {
+		sw.openWindow(w, h)
+		return
+	}
+	sw.mu.Lock()
+	sw.docked = true
+	sw.mu.Unlock()
+	sw.app.dockSession(sw.spec.ID, open == OpenSplit)
+}
+
+// PopOut moves a docked session into its own window without interrupting the stream.
+func (sw *SessionWindow) PopOut() {
+	sw.mu.Lock()
+	if !sw.docked || sw.closing {
+		sw.mu.Unlock()
+		return
+	}
+	sw.docked = false
+	sw.mu.Unlock()
+	sw.app.undockSession(sw.spec.ID)
+	sw.openWindow(sessionDefW, sessionDefH)
+}
+
+// Dock moves a popped-out session back into a main-window pane without interrupting the stream.
+func (sw *SessionWindow) Dock() {
+	sw.mu.Lock()
+	win := sw.win
+	if sw.docked || win == nil || sw.closing {
+		sw.mu.Unlock()
+		return
+	}
+	sw.win = nil
+	sw.docking = true
+	sw.docked = true
+	sw.mu.Unlock()
+	sw.app.dockSession(sw.spec.ID, false)
+	win.Close()
+}
+
+// Docked reports whether the session draws in a main-window pane.
+func (sw *SessionWindow) Docked() bool {
+	sw.mu.Lock()
+	defer sw.mu.Unlock()
+	return sw.docked
+}
+
+// hostWindow is the window that draws sw: its own when popped out, else the main window.
+func (sw *SessionWindow) hostWindow() *mygo.Window {
+	sw.mu.Lock()
+	win, docked := sw.win, sw.docked
+	sw.mu.Unlock()
+	if docked {
+		return sw.app.mainWindow()
+	}
+	return win
+}
+
+// openWindow opens sw's own window of size w×h.
 func (sw *SessionWindow) openWindow(w, h int) {
 	opts := mygo.WindowOptions{
 		Title:     sw.spec.Title,
@@ -146,7 +231,13 @@ func (sw *SessionWindow) openWindow(w, h int) {
 	sw.mu.Unlock()
 
 	win.OnClosed(func() {
-		sw.Close()
+		sw.mu.Lock()
+		docking := sw.docking
+		sw.docking = false
+		sw.mu.Unlock()
+		if !docking {
+			sw.Close()
+		}
 	})
 	win.Show()
 	win.Focus()
@@ -169,7 +260,7 @@ func (sw *SessionWindow) attachScrcpy(s *scrcpy.Session, d *dex.LoopbackSession,
 	if w <= 0 || h <= 0 {
 		w, h = sessionDefW, sessionDefH
 	}
-	sw.openWindow(w, h)
+	sw.show(w, h)
 	if s != nil {
 		go sw.watchScrcpyEnd(s)
 	}
@@ -182,7 +273,7 @@ func (sw *SessionWindow) attachMiracast(m *dex.MiracastSession) {
 	sw.codecLabel = "H.264"
 	sw.statusNote = L.MiracastWaitingNote()
 	sw.mu.Unlock()
-	sw.openWindow(sessionDefW, sessionDefH)
+	sw.show(sessionDefW, sessionDefH)
 	if m != nil {
 		go func() {
 			<-m.Done()
@@ -211,11 +302,8 @@ func (sw *SessionWindow) swapScrcpy(newSess *scrcpy.Session, newTransport, newSe
 			sw.negotiatedH = int(st.NegotiatedHeight)
 		}
 	}
-	win := sw.win
 	sw.mu.Unlock()
-	if win != nil {
-		win.Update(func() {})
-	}
+	sw.redraw()
 	if newSess != nil {
 		go sw.watchScrcpyEnd(newSess)
 	}
@@ -345,11 +433,8 @@ func (sw *SessionWindow) setStatusNote(note string) {
 		sw.noteTimer = nil
 	}
 	sw.statusNote = note
-	win := sw.win
 	sw.mu.Unlock()
-	if win != nil {
-		win.Update(func() {})
-	}
+	sw.redraw()
 }
 
 func (sw *SessionWindow) flashNote(note string) {
@@ -358,22 +443,16 @@ func (sw *SessionWindow) flashNote(note string) {
 		sw.noteTimer.Stop()
 	}
 	sw.statusNote = note
-	win := sw.win
 	sw.noteTimer = time.AfterFunc(2500*time.Millisecond, func() {
 		sw.mu.Lock()
 		if sw.statusNote == note {
 			sw.statusNote = ""
 		}
-		w := sw.win
 		sw.mu.Unlock()
-		if w != nil {
-			w.Update(func() {})
-		}
+		sw.redraw()
 	})
 	sw.mu.Unlock()
-	if win != nil {
-		win.Update(func() {})
-	}
+	sw.redraw()
 }
 
 func (sw *SessionWindow) attachAudio(ap *core.AudioPlayer) {
@@ -556,10 +635,9 @@ func (sw *SessionWindow) PushNV12(f core.NV12Frame, fps float64, avgUs int64) {
 	sw.avgDecodeUs = avgUs
 	sw.hwAccelerated = f.Hardware
 	sw.statusNote = ""
-	win := sw.win
 	sw.mu.Unlock()
 
-	if win != nil && !sw.updateQueued.Swap(true) {
+	if win := sw.hostWindow(); win != nil && !sw.updateQueued.Swap(true) {
 		win.Update(func() {
 			sw.updateQueued.Store(false)
 			sw.present()
@@ -655,8 +733,19 @@ func (sw *SessionWindow) Close() {
 	}()
 }
 
-// FocusWindow raises an already-open session window.
+// redraw asks the window hosting sw to draw again.
+func (sw *SessionWindow) redraw() {
+	if w := sw.hostWindow(); w != nil {
+		w.Update(func() {})
+	}
+}
+
+// FocusWindow shows the session: its pane in the main window when docked, else its own window.
 func (sw *SessionWindow) FocusWindow() {
+	if sw.Docked() {
+		sw.app.dockSession(sw.spec.ID, false)
+		return
+	}
 	sw.mu.Lock()
 	w := sw.win
 	sw.mu.Unlock()
@@ -666,12 +755,18 @@ func (sw *SessionWindow) FocusWindow() {
 	}
 }
 
-// view renders the telemetry HUD + interactive NV12 D3D11 surface.
+// view is the root of sw's own window.
 func (sw *SessionWindow) view(c *ui.Context) {
+	c.Root().Background(ui.Hex(stageBgHex))
+	sw.content(c, false)
+}
+
+// content renders the telemetry HUD and the interactive NV12 D3D11 surface, in sw's own window
+// or, embedded, in a main-window pane whose header holds the window controls.
+func (sw *SessionWindow) content(c *ui.Context, embedded bool) {
 	sw.present()
 
 	k := tok(c)
-	c.Root().Background(ui.Hex(stageBgHex))
 
 	sw.mu.Lock()
 	sw.services = c.Services()
@@ -709,18 +804,24 @@ func (sw *SessionWindow) view(c *ui.Context) {
 		specBackend, resText, fps, codec, hwTag, float64(decUs)/1000.0)
 
 	ui.Column(c.Key("session-root")).Fill().AlignItems(ui.Stretch).Children(func() {
-		if sw.spec.Mode == SessionModeApp {
+		if sw.spec.Mode == SessionModeApp && !embedded {
 			sw.appTitleBar(c, k)
 		}
 		if !collapsed {
 			ui.Row(c.Key("session-hud")).Height(hudHeight).Shrink(0).FillWidth().
 				Background(ui.Hex(hudBgDark)).Padding(6, 12).Gap(8).AlignItems(ui.Center).Children(func() {
-				ui.Row(c.Key("hud-transport-pill")).Padding(badgePadV, badgePadH).Radius(pillRadius).
-					Background(k.brandSoft).Children(func() {
-					ui.Text(c, specTransport).FontSize(sizeSmall).TextColor(k.brand).Bold().SingleLine()
-				})
-				ui.Text(c, telem).FontSize(sizeSmall).TextColor(ui.Hex("#E6EEF2")).Grow(1).SingleLine().
-					Tooltip(L.TelemetryTargetPrefix(specTarget))
+				if embedded {
+					// The pane header already shows the transport and measured telemetry.
+					ui.Text(c, telem).FontSize(sizeSmall).TextColor(ui.Hex("#9AA4AE")).Grow(1).SingleLine().
+						Tooltip(L.TelemetryTargetPrefix(specTarget))
+				} else {
+					ui.Row(c.Key("hud-transport-pill")).Padding(badgePadV, badgePadH).Radius(pillRadius).
+						Background(k.brandSoft).Children(func() {
+						ui.Text(c, specTransport).FontSize(sizeSmall).TextColor(k.brand).Bold().SingleLine()
+					})
+					ui.Text(c, telem).FontSize(sizeSmall).TextColor(ui.Hex("#E6EEF2")).Grow(1).SingleLine().
+						Tooltip(L.TelemetryTargetPrefix(specTarget))
+				}
 
 				if s != nil {
 					modeLbl := L.InputModeMouse()
@@ -813,6 +914,12 @@ func (sw *SessionWindow) view(c *ui.Context) {
 					}
 				}
 				if win != nil {
+					if ui.Button(c.Key("hud-dock"), "").Tooltip(L.PaneDock()).Children(func() {
+						ui.Icon(c, iconDock).Size(14, 14)
+					}).Clicked() {
+						sw.Dock()
+						return
+					}
 					if ui.Button(c.Key("hud-fullscreen"), "").Tooltip(L.ActionFullscreen()).Children(func() {
 						ui.Icon(c, iconFullscreen).Size(14, 14)
 					}).Clicked() {
@@ -826,7 +933,7 @@ func (sw *SessionWindow) view(c *ui.Context) {
 					sw.mu.Unlock()
 					sw.surface.Focus(c)
 				}
-				if ui.Button(c.Key("hud-close"), L.ActionDisconnect()).Bind(&sw.hudCloseHandle).Clicked() {
+				if !embedded && ui.Button(c.Key("hud-close"), L.ActionDisconnect()).Bind(&sw.hudCloseHandle).Clicked() {
 					sw.Close()
 				}
 			})
@@ -853,7 +960,7 @@ func (sw *SessionWindow) view(c *ui.Context) {
 					ui.Text(c, note).FontSize(sizeBody).TextColor(ui.Hex("#B8F1D2"))
 				})
 			}
-			if collapsed && sw.spec.Mode != SessionModeApp {
+			if collapsed && (sw.spec.Mode != SessionModeApp || embedded) {
 				ui.Row(c.Key("hud-pill-open")).Absolute().Top(10).Right(10).Children(func() {
 					if ui.Button(c.Key("hud-show"), L.HudShow()).Clicked() {
 						sw.mu.Lock()
@@ -930,6 +1037,12 @@ func (sw *SessionWindow) appTitleBar(c *ui.Context, k tokens) {
 				sw.mu.Unlock()
 				sw.surface.Focus(c)
 			}
+		}
+		if ui.ButtonBase(c.Key("app-tb-dock")).Size(28, 26).Radius(6).Center().Tooltip(L.PaneDock()).Children(func() {
+			ui.Icon(c, iconDock).Size(13, 13).TextColor(ui.Hex("#CBD5E1"))
+		}).Clicked() {
+			sw.Dock()
+			return
 		}
 		hudTip := L.HudShow()
 		if !collapsed {
@@ -1077,11 +1190,8 @@ func (sw *SessionWindow) handleInput(ev ui.InputEvent) bool {
 		sw.hudCollapsed = false
 		sw.focusHudNext = true
 		sw.statusNote = L.FocusReleasedHint()
-		w := sw.win
 		sw.mu.Unlock()
-		if w != nil {
-			w.Update(func() {})
-		}
+		sw.redraw()
 		return true
 	case ActionTouch:
 		if m != nil {

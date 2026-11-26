@@ -3,6 +3,7 @@
 mygo_windows_*.syso
 /.dev/
 /resources/*-*/
+/resources/windows/
 /resources/licenses/
 /core/target/
 /androfuse

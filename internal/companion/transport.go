@@ -665,7 +665,7 @@ func (s *Server) handlePair(conn net.Conn, enc *json.Encoder, env Envelope) {
 	s.mu.Lock()
 	tok := s.token
 	s.mu.Unlock()
-	_ = writeEnvelope(enc, env.ID, "pair.res", PairResponse{Token: tok, CertFingerprint: s.fingerprint}, "")
+	_ = writeEnvelope(enc, env.ID, "pair.res", PairResponse{Token: tok, CertFingerprint: s.fingerprint, Port: s.tcpPort(), Model: s.model}, "")
 }
 
 // RequestPairing asks the phone at addr (an `adb forward` of the Companion LocalSocket) to pair, showing
@@ -766,4 +766,12 @@ func isLocal(a net.Addr) bool {
 	}
 	ap, err := netip.ParseAddrPort(a.String())
 	return err == nil && ap.Addr().Unmap().IsLoopback()
+}
+
+// tcpPort returns the port of the server's TCP listener, or 0 without one.
+func (s *Server) tcpPort() int {
+	if ap, err := netip.ParseAddrPort(s.Addr()); err == nil {
+		return int(ap.Port())
+	}
+	return 0
 }

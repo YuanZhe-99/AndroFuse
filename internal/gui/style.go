@@ -12,6 +12,17 @@ const (
 	sizeTitle   float32 = 22
 
 	sidebarW    float32 = 232
+	railW       float32 = 64  // icon rail the sidebar folds into below railBreak
+	railBreak   float32 = 960 // window width below which the sidebar is an icon rail
+	mainDefW    int     = 1180
+	mainDefH    int     = 760
+	mainMinW    int     = 820 // V2.1 minimum main window
+	mainMinH    int     = 560
+	paneFoldW   float32 = 560 // narrower panes fold their header tools into ⋯
+	splitMinW   float32 = 360 // each half of a split stays at least 360×280
+	splitMinH   float32 = 280
+	tileSize    float32 = 32 // icon container of a list row
+	navBadgeMax         = 99 // badge counters cap at "99+"
 	paneMargin  float32 = 8
 	paneRadius  float32 = 12 // V2.1: panes and cards share --r-lg; dialogs use radiusXL
 	paneHeaderH float32 = 44

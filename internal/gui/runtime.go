@@ -191,7 +191,7 @@ func (a *App) ContinueCompanionApp() {
 		}
 		a.mu.Unlock()
 		if target != nil {
-			a.LaunchAppWindow(*target, adb.AppEntry{Package: res.Package, Label: res.Package, Resizeable: true})
+			a.LaunchAppWindow(*target, adb.AppEntry{Package: res.Package, Label: res.Package, Resizeable: true}, OpenDefault)
 		}
 	}()
 }
@@ -209,7 +209,7 @@ func (a *App) ConnectCompanionBeaconADB() {
 	if err != nil || host == "" {
 		return
 	}
-	a.ConnectWirelessTLS(net.JoinHostPort(host, strconv.Itoa(port)))
+	a.ConnectWirelessTLS(net.JoinHostPort(host, strconv.Itoa(port)), false)
 }
 
 // RunCompanionDisplayGuard invokes orphan display cleanup on the connected Companion APK (`INV-03`).
@@ -565,6 +565,9 @@ func (a *App) RefreshDevices() {
 
 		devs, dErr := client.Devices(ctx)
 		svcs, _ := client.MDNSServices(ctx)
+		if dErr == nil && a.reconnectRemembered(ctx, client, a.onlineHashes(devs), svcs) {
+			devs, dErr = client.Devices(ctx)
+		}
 
 		a.rt.coreMu.Lock()
 		if !a.rt.recoverRan && dErr == nil {
@@ -642,6 +645,7 @@ func (a *App) RefreshDevices() {
 			inspected = append(inspected, item)
 		}
 
+		a.rememberDevices(inspected, time.Now())
 		notice := ""
 		if dErr != nil {
 			notice = dErr.Error()
@@ -662,7 +666,9 @@ func (a *App) RefreshDevices() {
 }
 
 // ConnectWirelessTLS connects to a discovered mDNS or manual TLS Wireless ADB host:port (`INV-07`).
-func (a *App) ConnectWirelessTLS(addr string) {
+// Inputs: installCompanion, the Connect dialog's unticked opt-in (`INV-09`), then installs and
+// pairs the Companion over the new connection.
+func (a *App) ConnectWirelessTLS(addr string, installCompanion bool) {
 	a.update(func() { a.deviceNotice = "" })
 	go func() {
 		client, _, err := a.ensureADBAndLeases()
@@ -672,9 +678,18 @@ func (a *App) ConnectWirelessTLS(addr string) {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		if _, err := client.ConnectTLS(ctx, addr, false); err != nil {
+		serial, err := client.ConnectTLS(ctx, addr, false)
+		if err != nil {
 			a.update(func() { a.deviceNotice = err.Error() })
 			return
+		}
+		a.update(func() { a.connectOpen = false })
+		if installCompanion {
+			a.mu.Lock()
+			join := a.compJoinMesh && a.rt.meshCfg.NetworkName != ""
+			a.mu.Unlock()
+			a.PairCompanionOverADB(serial, adb.MaskEndpoint(addr), join)
+			a.update(func() { a.page = string(pageCompanion) })
 		}
 		a.RefreshDevices()
 	}()
@@ -718,7 +733,7 @@ func (a *App) DisconnectWireless(serial string) {
 }
 
 // LaunchDeX opens an interactive native Samsung DeX window (or virtual desktop fallback if requested/non-Samsung).
-func (a *App) LaunchDeX(d DiscoveredDevice, forceFallback bool) {
+func (a *App) LaunchDeX(d DiscoveredDevice, forceFallback bool, open OpenIn) {
 	devKey := d.HardwareHash
 	if devKey == "" {
 		devKey = d.Target.DeviceHash
@@ -764,6 +779,7 @@ func (a *App) LaunchDeX(d DiscoveredDevice, forceFallback bool) {
 				Serial:       d.Target.Serial,
 				Title:        fmt.Sprintf("%s · Samsung DeX (%s)", d.Profile.Model, tLabel),
 				Mode:         SessionModeDeX,
+				Open:         open,
 				Transport:    tLabel,
 				BackendLabel: route.Label,
 				TargetSpec:   "1920×1080 @ 60 fps",
@@ -816,6 +832,7 @@ func (a *App) LaunchDeX(d DiscoveredDevice, forceFallback bool) {
 			Serial:       d.Target.Serial,
 			Title:        fmt.Sprintf("%s · %s (%s)", d.Profile.Model, fallbackVerdict.Label, tLabel),
 			Mode:         SessionModeDeXFallback,
+			Open:         open,
 			Transport:    tLabel,
 			BackendLabel: fallbackVerdict.Label,
 			TargetSpec:   "1600×900 @ 60 fps",
@@ -860,7 +877,7 @@ func (a *App) LaunchDeX(d DiscoveredDevice, forceFallback bool) {
 }
 
 // LaunchMirror opens an interactive Phone Mirror window for Display 0.
-func (a *App) LaunchMirror(d DiscoveredDevice) {
+func (a *App) LaunchMirror(d DiscoveredDevice, open OpenIn) {
 	devKey := d.HardwareHash
 	if devKey == "" {
 		devKey = d.Target.DeviceHash
@@ -895,6 +912,7 @@ func (a *App) LaunchMirror(d DiscoveredDevice) {
 			Serial:       d.Target.Serial,
 			Title:        fmt.Sprintf("%s · %s (%s)", d.Profile.Model, L.ModeMirrorTitle(), tLabel),
 			Mode:         SessionModeMirror,
+			Open:         open,
 			Transport:    tLabel,
 			BackendLabel: L.ModeMirrorTitle(),
 			TargetSpec:   "Display 0 · 60 fps",
@@ -938,7 +956,7 @@ func (a *App) LaunchMirror(d DiscoveredDevice) {
 }
 
 // LaunchAppWindow opens an isolated chromeless flex-display native window running app on the target device.
-func (a *App) LaunchAppWindow(d DiscoveredDevice, app adb.AppEntry) {
+func (a *App) LaunchAppWindow(d DiscoveredDevice, app adb.AppEntry, open OpenIn) {
 	pkg := strings.TrimSpace(app.Package)
 	if pkg == "" {
 		return
@@ -986,6 +1004,7 @@ func (a *App) LaunchAppWindow(d DiscoveredDevice, app adb.AppEntry) {
 			Serial:       d.Target.Serial,
 			Title:        label,
 			Mode:         SessionModeApp,
+			Open:         open,
 			Transport:    tLabel,
 			BackendLabel: label,
 			TargetSpec:   fmt.Sprintf("%d×%d flex · 60 fps", appWinInitW, appWinInitH),
@@ -1093,6 +1112,7 @@ func (a *App) addSession(sw *SessionWindow) {
 func (a *App) removeSession(id string) {
 	a.mu.Lock()
 	delete(a.sessions, id)
+	a.undockLocked(id)
 	w := a.window
 	a.mu.Unlock()
 	if w != nil {
@@ -1194,7 +1214,7 @@ func (a *App) ensureMCPServerLocked() *mcp.Server {
 			if !ok {
 				return nil, fmt.Errorf("device not found")
 			}
-			a.LaunchAppWindow(target, adb.AppEntry{Package: packageName, Label: packageName})
+			a.LaunchAppWindow(target, adb.AppEntry{Package: packageName, Label: packageName}, OpenDefault)
 			return map[string]any{"requested": packageName}, nil
 		},
 	}, 30*time.Minute)
@@ -1260,7 +1280,7 @@ func (a *App) EmergencyStopMCP() {
 
 // LaunchPhoneCamera opens a scrcpy camera+mic stream paired with a loopback MJPEG bridge (`M5`).
 // Side effects: Starts avbridge.MJPEGServer, opens a SessionWindow, and clears state on close.
-func (a *App) LaunchPhoneCamera(d DiscoveredDevice, facing string) {
+func (a *App) LaunchPhoneCamera(d DiscoveredDevice, facing string, open OpenIn) {
 	devKey := d.HardwareHash
 	if devKey == "" {
 		devKey = d.Target.DeviceHash
@@ -1305,6 +1325,7 @@ func (a *App) LaunchPhoneCamera(d DiscoveredDevice, facing string) {
 			Serial:       d.Target.Serial,
 			Title:        fmt.Sprintf("%s · %s (%s)", d.Profile.Model, L.ActionLaunchCamera(), facing),
 			Mode:         SessionModeCamera,
+			Open:         open,
 			Transport:    tLabel,
 			BackendLabel: "scrcpy camera + loopback MJPEG",
 			TargetSpec:   "1280×720 @ 30 fps (" + facing + ")",

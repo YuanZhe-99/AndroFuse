@@ -374,11 +374,11 @@ func (msgs Messages) WirelessCardTitle() string {
 	return Catalog.Format(msgs.locale, "WirelessCardTitle", nil)
 }
 
-// WirelessCardDesc says "Encrypted TLS Wireless Debugging (`_adb-tls-connect._tcp`) is preferred over plaintext tcpip. Direct host:port works …"
+// WirelessCardDesc says "Phones on the same network with Wireless debugging on show up here."
 // in the language the app shows.
 func WirelessCardDesc() string { return In(i18n.Locale()).WirelessCardDesc() }
 
-// WirelessCardDesc says "Encrypted TLS Wireless Debugging (`_adb-tls-connect._tcp`) is preferred over plaintext tcpip. Direct host:port works …"
+// WirelessCardDesc says "Phones on the same network with Wireless debugging on show up here."
 // in the language of msgs.
 func (msgs Messages) WirelessCardDesc() string {
 	return Catalog.Format(msgs.locale, "WirelessCardDesc", nil)
@@ -464,21 +464,21 @@ func (msgs Messages) PairSuccessHint() string {
 	return Catalog.Format(msgs.locale, "PairSuccessHint", nil)
 }
 
-// VMCardTitle says "Built-in Android VM (On-Demand)"
+// VMCardTitle says "Local Android environment"
 // in the language the app shows.
 func VMCardTitle() string { return In(i18n.Locale()).VMCardTitle() }
 
-// VMCardTitle says "Built-in Android VM (On-Demand)"
+// VMCardTitle says "Local Android environment"
 // in the language of msgs.
 func (msgs Messages) VMCardTitle() string {
 	return Catalog.Format(msgs.locale, "VMCardTitle", nil)
 }
 
-// VMCardDesc says "Optional native-ABI headless Android VM under %LOCALAPPDATA%\\AndroFuse\\vm so you can launch Independent App Windows w…"
+// VMCardDesc says "Run apps on this computer without a phone"
 // in the language the app shows.
 func VMCardDesc() string { return In(i18n.Locale()).VMCardDesc() }
 
-// VMCardDesc says "Optional native-ABI headless Android VM under %LOCALAPPDATA%\\AndroFuse\\vm so you can launch Independent App Windows w…"
+// VMCardDesc says "Run apps on this computer without a phone"
 // in the language of msgs.
 func (msgs Messages) VMCardDesc() string {
 	return Catalog.Format(msgs.locale, "VMCardDesc", nil)
@@ -544,21 +544,21 @@ func (msgs Messages) VMStateError() string {
 	return Catalog.Format(msgs.locale, "VMStateError", nil)
 }
 
-// VMActionDownload says "Download Built-in VM"
+// VMActionDownload says "Download"
 // in the language the app shows.
 func VMActionDownload() string { return In(i18n.Locale()).VMActionDownload() }
 
-// VMActionDownload says "Download Built-in VM"
+// VMActionDownload says "Download"
 // in the language of msgs.
 func (msgs Messages) VMActionDownload() string {
 	return Catalog.Format(msgs.locale, "VMActionDownload", nil)
 }
 
-// VMActionStart says "Start Headless VM"
+// VMActionStart says "Start"
 // in the language the app shows.
 func VMActionStart() string { return In(i18n.Locale()).VMActionStart() }
 
-// VMActionStart says "Start Headless VM"
+// VMActionStart says "Start"
 // in the language of msgs.
 func (msgs Messages) VMActionStart() string {
 	return Catalog.Format(msgs.locale, "VMActionStart", nil)
@@ -1556,71 +1556,71 @@ func (msgs Messages) CompanionPermissionsTitle() string {
 	return Catalog.Format(msgs.locale, "CompanionPermissionsTitle", nil)
 }
 
-// PermTelemetry says "Battery, Thermal & Network Telemetry"
+// PermTelemetry says "Battery & network status"
 // in the language the app shows.
 func PermTelemetry() string { return In(i18n.Locale()).PermTelemetry() }
 
-// PermTelemetry says "Battery, Thermal & Network Telemetry"
+// PermTelemetry says "Battery & network status"
 // in the language of msgs.
 func (msgs Messages) PermTelemetry() string {
 	return Catalog.Format(msgs.locale, "PermTelemetry", nil)
 }
 
-// PermClipboard says "Clipboard Sync Assist"
+// PermClipboard says "Clipboard sync"
 // in the language the app shows.
 func PermClipboard() string { return In(i18n.Locale()).PermClipboard() }
 
-// PermClipboard says "Clipboard Sync Assist"
+// PermClipboard says "Clipboard sync"
 // in the language of msgs.
 func (msgs Messages) PermClipboard() string {
 	return Catalog.Format(msgs.locale, "PermClipboard", nil)
 }
 
-// PermNotifications says "Notification Sync & Inline Reply"
+// PermNotifications says "Notifications & replies"
 // in the language the app shows.
 func PermNotifications() string { return In(i18n.Locale()).PermNotifications() }
 
-// PermNotifications says "Notification Sync & Inline Reply"
+// PermNotifications says "Notifications & replies"
 // in the language of msgs.
 func (msgs Messages) PermNotifications() string {
 	return Catalog.Format(msgs.locale, "PermNotifications", nil)
 }
 
-// PermFileTransfer says "SAF File Push & Drop"
+// PermFileTransfer says "Receive computer files"
 // in the language the app shows.
 func PermFileTransfer() string { return In(i18n.Locale()).PermFileTransfer() }
 
-// PermFileTransfer says "SAF File Push & Drop"
+// PermFileTransfer says "Receive computer files"
 // in the language of msgs.
 func (msgs Messages) PermFileTransfer() string {
 	return Catalog.Format(msgs.locale, "PermFileTransfer", nil)
 }
 
-// PermAppContinuity says "Foreground App Handoff"
+// PermAppContinuity says "App handoff"
 // in the language the app shows.
 func PermAppContinuity() string { return In(i18n.Locale()).PermAppContinuity() }
 
-// PermAppContinuity says "Foreground App Handoff"
+// PermAppContinuity says "App handoff"
 // in the language of msgs.
 func (msgs Messages) PermAppContinuity() string {
 	return Catalog.Format(msgs.locale, "PermAppContinuity", nil)
 }
 
-// PermDisplayGuard says "Orphan Virtual Display Cleanup"
+// PermDisplayGuard says "Clean up stray virtual screens"
 // in the language the app shows.
 func PermDisplayGuard() string { return In(i18n.Locale()).PermDisplayGuard() }
 
-// PermDisplayGuard says "Orphan Virtual Display Cleanup"
+// PermDisplayGuard says "Clean up stray virtual screens"
 // in the language of msgs.
 func (msgs Messages) PermDisplayGuard() string {
 	return Catalog.Format(msgs.locale, "PermDisplayGuard", nil)
 }
 
-// PermADBBeacon says "Cross-Network TLS ADB Port Beacon"
+// PermADBBeacon says "Cross-network port helper"
 // in the language the app shows.
 func PermADBBeacon() string { return In(i18n.Locale()).PermADBBeacon() }
 
-// PermADBBeacon says "Cross-Network TLS ADB Port Beacon"
+// PermADBBeacon says "Cross-network port helper"
 // in the language of msgs.
 func (msgs Messages) PermADBBeacon() string {
 	return Catalog.Format(msgs.locale, "PermADBBeacon", nil)
@@ -1858,11 +1858,11 @@ func (msgs Messages) MCPAuditTitle() string {
 	return Catalog.Format(msgs.locale, "MCPAuditTitle", nil)
 }
 
-// PermMediaBridge says "PC Camera & Mic Uplink Bridge"
+// PermMediaBridge says "Receive computer microphone"
 // in the language the app shows.
 func PermMediaBridge() string { return In(i18n.Locale()).PermMediaBridge() }
 
-// PermMediaBridge says "PC Camera & Mic Uplink Bridge"
+// PermMediaBridge says "Receive computer microphone"
 // in the language of msgs.
 func (msgs Messages) PermMediaBridge() string {
 	return Catalog.Format(msgs.locale, "PermMediaBridge", nil)
@@ -2300,4 +2300,926 @@ func CompanionStopMicBtn() string { return In(i18n.Locale()).CompanionStopMicBtn
 // in the language of msgs.
 func (msgs Messages) CompanionStopMicBtn() string {
 	return Catalog.Format(msgs.locale, "CompanionStopMicBtn", nil)
+}
+
+// CompanionNotPaired says "Pair this phone's Companion first."
+// in the language the app shows.
+func CompanionNotPaired() string { return In(i18n.Locale()).CompanionNotPaired() }
+
+// CompanionNotPaired says "Pair this phone's Companion first."
+// in the language of msgs.
+func (msgs Messages) CompanionNotPaired() string {
+	return Catalog.Format(msgs.locale, "CompanionNotPaired", nil)
+}
+
+// CompanionNoRoute says "The phone isn't on adb or in the mesh right now."
+// in the language the app shows.
+func CompanionNoRoute() string { return In(i18n.Locale()).CompanionNoRoute() }
+
+// CompanionNoRoute says "The phone isn't on adb or in the mesh right now."
+// in the language of msgs.
+func (msgs Messages) CompanionNoRoute() string {
+	return Catalog.Format(msgs.locale, "CompanionNoRoute", nil)
+}
+
+// PhoneTabHome says "Home"
+// in the language the app shows.
+func PhoneTabHome() string { return In(i18n.Locale()).PhoneTabHome() }
+
+// PhoneTabHome says "Home"
+// in the language of msgs.
+func (msgs Messages) PhoneTabHome() string {
+	return Catalog.Format(msgs.locale, "PhoneTabHome", nil)
+}
+
+// PhoneTabPermissions says "Permissions"
+// in the language the app shows.
+func PhoneTabPermissions() string { return In(i18n.Locale()).PhoneTabPermissions() }
+
+// PhoneTabPermissions says "Permissions"
+// in the language of msgs.
+func (msgs Messages) PhoneTabPermissions() string {
+	return Catalog.Format(msgs.locale, "PhoneTabPermissions", nil)
+}
+
+// PhoneTabSecurity says "Security"
+// in the language the app shows.
+func PhoneTabSecurity() string { return In(i18n.Locale()).PhoneTabSecurity() }
+
+// PhoneTabSecurity says "Security"
+// in the language of msgs.
+func (msgs Messages) PhoneTabSecurity() string {
+	return Catalog.Format(msgs.locale, "PhoneTabSecurity", nil)
+}
+
+// PhoneServiceOn says "Companion is on"
+// in the language the app shows.
+func PhoneServiceOn() string { return In(i18n.Locale()).PhoneServiceOn() }
+
+// PhoneServiceOn says "Companion is on"
+// in the language of msgs.
+func (msgs Messages) PhoneServiceOn() string {
+	return Catalog.Format(msgs.locale, "PhoneServiceOn", nil)
+}
+
+// PhoneServiceOnSub says "Encrypted · waiting for your computer"
+// in the language the app shows.
+func PhoneServiceOnSub() string { return In(i18n.Locale()).PhoneServiceOnSub() }
+
+// PhoneServiceOnSub says "Encrypted · waiting for your computer"
+// in the language of msgs.
+func (msgs Messages) PhoneServiceOnSub() string {
+	return Catalog.Format(msgs.locale, "PhoneServiceOnSub", nil)
+}
+
+// PhoneServiceOff says "Companion is off"
+// in the language the app shows.
+func PhoneServiceOff() string { return In(i18n.Locale()).PhoneServiceOff() }
+
+// PhoneServiceOff says "Companion is off"
+// in the language of msgs.
+func (msgs Messages) PhoneServiceOff() string {
+	return Catalog.Format(msgs.locale, "PhoneServiceOff", nil)
+}
+
+// PhoneServiceOffSub says "Turn it on so your computer can connect"
+// in the language the app shows.
+func PhoneServiceOffSub() string { return In(i18n.Locale()).PhoneServiceOffSub() }
+
+// PhoneServiceOffSub says "Turn it on so your computer can connect"
+// in the language of msgs.
+func (msgs Messages) PhoneServiceOffSub() string {
+	return Catalog.Format(msgs.locale, "PhoneServiceOffSub", nil)
+}
+
+// ActionCopy says "Copy"
+// in the language the app shows.
+func ActionCopy() string { return In(i18n.Locale()).ActionCopy() }
+
+// ActionCopy says "Copy"
+// in the language of msgs.
+func (msgs Messages) ActionCopy() string {
+	return Catalog.Format(msgs.locale, "ActionCopy", nil)
+}
+
+// Copied says "Copied"
+// in the language the app shows.
+func Copied() string { return In(i18n.Locale()).Copied() }
+
+// Copied says "Copied"
+// in the language of msgs.
+func (msgs Messages) Copied() string {
+	return Catalog.Format(msgs.locale, "Copied", nil)
+}
+
+// Saved says "Saved"
+// in the language the app shows.
+func Saved() string { return In(i18n.Locale()).Saved() }
+
+// Saved says "Saved"
+// in the language of msgs.
+func (msgs Messages) Saved() string {
+	return Catalog.Format(msgs.locale, "Saved", nil)
+}
+
+// PhoneNewCode says "New code"
+// in the language the app shows.
+func PhoneNewCode() string { return In(i18n.Locale()).PhoneNewCode() }
+
+// PhoneNewCode says "New code"
+// in the language of msgs.
+func (msgs Messages) PhoneNewCode() string {
+	return Catalog.Format(msgs.locale, "PhoneNewCode", nil)
+}
+
+// PhonePermsSummary says "What your computer may use"
+// in the language the app shows.
+func PhonePermsSummary() string { return In(i18n.Locale()).PhonePermsSummary() }
+
+// PhonePermsSummary says "What your computer may use"
+// in the language of msgs.
+func (msgs Messages) PhonePermsSummary() string {
+	return Catalog.Format(msgs.locale, "PhonePermsSummary", nil)
+}
+
+// PhonePermsOn says "{count} on"
+// in the language the app shows.
+func PhonePermsOn(count int) string { return In(i18n.Locale()).PhonePermsOn(count) }
+
+// PhonePermsOn says "{count} on"
+// in the language of msgs.
+func (msgs Messages) PhonePermsOn(count int) string {
+	return Catalog.Format(msgs.locale, "PhonePermsOn", map[string]any{"count": count})
+}
+
+// PhoneSecuritySummary says "Cross-network & activity"
+// in the language the app shows.
+func PhoneSecuritySummary() string { return In(i18n.Locale()).PhoneSecuritySummary() }
+
+// PhoneSecuritySummary says "Cross-network & activity"
+// in the language of msgs.
+func (msgs Messages) PhoneSecuritySummary() string {
+	return Catalog.Format(msgs.locale, "PhoneSecuritySummary", nil)
+}
+
+// PhoneSecuritySub says "Wireless port · fingerprint"
+// in the language the app shows.
+func PhoneSecuritySub() string { return In(i18n.Locale()).PhoneSecuritySub() }
+
+// PhoneSecuritySub says "Wireless port · fingerprint"
+// in the language of msgs.
+func (msgs Messages) PhoneSecuritySub() string {
+	return Catalog.Format(msgs.locale, "PhoneSecuritySub", nil)
+}
+
+// MeshSaverTitle says "Save battery"
+// in the language the app shows.
+func MeshSaverTitle() string { return In(i18n.Locale()).MeshSaverTitle() }
+
+// MeshSaverTitle says "Save battery"
+// in the language of msgs.
+func (msgs Messages) MeshSaverTitle() string {
+	return Catalog.Format(msgs.locale, "MeshSaverTitle", nil)
+}
+
+// MeshSaverDesc says "Connects a little slower, wakes the phone less"
+// in the language the app shows.
+func MeshSaverDesc() string { return In(i18n.Locale()).MeshSaverDesc() }
+
+// MeshSaverDesc says "Connects a little slower, wakes the phone less"
+// in the language of msgs.
+func (msgs Messages) MeshSaverDesc() string {
+	return Catalog.Format(msgs.locale, "MeshSaverDesc", nil)
+}
+
+// PhonePermsEveryday says "Everyday"
+// in the language the app shows.
+func PhonePermsEveryday() string { return In(i18n.Locale()).PhonePermsEveryday() }
+
+// PhonePermsEveryday says "Everyday"
+// in the language of msgs.
+func (msgs Messages) PhonePermsEveryday() string {
+	return Catalog.Format(msgs.locale, "PhonePermsEveryday", nil)
+}
+
+// PhonePermsScreen says "Screen & safety"
+// in the language the app shows.
+func PhonePermsScreen() string { return In(i18n.Locale()).PhonePermsScreen() }
+
+// PhonePermsScreen says "Screen & safety"
+// in the language of msgs.
+func (msgs Messages) PhonePermsScreen() string {
+	return Catalog.Format(msgs.locale, "PhonePermsScreen", nil)
+}
+
+// PermTelemetrySub says "Battery and temperature on the computer"
+// in the language the app shows.
+func PermTelemetrySub() string { return In(i18n.Locale()).PermTelemetrySub() }
+
+// PermTelemetrySub says "Battery and temperature on the computer"
+// in the language of msgs.
+func (msgs Messages) PermTelemetrySub() string {
+	return Catalog.Format(msgs.locale, "PermTelemetrySub", nil)
+}
+
+// PermClipboardSub says "Share what you copy both ways"
+// in the language the app shows.
+func PermClipboardSub() string { return In(i18n.Locale()).PermClipboardSub() }
+
+// PermClipboardSub says "Share what you copy both ways"
+// in the language of msgs.
+func (msgs Messages) PermClipboardSub() string {
+	return Catalog.Format(msgs.locale, "PermClipboardSub", nil)
+}
+
+// PermNotificationsSub says "See and reply on the computer"
+// in the language the app shows.
+func PermNotificationsSub() string { return In(i18n.Locale()).PermNotificationsSub() }
+
+// PermNotificationsSub says "See and reply on the computer"
+// in the language of msgs.
+func (msgs Messages) PermNotificationsSub() string {
+	return Catalog.Format(msgs.locale, "PermNotificationsSub", nil)
+}
+
+// PermFileTransferSub says "Saved only to Downloads"
+// in the language the app shows.
+func PermFileTransferSub() string { return In(i18n.Locale()).PermFileTransferSub() }
+
+// PermFileTransferSub says "Saved only to Downloads"
+// in the language of msgs.
+func (msgs Messages) PermFileTransferSub() string {
+	return Catalog.Format(msgs.locale, "PermFileTransferSub", nil)
+}
+
+// PermAppContinuitySub says "Continue the current app on the computer"
+// in the language the app shows.
+func PermAppContinuitySub() string { return In(i18n.Locale()).PermAppContinuitySub() }
+
+// PermAppContinuitySub says "Continue the current app on the computer"
+// in the language of msgs.
+func (msgs Messages) PermAppContinuitySub() string {
+	return Catalog.Format(msgs.locale, "PermAppContinuitySub", nil)
+}
+
+// PermMediaBridgeSub says "Off by default · computer audio into the phone"
+// in the language the app shows.
+func PermMediaBridgeSub() string { return In(i18n.Locale()).PermMediaBridgeSub() }
+
+// PermMediaBridgeSub says "Off by default · computer audio into the phone"
+// in the language of msgs.
+func (msgs Messages) PermMediaBridgeSub() string {
+	return Catalog.Format(msgs.locale, "PermMediaBridgeSub", nil)
+}
+
+// PermDisplayGuardSub says "Restore the display after a disconnect"
+// in the language the app shows.
+func PermDisplayGuardSub() string { return In(i18n.Locale()).PermDisplayGuardSub() }
+
+// PermDisplayGuardSub says "Restore the display after a disconnect"
+// in the language of msgs.
+func (msgs Messages) PermDisplayGuardSub() string {
+	return Catalog.Format(msgs.locale, "PermDisplayGuardSub", nil)
+}
+
+// PermADBBeaconSub says "Off by default · helps the computer find this phone"
+// in the language the app shows.
+func PermADBBeaconSub() string { return In(i18n.Locale()).PermADBBeaconSub() }
+
+// PermADBBeaconSub says "Off by default · helps the computer find this phone"
+// in the language of msgs.
+func (msgs Messages) PermADBBeaconSub() string {
+	return Catalog.Format(msgs.locale, "PermADBBeaconSub", nil)
+}
+
+// PhoneBeaconSub says "Shown on the system Wireless debugging page"
+// in the language the app shows.
+func PhoneBeaconSub() string { return In(i18n.Locale()).PhoneBeaconSub() }
+
+// PhoneBeaconSub says "Shown on the system Wireless debugging page"
+// in the language of msgs.
+func (msgs Messages) PhoneBeaconSub() string {
+	return Catalog.Format(msgs.locale, "PhoneBeaconSub", nil)
+}
+
+// PortRangeError says "Use a port from 1024 to 65535"
+// in the language the app shows.
+func PortRangeError() string { return In(i18n.Locale()).PortRangeError() }
+
+// PortRangeError says "Use a port from 1024 to 65535"
+// in the language of msgs.
+func (msgs Messages) PortRangeError() string {
+	return Catalog.Format(msgs.locale, "PortRangeError", nil)
+}
+
+// PhoneFingerprintSub says "Matches the one your computer shows, group by group"
+// in the language the app shows.
+func PhoneFingerprintSub() string { return In(i18n.Locale()).PhoneFingerprintSub() }
+
+// PhoneFingerprintSub says "Matches the one your computer shows, group by group"
+// in the language of msgs.
+func (msgs Messages) PhoneFingerprintSub() string {
+	return Catalog.Format(msgs.locale, "PhoneFingerprintSub", nil)
+}
+
+// PaneAppTitle says "App window"
+// in the language the app shows.
+func PaneAppTitle() string { return In(i18n.Locale()).PaneAppTitle() }
+
+// PaneAppTitle says "App window"
+// in the language of msgs.
+func (msgs Messages) PaneAppTitle() string {
+	return Catalog.Format(msgs.locale, "PaneAppTitle", nil)
+}
+
+// PaneCameraTitle says "Phone camera"
+// in the language the app shows.
+func PaneCameraTitle() string { return In(i18n.Locale()).PaneCameraTitle() }
+
+// PaneCameraTitle says "Phone camera"
+// in the language of msgs.
+func (msgs Messages) PaneCameraTitle() string {
+	return Catalog.Format(msgs.locale, "PaneCameraTitle", nil)
+}
+
+// PaneMirrorTitle says "Phone mirror"
+// in the language the app shows.
+func PaneMirrorTitle() string { return In(i18n.Locale()).PaneMirrorTitle() }
+
+// PaneMirrorTitle says "Phone mirror"
+// in the language of msgs.
+func (msgs Messages) PaneMirrorTitle() string {
+	return Catalog.Format(msgs.locale, "PaneMirrorTitle", nil)
+}
+
+// ActionUndo says "Undo"
+// in the language the app shows.
+func ActionUndo() string { return In(i18n.Locale()).ActionUndo() }
+
+// ActionUndo says "Undo"
+// in the language of msgs.
+func (msgs Messages) ActionUndo() string {
+	return Catalog.Format(msgs.locale, "ActionUndo", nil)
+}
+
+// AppsEmpty says "Connect a phone to see its apps"
+// in the language the app shows.
+func AppsEmpty() string { return In(i18n.Locale()).AppsEmpty() }
+
+// AppsEmpty says "Connect a phone to see its apps"
+// in the language of msgs.
+func (msgs Messages) AppsEmpty() string {
+	return Catalog.Format(msgs.locale, "AppsEmpty", nil)
+}
+
+// AppsHint says "Right-click an app to open it in its own window"
+// in the language the app shows.
+func AppsHint() string { return In(i18n.Locale()).AppsHint() }
+
+// AppsHint says "Right-click an app to open it in its own window"
+// in the language of msgs.
+func (msgs Messages) AppsHint() string {
+	return Catalog.Format(msgs.locale, "AppsHint", nil)
+}
+
+// ConnectDevice says "Connect device"
+// in the language the app shows.
+func ConnectDevice() string { return In(i18n.Locale()).ConnectDevice() }
+
+// ConnectDevice says "Connect device"
+// in the language of msgs.
+func (msgs Messages) ConnectDevice() string {
+	return Catalog.Format(msgs.locale, "ConnectDevice", nil)
+}
+
+// ConnectInstallCompanion says "Also install AndroFuse Companion after connecting (optional)"
+// in the language the app shows.
+func ConnectInstallCompanion() string { return In(i18n.Locale()).ConnectInstallCompanion() }
+
+// ConnectInstallCompanion says "Also install AndroFuse Companion after connecting (optional)"
+// in the language of msgs.
+func (msgs Messages) ConnectInstallCompanion() string {
+	return Catalog.Format(msgs.locale, "ConnectInstallCompanion", nil)
+}
+
+// ConnectTabCompanion says "Phone Companion"
+// in the language the app shows.
+func ConnectTabCompanion() string { return In(i18n.Locale()).ConnectTabCompanion() }
+
+// ConnectTabCompanion says "Phone Companion"
+// in the language of msgs.
+func (msgs Messages) ConnectTabCompanion() string {
+	return Catalog.Format(msgs.locale, "ConnectTabCompanion", nil)
+}
+
+// ConnectTabWireless says "Wireless phone"
+// in the language the app shows.
+func ConnectTabWireless() string { return In(i18n.Locale()).ConnectTabWireless() }
+
+// ConnectTabWireless says "Wireless phone"
+// in the language of msgs.
+func (msgs Messages) ConnectTabWireless() string {
+	return Catalog.Format(msgs.locale, "ConnectTabWireless", nil)
+}
+
+// DevicesCount says "{count, plural, =0{No devices connected} one{1 device} other{{count} devices}}"
+// in the language the app shows.
+func DevicesCount(count int) string { return In(i18n.Locale()).DevicesCount(count) }
+
+// DevicesCount says "{count, plural, =0{No devices connected} one{1 device} other{{count} devices}}"
+// in the language of msgs.
+func (msgs Messages) DevicesCount(count int) string {
+	return Catalog.Format(msgs.locale, "DevicesCount", map[string]any{"count": count})
+}
+
+// DevicesEmptyLine says "Plug in a phone over USB, or connect one wirelessly."
+// in the language the app shows.
+func DevicesEmptyLine() string { return In(i18n.Locale()).DevicesEmptyLine() }
+
+// DevicesEmptyLine says "Plug in a phone over USB, or connect one wirelessly."
+// in the language of msgs.
+func (msgs Messages) DevicesEmptyLine() string {
+	return Catalog.Format(msgs.locale, "DevicesEmptyLine", nil)
+}
+
+// NavApps says "Apps"
+// in the language the app shows.
+func NavApps() string { return In(i18n.Locale()).NavApps() }
+
+// NavApps says "Apps"
+// in the language of msgs.
+func (msgs Messages) NavApps() string {
+	return Catalog.Format(msgs.locale, "NavApps", nil)
+}
+
+// NavCompanion says "Companion"
+// in the language the app shows.
+func NavCompanion() string { return In(i18n.Locale()).NavCompanion() }
+
+// NavCompanion says "Companion"
+// in the language of msgs.
+func (msgs Messages) NavCompanion() string {
+	return Catalog.Format(msgs.locale, "NavCompanion", nil)
+}
+
+// NavOpen says "Open"
+// in the language the app shows.
+func NavOpen() string { return In(i18n.Locale()).NavOpen() }
+
+// NavOpen says "Open"
+// in the language of msgs.
+func (msgs Messages) NavOpen() string {
+	return Catalog.Format(msgs.locale, "NavOpen", nil)
+}
+
+// NavWindows says "Windows"
+// in the language the app shows.
+func NavWindows() string { return In(i18n.Locale()).NavWindows() }
+
+// NavWindows says "Windows"
+// in the language of msgs.
+func (msgs Messages) NavWindows() string {
+	return Catalog.Format(msgs.locale, "NavWindows", nil)
+}
+
+// OpenBeside says "Open beside the current pane"
+// in the language the app shows.
+func OpenBeside() string { return In(i18n.Locale()).OpenBeside() }
+
+// OpenBeside says "Open beside the current pane"
+// in the language of msgs.
+func (msgs Messages) OpenBeside() string {
+	return Catalog.Format(msgs.locale, "OpenBeside", nil)
+}
+
+// OpenHint says "Opens in the main window. Use ▾ to split or open a separate window."
+// in the language the app shows.
+func OpenHint() string { return In(i18n.Locale()).OpenHint() }
+
+// OpenHint says "Opens in the main window. Use ▾ to split or open a separate window."
+// in the language of msgs.
+func (msgs Messages) OpenHint() string {
+	return Catalog.Format(msgs.locale, "OpenHint", nil)
+}
+
+// OpenInPane says "Open in the main window"
+// in the language the app shows.
+func OpenInPane() string { return In(i18n.Locale()).OpenInPane() }
+
+// OpenInPane says "Open in the main window"
+// in the language of msgs.
+func (msgs Messages) OpenInPane() string {
+	return Catalog.Format(msgs.locale, "OpenInPane", nil)
+}
+
+// OpenInWindow says "Open in a separate window"
+// in the language the app shows.
+func OpenInWindow() string { return In(i18n.Locale()).OpenInWindow() }
+
+// OpenInWindow says "Open in a separate window"
+// in the language of msgs.
+func (msgs Messages) OpenInWindow() string {
+	return Catalog.Format(msgs.locale, "OpenInWindow", nil)
+}
+
+// OpenPaneShort says "Main window"
+// in the language the app shows.
+func OpenPaneShort() string { return In(i18n.Locale()).OpenPaneShort() }
+
+// OpenPaneShort says "Main window"
+// in the language of msgs.
+func (msgs Messages) OpenPaneShort() string {
+	return Catalog.Format(msgs.locale, "OpenPaneShort", nil)
+}
+
+// OpenWindowShort says "Separate window"
+// in the language the app shows.
+func OpenWindowShort() string { return In(i18n.Locale()).OpenWindowShort() }
+
+// OpenWindowShort says "Separate window"
+// in the language of msgs.
+func (msgs Messages) OpenWindowShort() string {
+	return Catalog.Format(msgs.locale, "OpenWindowShort", nil)
+}
+
+// PairCodeError says "The pairing code has 6 digits"
+// in the language the app shows.
+func PairCodeError() string { return In(i18n.Locale()).PairCodeError() }
+
+// PairCodeError says "The pairing code has 6 digits"
+// in the language of msgs.
+func (msgs Messages) PairCodeError() string {
+	return Catalog.Format(msgs.locale, "PairCodeError", nil)
+}
+
+// PaneMore says "More"
+// in the language the app shows.
+func PaneMore() string { return In(i18n.Locale()).PaneMore() }
+
+// PaneMore says "More"
+// in the language of msgs.
+func (msgs Messages) PaneMore() string {
+	return Catalog.Format(msgs.locale, "PaneMore", nil)
+}
+
+// PanePopOut says "Open in a separate window"
+// in the language the app shows.
+func PanePopOut() string { return In(i18n.Locale()).PanePopOut() }
+
+// PanePopOut says "Open in a separate window"
+// in the language of msgs.
+func (msgs Messages) PanePopOut() string {
+	return Catalog.Format(msgs.locale, "PanePopOut", nil)
+}
+
+// PaneSplitDown says "Split down"
+// in the language the app shows.
+func PaneSplitDown() string { return In(i18n.Locale()).PaneSplitDown() }
+
+// PaneSplitDown says "Split down"
+// in the language of msgs.
+func (msgs Messages) PaneSplitDown() string {
+	return Catalog.Format(msgs.locale, "PaneSplitDown", nil)
+}
+
+// PaneSplitRight says "Split right"
+// in the language the app shows.
+func PaneSplitRight() string { return In(i18n.Locale()).PaneSplitRight() }
+
+// PaneSplitRight says "Split right"
+// in the language of msgs.
+func (msgs Messages) PaneSplitRight() string {
+	return Catalog.Format(msgs.locale, "PaneSplitRight", nil)
+}
+
+// PaneSplitWith says "Split with {name}"
+// in the language the app shows.
+func PaneSplitWith(name string) string { return In(i18n.Locale()).PaneSplitWith(name) }
+
+// PaneSplitWith says "Split with {name}"
+// in the language of msgs.
+func (msgs Messages) PaneSplitWith(name string) string {
+	return Catalog.Format(msgs.locale, "PaneSplitWith", map[string]any{"name": name})
+}
+
+// PaneTelemetry says "{transport} · {size} · measured {fps} fps"
+// in the language the app shows.
+func PaneTelemetry(transport string, size string, fps string) string {
+	return In(i18n.Locale()).PaneTelemetry(transport, size, fps)
+}
+
+// PaneTelemetry says "{transport} · {size} · measured {fps} fps"
+// in the language of msgs.
+func (msgs Messages) PaneTelemetry(transport string, size string, fps string) string {
+	return Catalog.Format(msgs.locale, "PaneTelemetry", map[string]any{"transport": transport, "size": size, "fps": fps})
+}
+
+// PaneUnsplit says "Show only this pane"
+// in the language the app shows.
+func PaneUnsplit() string { return In(i18n.Locale()).PaneUnsplit() }
+
+// PaneUnsplit says "Show only this pane"
+// in the language of msgs.
+func (msgs Messages) PaneUnsplit() string {
+	return Catalog.Format(msgs.locale, "PaneUnsplit", nil)
+}
+
+// ReadyAttention says "Needs attention"
+// in the language the app shows.
+func ReadyAttention() string { return In(i18n.Locale()).ReadyAttention() }
+
+// ReadyAttention says "Needs attention"
+// in the language of msgs.
+func (msgs Messages) ReadyAttention() string {
+	return Catalog.Format(msgs.locale, "ReadyAttention", nil)
+}
+
+// ReadyChecking says "Checking this computer…"
+// in the language the app shows.
+func ReadyChecking() string { return In(i18n.Locale()).ReadyChecking() }
+
+// ReadyChecking says "Checking this computer…"
+// in the language of msgs.
+func (msgs Messages) ReadyChecking() string {
+	return Catalog.Format(msgs.locale, "ReadyChecking", nil)
+}
+
+// ReadyHWDecode says "Hardware decoding available"
+// in the language the app shows.
+func ReadyHWDecode() string { return In(i18n.Locale()).ReadyHWDecode() }
+
+// ReadyHWDecode says "Hardware decoding available"
+// in the language of msgs.
+func (msgs Messages) ReadyHWDecode() string {
+	return Catalog.Format(msgs.locale, "ReadyHWDecode", nil)
+}
+
+// ReadyOK says "This computer is ready"
+// in the language the app shows.
+func ReadyOK() string { return In(i18n.Locale()).ReadyOK() }
+
+// ReadyOK says "This computer is ready"
+// in the language of msgs.
+func (msgs Messages) ReadyOK() string {
+	return Catalog.Format(msgs.locale, "ReadyOK", nil)
+}
+
+// ReadySeeDiagnostics says "See Diagnostics"
+// in the language the app shows.
+func ReadySeeDiagnostics() string { return In(i18n.Locale()).ReadySeeDiagnostics() }
+
+// ReadySeeDiagnostics says "See Diagnostics"
+// in the language of msgs.
+func (msgs Messages) ReadySeeDiagnostics() string {
+	return Catalog.Format(msgs.locale, "ReadySeeDiagnostics", nil)
+}
+
+// RememberedAuto says "Reconnect"
+// in the language the app shows.
+func RememberedAuto() string { return In(i18n.Locale()).RememberedAuto() }
+
+// RememberedAuto says "Reconnect"
+// in the language of msgs.
+func (msgs Messages) RememberedAuto() string {
+	return Catalog.Format(msgs.locale, "RememberedAuto", nil)
+}
+
+// RememberedCompanion says "Companion"
+// in the language the app shows.
+func RememberedCompanion() string { return In(i18n.Locale()).RememberedCompanion() }
+
+// RememberedCompanion says "Companion"
+// in the language of msgs.
+func (msgs Messages) RememberedCompanion() string {
+	return Catalog.Format(msgs.locale, "RememberedCompanion", nil)
+}
+
+// RememberedCompanionTip says "Connect to its Companion over adb or the mesh"
+// in the language the app shows.
+func RememberedCompanionTip() string { return In(i18n.Locale()).RememberedCompanionTip() }
+
+// RememberedCompanionTip says "Connect to its Companion over adb or the mesh"
+// in the language of msgs.
+func (msgs Messages) RememberedCompanionTip() string {
+	return Catalog.Format(msgs.locale, "RememberedCompanionTip", nil)
+}
+
+// RememberedForget says "Forget"
+// in the language the app shows.
+func RememberedForget() string { return In(i18n.Locale()).RememberedForget() }
+
+// RememberedForget says "Forget"
+// in the language of msgs.
+func (msgs Messages) RememberedForget() string {
+	return Catalog.Format(msgs.locale, "RememberedForget", nil)
+}
+
+// RememberedForgotten says "Forgot {name}"
+// in the language the app shows.
+func RememberedForgotten(name string) string { return In(i18n.Locale()).RememberedForgotten(name) }
+
+// RememberedForgotten says "Forgot {name}"
+// in the language of msgs.
+func (msgs Messages) RememberedForgotten(name string) string {
+	return Catalog.Format(msgs.locale, "RememberedForgotten", map[string]any{"name": name})
+}
+
+// RememberedLastSeen says "Offline · last seen {time}"
+// in the language the app shows.
+func RememberedLastSeen(time_ string) string { return In(i18n.Locale()).RememberedLastSeen(time_) }
+
+// RememberedLastSeen says "Offline · last seen {time}"
+// in the language of msgs.
+func (msgs Messages) RememberedLastSeen(time_ string) string {
+	return Catalog.Format(msgs.locale, "RememberedLastSeen", map[string]any{"time": time_})
+}
+
+// RememberedOffline says "{count} offline"
+// in the language the app shows.
+func RememberedOffline(count int) string { return In(i18n.Locale()).RememberedOffline(count) }
+
+// RememberedOffline says "{count} offline"
+// in the language of msgs.
+func (msgs Messages) RememberedOffline(count int) string {
+	return Catalog.Format(msgs.locale, "RememberedOffline", map[string]any{"count": count})
+}
+
+// RememberedTitle says "Remembered devices"
+// in the language the app shows.
+func RememberedTitle() string { return In(i18n.Locale()).RememberedTitle() }
+
+// RememberedTitle says "Remembered devices"
+// in the language of msgs.
+func (msgs Messages) RememberedTitle() string {
+	return Catalog.Format(msgs.locale, "RememberedTitle", nil)
+}
+
+// SettingsAppearanceSub says "Light, dark or follow the system"
+// in the language the app shows.
+func SettingsAppearanceSub() string { return In(i18n.Locale()).SettingsAppearanceSub() }
+
+// SettingsAppearanceSub says "Light, dark or follow the system"
+// in the language of msgs.
+func (msgs Messages) SettingsAppearanceSub() string {
+	return Catalog.Format(msgs.locale, "SettingsAppearanceSub", nil)
+}
+
+// SettingsAppsOpen says "App windows open in"
+// in the language the app shows.
+func SettingsAppsOpen() string { return In(i18n.Locale()).SettingsAppsOpen() }
+
+// SettingsAppsOpen says "App windows open in"
+// in the language of msgs.
+func (msgs Messages) SettingsAppsOpen() string {
+	return Catalog.Format(msgs.locale, "SettingsAppsOpen", nil)
+}
+
+// SettingsAppsOpenSub says "Separate windows are easier to arrange across screens"
+// in the language the app shows.
+func SettingsAppsOpenSub() string { return In(i18n.Locale()).SettingsAppsOpenSub() }
+
+// SettingsAppsOpenSub says "Separate windows are easier to arrange across screens"
+// in the language of msgs.
+func (msgs Messages) SettingsAppsOpenSub() string {
+	return Catalog.Format(msgs.locale, "SettingsAppsOpenSub", nil)
+}
+
+// SettingsGeneral says "General"
+// in the language the app shows.
+func SettingsGeneral() string { return In(i18n.Locale()).SettingsGeneral() }
+
+// SettingsGeneral says "General"
+// in the language of msgs.
+func (msgs Messages) SettingsGeneral() string {
+	return Catalog.Format(msgs.locale, "SettingsGeneral", nil)
+}
+
+// SettingsLanguageSub says "Applies at once"
+// in the language the app shows.
+func SettingsLanguageSub() string { return In(i18n.Locale()).SettingsLanguageSub() }
+
+// SettingsLanguageSub says "Applies at once"
+// in the language of msgs.
+func (msgs Messages) SettingsLanguageSub() string {
+	return Catalog.Format(msgs.locale, "SettingsLanguageSub", nil)
+}
+
+// SettingsLocal says "Local environment"
+// in the language the app shows.
+func SettingsLocal() string { return In(i18n.Locale()).SettingsLocal() }
+
+// SettingsLocal says "Local environment"
+// in the language of msgs.
+func (msgs Messages) SettingsLocal() string {
+	return Catalog.Format(msgs.locale, "SettingsLocal", nil)
+}
+
+// SettingsNetwork says "Network"
+// in the language the app shows.
+func SettingsNetwork() string { return In(i18n.Locale()).SettingsNetwork() }
+
+// SettingsNetwork says "Network"
+// in the language of msgs.
+func (msgs Messages) SettingsNetwork() string {
+	return Catalog.Format(msgs.locale, "SettingsNetwork", nil)
+}
+
+// SettingsSecurity says "Security & advanced"
+// in the language the app shows.
+func SettingsSecurity() string { return In(i18n.Locale()).SettingsSecurity() }
+
+// SettingsSecurity says "Security & advanced"
+// in the language of msgs.
+func (msgs Messages) SettingsSecurity() string {
+	return Catalog.Format(msgs.locale, "SettingsSecurity", nil)
+}
+
+// SettingsStreamsOpen says "DeX and mirroring open in"
+// in the language the app shows.
+func SettingsStreamsOpen() string { return In(i18n.Locale()).SettingsStreamsOpen() }
+
+// SettingsStreamsOpen says "DeX and mirroring open in"
+// in the language of msgs.
+func (msgs Messages) SettingsStreamsOpen() string {
+	return Catalog.Format(msgs.locale, "SettingsStreamsOpen", nil)
+}
+
+// SettingsStreamsOpenSub says "You can always use ▾ or ↗ instead"
+// in the language the app shows.
+func SettingsStreamsOpenSub() string { return In(i18n.Locale()).SettingsStreamsOpenSub() }
+
+// SettingsStreamsOpenSub says "You can always use ▾ or ↗ instead"
+// in the language of msgs.
+func (msgs Messages) SettingsStreamsOpenSub() string {
+	return Catalog.Format(msgs.locale, "SettingsStreamsOpenSub", nil)
+}
+
+// SettingsWindows says "Windows & split"
+// in the language the app shows.
+func SettingsWindows() string { return In(i18n.Locale()).SettingsWindows() }
+
+// SettingsWindows says "Windows & split"
+// in the language of msgs.
+func (msgs Messages) SettingsWindows() string {
+	return Catalog.Format(msgs.locale, "SettingsWindows", nil)
+}
+
+// PaneDock says "Back to the main window"
+// in the language the app shows.
+func PaneDock() string { return In(i18n.Locale()).PaneDock() }
+
+// PaneDock says "Back to the main window"
+// in the language of msgs.
+func (msgs Messages) PaneDock() string {
+	return Catalog.Format(msgs.locale, "PaneDock", nil)
+}
+
+// CompanionChooseApk says "Choose installer…"
+// in the language the app shows.
+func CompanionChooseApk() string { return In(i18n.Locale()).CompanionChooseApk() }
+
+// CompanionChooseApk says "Choose installer…"
+// in the language of msgs.
+func (msgs Messages) CompanionChooseApk() string {
+	return Catalog.Format(msgs.locale, "CompanionChooseApk", nil)
+}
+
+// CompanionApkChosen says "Will install {name}"
+// in the language the app shows.
+func CompanionApkChosen(name string) string { return In(i18n.Locale()).CompanionApkChosen(name) }
+
+// CompanionApkChosen says "Will install {name}"
+// in the language of msgs.
+func (msgs Messages) CompanionApkChosen(name string) string {
+	return Catalog.Format(msgs.locale, "CompanionApkChosen", map[string]any{"name": name})
+}
+
+// BeaconVerified says "Saved · Wireless debugging answers on this port"
+// in the language the app shows.
+func BeaconVerified() string { return In(i18n.Locale()).BeaconVerified() }
+
+// BeaconVerified says "Saved · Wireless debugging answers on this port"
+// in the language of msgs.
+func (msgs Messages) BeaconVerified() string {
+	return Catalog.Format(msgs.locale, "BeaconVerified", nil)
+}
+
+// BeaconPlain says "This port is plain adb tcpip, not Wireless debugging. Not saved."
+// in the language the app shows.
+func BeaconPlain() string { return In(i18n.Locale()).BeaconPlain() }
+
+// BeaconPlain says "This port is plain adb tcpip, not Wireless debugging. Not saved."
+// in the language of msgs.
+func (msgs Messages) BeaconPlain() string {
+	return Catalog.Format(msgs.locale, "BeaconPlain", nil)
+}
+
+// BeaconUnverified says "Saved, but nothing answers on this port right now"
+// in the language the app shows.
+func BeaconUnverified() string { return In(i18n.Locale()).BeaconUnverified() }
+
+// BeaconUnverified says "Saved, but nothing answers on this port right now"
+// in the language of msgs.
+func (msgs Messages) BeaconUnverified() string {
+	return Catalog.Format(msgs.locale, "BeaconUnverified", nil)
 }

@@ -65,6 +65,8 @@ jobs:
         uses: EmbarkStudios/cargo-deny-action@17aeb3c839e42274e2b8adf721c8c65edfdc74dd # v2.1.3
         with:
           manifest-path: core/Cargo.toml
+          # The action's container must install the toolchain rust-toolchain.toml pins.
+          rust-version: "1.99.1"
       - name: Go advisories
         run: |
           GOBIN="$RUNNER_TEMP" go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
@@ -100,7 +102,9 @@ jobs:
         shell: pwsh
         run: |
           go run ./tools/fetchdeps
-          $clang = Get-ChildItem "C:\Program Files\Microsoft Visual Studio\*\*\VC\Tools\Llvm\ARM64\bin\clang.exe", "C:\Program Files\LLVM\bin\clang.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          # libclang must match the runner's own architecture: an ARM64 clang cannot run on x64.
+          $llvm = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "ARM64" } else { "x64" }
+          $clang = Get-ChildItem "C:\Program Files\Microsoft Visual Studio\*\*\VC\Tools\Llvm\$llvm\bin\clang.exe", "C:\Program Files\LLVM\bin\clang.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
           if ($clang) { Add-Content $env:GITHUB_PATH $clang.DirectoryName }
       - name: Clippy
         run: cargo clippy --manifest-path core/Cargo.toml --workspace --all-targets -- -D warnings
@@ -136,7 +140,9 @@ jobs:
         shell: pwsh
         run: |
           go run ./tools/fetchdeps
-          $clang = Get-ChildItem "C:\Program Files\Microsoft Visual Studio\*\*\VC\Tools\Llvm\ARM64\bin\clang.exe", "C:\Program Files\LLVM\bin\clang.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          # libclang must match the runner's own architecture: an ARM64 clang cannot run on x64.
+          $llvm = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "ARM64" } else { "x64" }
+          $clang = Get-ChildItem "C:\Program Files\Microsoft Visual Studio\*\*\VC\Tools\Llvm\$llvm\bin\clang.exe", "C:\Program Files\LLVM\bin\clang.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
           if ($clang) { Add-Content $env:GITHUB_PATH $clang.DirectoryName }
       - name: Build Rust core & Go binaries
         shell: pwsh
@@ -190,6 +196,8 @@ jobs:
       - name: Rust core for Android (embedded EasyTier)
         run: |
           go run ./tools/fetchdeps
+          # The NDK the step above installs, not the runner's preset ANDROID_NDK_HOME.
+          export ANDROID_NDK_HOME="${ANDROID_HOME:-$ANDROID_SDK_ROOT}/ndk/29.0.14206865"
           bash scripts/build-android-core.sh arm64-v8a
       - name: Android companion vet & APK
         env:

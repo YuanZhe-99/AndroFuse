@@ -28,6 +28,14 @@ version=$(sed -n 's/^const Version = "\(.*\)"/\1/p' internal/version/version.go)
 mkdir -p resources/licenses build
 cp LICENSE THIRD_PARTY_NOTICES.md resources/licenses/
 
+# Ship the same-version Companion APK in companion/ next to androfuse.exe (the release workflow
+# downloads it there; locally it comes from `go run ./tools/buildapk`).
+apk="build/AndroFuse-$version-android-arm64.apk"
+if [ -f "$apk" ]; then
+	mkdir -p resources/windows/companion
+	cp "$apk" resources/windows/companion/
+fi
+
 # Build shared UID 2000 DeX / icon helper JAR if javac/d8 are present (or keep existing build artifact).
 if command -v javac >/dev/null 2>&1 && [ -n "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}" ]; then
 	go run ./tools/builddex

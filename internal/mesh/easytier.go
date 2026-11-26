@@ -6,6 +6,7 @@ package mesh
 
 import (
 	"errors"
+	"net/netip"
 	"sync"
 
 	"github.com/YuanZhe-99/AndroFuse/internal/core"
@@ -28,6 +29,9 @@ type Config struct {
 	// Listeners are addresses this node accepts connections on; empty by default (`INV-07`).
 	Listeners    []string      `json:"listeners,omitempty"`
 	PortForwards []PortForward `json:"port_forwards,omitempty"`
+	// LowPower trades connection set-up speed for fewer background wakeups (see the core's
+	// MeshConfig.low_power); the Companion uses it on battery.
+	LowPower bool `json:"low_power,omitempty"`
 }
 
 // Status summarizes the embedded mesh for the UI.
@@ -46,13 +50,25 @@ type startParams struct {
 	Peers         []string      `json:"peers,omitempty"`
 	Listeners     []string      `json:"listeners,omitempty"`
 	PortForwards  []PortForward `json:"port_forwards,omitempty"`
+	LowPower      bool          `json:"low_power,omitempty"`
 }
 
-// coreStatus mirrors the core's MeshStatus result (running info is not surfaced, `INV-08`).
+// coreStatus mirrors the core's MeshStatus result. Info, EasyTier's running info, is read only
+// for peer lookups and never surfaced or logged (`INV-08`).
 type coreStatus struct {
 	Running bool   `json:"running"`
 	Engine  string `json:"engine"`
 	Error   string `json:"error,omitempty"`
+	Info    struct {
+		Routes []struct {
+			Hostname string `json:"hostname"`
+			IPv4     *struct {
+				Address *struct {
+					Addr uint32 `json:"addr"`
+				} `json:"address"`
+			} `json:"ipv4_addr"`
+		} `json:"routes"`
+	} `json:"info"`
 }
 
 // Manager controls the single embedded mesh instance of a loaded core library.
@@ -82,6 +98,7 @@ func (m *Manager) Start(cfg Config) error {
 		Peers:         cfg.Peers,
 		Listeners:     cfg.Listeners,
 		PortForwards:  cfg.PortForwards,
+		LowPower:      cfg.LowPower,
 	}, &st)
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -117,4 +134,20 @@ func (m *Manager) Status() Status {
 		m.status.LastError = st.Error
 	}
 	return m.status
+}
+
+// PeerIPv4 returns the mesh IPv4 address of the peer that joined as hostname (its DeviceName).
+// Returns: false while the mesh is down, the peer is unknown, or it has no address yet.
+func (m *Manager) PeerIPv4(hostname string) (string, bool) {
+	var st coreStatus
+	if err := m.lib.Call("mesh.status", nil, &st); err != nil || !st.Running {
+		return "", false
+	}
+	for _, r := range st.Info.Routes {
+		if r.Hostname == hostname && r.IPv4 != nil && r.IPv4.Address != nil && r.IPv4.Address.Addr != 0 {
+			a := r.IPv4.Address.Addr
+			return netip.AddrFrom4([4]byte{byte(a >> 24), byte(a >> 16), byte(a >> 8), byte(a)}).String(), true
+		}
+	}
+	return "", false
 }

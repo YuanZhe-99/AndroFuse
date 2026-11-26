@@ -247,7 +247,7 @@ flowchart TB
 - **已落地（基础能力）**：
   1. **单设备多传输去重聚合（`INV-02`）**：`internal/adb` 通过 `getprop ro.serialno` 硬件哈希将同一台手机的有线 USB 与加密 TLS 无线 ADB 合并为一张统一设备卡片（`MergeDevices`/`UnifiedDevice`，`localapi` 同步返回 `unified_devices`）；
   2. **路由策略选择器与编码器并发余量保护（`INV-01`、`INV-06`）**：`FormatOneUIVersion` + `SelectRoute` 与编码通道计数保护已在 Fold 8 自动化测试通过。
-- **热切换**：根因与修复见 **§9.1 第 4 项**；剩余物理 USB 拔线复测。
+- **热切换**：根因与修复见 `doc/en-us/protocols.md`（`serve` 脱离 adb 会话启动）；剩余物理 USB 拔线复测（§9.1 第 1 项）。
 
 ### M3：Android Companion APK 与跨端协同（`0.3.0` — 🚧 协议/宿主/UI/EasyTier `--no-tun` 托管与 APK 构建工具已就绪，待真机系统权限联调）
 - **M3a 已落地（内建可下载 Android 虚拟机，§6.6）**：
@@ -259,12 +259,12 @@ flowchart TB
   4. 桌面 GUI 接入可选「Android Companion 协同与异网直连」卡片（不强制安装 APK，`INV-11`）；后续仅余物理真机上的系统权限端到端联调。
 - **Done When**：内建 VM 支持原生架构下载/无头启停并无缝运行独立 APP 窗口；卸载 Companion APK 时基础有线/无线 ADB 模式 100% 正常；安装并显式授权后 P1 全部跨端协同功能通过真机端到端验收。
 
-### M4：双架构正式发布、Windows 10 评估与长稳打磨（`0.4.0` — 🚧 签名/PE 校验/打包脚本与 GitHub CI/Release 工作流已落地，待真机 x64/Win10 与 30 分钟压测）
+### M4：双架构正式发布、Windows 10 评估与长稳打磨（`0.4.0` — 🚧 签名/PE 校验/打包脚本与 GitHub CI/Release 工作流已落地，待真机 x64/Win10，30 分钟压测已在模拟器通过）
 - **已落地（工程与 CI/CD 基础设施）**：
   1. 新增 `internal/bundlesig` + `tools/sign`（对齐 Kyokai 的 Ed25519 `bundle.json` + `bundle.sig` 辅助包签名与 `keygen` 工具）与 `scripts/build.sh`（许可随包、核心 DLL、PE 校验、Bundle 签名、NSIS 安装包/ZIP）；
   2. 新增 `tools/checkpe`（逐一验证输出 `.exe` / `.dll` 为原生 `0xAA64` / `0x8664` PE，拒绝转译，`INV-10`）；
   3. 新增 `.github/workflows/ci.yml` 与 `.github/workflows/release.yml`（Win11 ARM64 + Win11 x64 + Android arm64 构建、`govulncheck`、`gitleaks`、`cargo deny` 与 `SHA256SUMS.txt` 发布流程；不自动打 Tag）。
-- **待真机硬件验收**：Windows 11 `x64` 真机与 Windows 10（`19045+`）安装/运行实测、多显示器跨屏高 DPI、休眠唤醒与 30 分钟连续烤机压测。
+- **待真机硬件验收**：Windows 11 `x64` 真机与 Windows 10（`19045+`）安装/运行实测、多显示器跨屏高 DPI、休眠唤醒，以及真机上的 30 分钟连续烤机压测（模拟器 30 分钟压测已通过，见 `doc/en-us/platform-notes.md`，`internal/scrcpy` 的 `TestLiveSoak` 可复用）。
 - **Done When**：双 Windows 架构均在真实硬件完成安装、升级、卸载与全套验收清单。
 
 ### M5：后续增强（`0.5.0+` — ✅ 软件主干已落地，待真机权限联调与独立 COM 驱动评估）
@@ -275,53 +275,29 @@ flowchart TB
   3. 新增 `internal/avbridge`（本机防越权 MJPEG 流、`MFCreateVirtualCamera` 系统能力诚实探测与 `StreamMic` 经 Companion `MediaBridge` 加密隧道回传 WASAPI 采集 PCM 帧）及 C ABI v5 真实 WASAPI `WasapiMicCapturer`（`androfuse_mic_*`）；
   4. 新增 `packaging/android/AndroidManifest.services.xml` 与桌面 Settings 页 EasyTier（`--no-tun`）托管配置卡片、Companion 面板 PC 麦克风一键回传按钮；
   5. **诚实边界**：尚未打包需要管理员签名/安装的独立 Windows COM `MFCreateVirtualCamera` Media Source 驱动，当前通过原生预览窗口 + 本机防越权 MJPEG 流提供通用接入能力；PC→Android 在非 Root 手机上通过 Companion App 会话内接入，暂未做全系统 HAL 虚拟设备注入；真实硬件验收需接真机。
+  6. **独立虚拟摄像头驱动评估结论（2026-11-25）**：`MFCreateVirtualCamera` 仅 Windows 11 可用，帧服务器（Frame Server）加载的 Media Source COM 组件只能注册在 HKLM（需管理员、`regsvr32` 或安装程序写注册表），不能注册在 HKCU；「所有用户」可见的虚拟摄像头同样要求管理员。因此可行做法是：单独的原生 Media Source DLL（x64 与 ARM64 各一份，保持 `INV-10` 原生对等），由 Windows 安装包的可选组件在用户明确同意后以管理员身份注册，运行时由 `internal/avbridge` 以「仅当前会话」方式创建摄像头并把手机画面送入；Windows 10 只能走 DirectShow 滤镜路线，不作为重点。实现前该能力保持「未支持」。
 
 ---
 
 ### §9.1 下一阶段重点规划（2026-11-25 实测反馈后修订）
 
-基于 2026-11-25 真机核查与用户反馈，以下五项工作作为下一阶段核心实施计划：
+内置 EasyTier 组网、首次配对自动入网与随机端口、Companion 待机与省电模式、`serve` 热切换根因修复、`devices.json` 设备记忆与经组网重连、桌面端与手机端前端重做、安装包附带伴侣 APK 均已落地，行为见 `doc/en-us/architecture.md`、`doc/en-us/protocols.md` §6，实测证据见 `doc/en-us/platform-notes.md`。以下为仍未完成的部分：
 
-#### 1. 内置集成式 EasyTier 组网（替代外部 CLI 进程托管）
-- **已落地（2026-11-25，Windows 桌面端）**：EasyTier v2.7.1（LGPL-3.0，与 `GPL-3.0-only` 兼容）经上游 `easytier-ffi` 静态链接进 `core/androfuse-core`（`mesh.rs`，固定修订 `0d9c52b`，未启用 `c-abi` 以免导出通用符号）；C ABI v6 新增 `androfuse_call` 方法 `mesh.start` / `mesh.stop` / `mesh.status`，强制 `no_tun`、默认无监听端口、端口转发仅绑定 `127.0.0.1`（`INV-07`）；`internal/mesh` 改为核心库客户端，桌面端 GUI 已切换，外部 `easytier-core.exe` 依赖移除；`packet.dll` 改为延迟加载；`core/deny.toml` 按用户批准仅放行 EasyTier 组织 git 源并显式允许其传递依赖的宽松许可证；`tools/fetchdeps` 固定 `protoc` 36.2，`-check-upstream` 与发布流程警告用于随 App 更新及时升级 EasyTier。
-- **已落地（2026-11-25，Android 与首次配对自动入网）**：`scripts/build-android-core.sh` 用 NDK 构建内置 EasyTier 的 `libandrofuse_core.so`，由 MyGo 原生模块 `internal/androidcore` 打进 APK 并加载；电脑端组网设置像 Kyokai 一样保存在 `gui.json`（密钥 DPAPI 密封，开启状态启动时自动恢复）；首次经 adb 安装伴侣后以数字比对（`pair.request`，仅回环）配对，用户勾选「同时加入组网」时经 `mesh.join` 把组网交给手机，手机以 Android Keystore 密封保存并自动重连；`Pixel_9a_API_36` 端到端实测通过；所有监听均无固定端口：电脑组网的可选直连与手机伴侣 TCP 使用 20000–48999 内的随机高端口（空闲时沿用），经 adb 配对走 `localabstract:androfuse-companion` 本地套接字，随机端口下重跑同样通过。
-- **剩余**：
-  1. **跨网联调**：电脑与真机经公网中继实测 ADB TLS 与 Companion TLS 端口转发；
-  2. **CI 验证**：推送后确认 Windows 运行器的 clang\/`protoc` 前置步骤与 Android 任务的核心库构建（`libclang`）生效；
-  3. **发布打包**：Windows 安装包需在 `companion/` 目录附带同版本伴侣 APK，桌面端「安装伴侣并配对」才能离线使用。
+#### 1. 跨网与真机联调
+1. 电脑与真机经公网中继实测 ADB TLS 与 Companion TLS 端口转发，以及「已记住设备」在 adb 离线时经组网对等地址自动重连伴侣；
+2. 真机 Wi-Fi ↔ 蜂窝切换时的 `NetworkCallback` 事件与「省电」模式下的整机耗电（模拟器无法断开虚拟网络，也无法归因射频耗电）；
+3. **物理 USB 拔线复测**：在 `androfuse.exe` 中 USB 启动 DeX 后拔线，确认自动切到 Wi-Fi。
 
-#### 2. 手机端自连本地 Wi-Fi ADB 调研与设计（`INV-09`、`INV-13` 合规）
-- **已知结论（基于公开 AOSP 行为与开源先例，未参考商业代码）**：
-  1. 无线调试（`adbd` TLS）在所有接口监听，普通 App 具备 `INTERNET` 权限即可发起到 `127.0.0.1:<port>` 的 TCP 连接；开源项目（如 Shizuku 的无线调试启动、LADB）已在非 Root 设备上自连 `adbd`，说明 SELinux 不阻断 `untrusted_app` 的回环 TCP 连接；
-  2. 无线调试仅在连接 Wi-Fi 时运行，切换网络或断开 Wi-Fi 会自动关闭并更换端口；纯蜂窝网络下无法自连，**跨 5G 场景应由内置 EasyTier 直接转发到手机的 `adbd`，而非依赖手机自连**；
-  3. 首次配对必须由用户在系统「无线调试 › 使用配对码配对」中看到 6 位码（可在分屏中完成），配对协议为 SPAKE2 + TLS（AOSP `adb pairing`，Apache-2.0）；端口可通过 `NsdManager` 发现本机 `_adb-tls-connect._tcp`。
-- **设计**：自连仅用于手机端自愈（断线后清理残留虚拟显示、保持无线调试端口信标准确），远程运维走 EasyTier 端口转发；ADB RSA 密钥存于 Android Keystore 包装的私有存储（`INV-08`），每次配对需用户确认（`INV-09`）。
-- **待实测（需在 Fold 8 安装伴侣调试版）**：用 `run-as com.yuanzhe.androfuse` 在 App SELinux 域验证 `127.0.0.1:<tls_port>` 可达性与 One UI 9 是否对回环连接另有限制。
+#### 2. 手机端自连本地无线调试（`INV-09`、`INV-13` 合规）
+- **已知结论**：无线调试仅在连接 Wi-Fi 时运行，纯蜂窝网络下无法自连，跨 5G 场景由内置 EasyTier 直接转发到手机的 `adbd`；首次配对必须由用户在系统「无线调试 › 使用配对码配对」中看到 6 位码（SPAKE2 + TLS，AOSP `adb pairing`，Apache-2.0）。
+- **AVD 结论（2026-11-25）**：伴侣在保存无线调试端口前从 App 进程向 `127.0.0.1:<port>` 发送 CNXN 探测；在 `Pixel_9a_API_36` 上 App 域可连到 adbd 的 TCP 监听（明文 5555，按 `INV-07` 拒绝保存），说明 SELinux 不阻断回环连接；该镜像没有 Wi-Fi 射频，无线调试会被系统立即关闭，TLS 端口无法在模拟器上试。
+- **设计**：自连仅用于手机端自愈（断线后清理残留虚拟显示、保持端口信标准确），远程运维走 EasyTier 端口转发；ADB RSA 密钥存于 Android Keystore 包装的私有存储（`INV-08`），每次配对需用户确认（`INV-09`）。
+- **待实测**：Fold 8 上在安全页填入无线调试端口，确认显示「无线调试在此端口应答」（STLS），以及 One UI 9 是否对回环连接另有限制；通过后再实现 App 内配对与自连。
 
-#### 3. 手机端常驻运行的省电与功耗治理（Companion Power Efficiency）
-- **现状结论**：伴侣端遥测本就是按需读取 sysfs（无轮询循环），桌面端仅在连接时拉取一次状态，原先也未持有唤醒锁。
-- **已落地（2026-11-25）**：MyGo 移动插件 `androfusePower`（`internal/androidbridge/android/Power.kt` + `mygo-plugin.json`）：用户开启「后台待机」时才启动 `connectedDevice` 类型前台服务（最低重要性通知，`START_NOT_STICKY`）；`PARTIAL_WAKE_LOCK` + Wi-Fi 低延迟锁作为「活动租约」仅在文件传输、媒体帧、剪贴板时持有，空闲 30 秒或停止服务即释放，原生锁另带 2 分钟硬超时；网络切换改由 `ConnectivityManager.NetworkCallback` 事件上报；手机端新增「后台待机」开关（默认关闭）。
-- **编译验证（2026-11-25）**：安装 JDK 17 后 APK 已编译打包（含 `libmygoapp.so`、`AndroFuseStandbyService` 与相关权限）；同时修复 `tools/buildapk` 在 Windows 上生成的 APK 缺少 Go 原生库与清单权限的问题。
-- **AVD 实测（2026-11-25，`Pixel_9a_API_36`）**：前台待机服务、后台存活、空闲无唤醒锁、传输时获取并在 30.03 秒后释放唤醒锁/Wi-Fi 锁均已通过；并修复了 Android 14+ 缺少 `CHANGE_NETWORK_STATE` 导致伴侣崩溃的问题。
-- **剩余**：在真机上验证 Wi-Fi ↔ 蜂窝切换时的 `NetworkCallback` 事件（模拟器虚拟网络无法断开）；内置 EasyTier 上手机后再补空闲降频选项。
-
-#### 4. USB ↔ Wi-Fi 热切换根因排查与修复
-- **根因（2026-11-25 实测确认）**：`serve` 助手是 `adb shell` 会话的子进程，传输断开（USB 拔线或 Wi-Fi 中断）时 adbd 结束整个进程组，助手在进入 30 秒宽限期前即被终止，DeX 显示器随之消失，桌面端无可续接对象。
-- **已修复**：`serve` 改为 `setsid -w nohup` 脱离会话启动（toybox 不支持时退回原方式）；桌面端宽限循环在无在线无线传输时，仅按 mDNS 实例 `adb-<ro.serialno>-…` 匹配同一台手机并自动 `adb connect`；新增 `TestLiveDeXSurvivesTransportDrop`，Fold 8 经 TLS Wi-Fi 断开重连实测通过（显示器保持、`REATTACHED` + `PONG`、干净 `STOP`）。
-- **剩余**：
-  1. **物理 USB 拔线复测**：在 `androfuse.exe` 中 USB 启动 DeX 后拔线，确认自动切到 Wi-Fi；
-  2. **设备记忆**：`devices.json` 持久化硬件哈希与已配对无线端点（与 §9.1-5 第 4 项合并实施）。
-
-#### 5. 桌面端与手机端前端全面重做
-- **目标**：彻底重构桌面端（`internal/gui`）与手机端（`internal/androidhost`）原生 MyGo 界面，落地已完成评审方向确认的 **V2.1 HTML 设计草稿（[design/index.html](design/index.html)）**。
-- **实施要点**：
-  1. **桌面端主窗口内嵌分屏架构**：DeX、手机镜像、独立应用窗口与手机摄像头默认在主窗口内以窗格（Pane）打开，支持左右分屏（`DeX + 手机镜像`）、一键弹出为独立窗口（`↗`）及无断流停靠回主窗口（`◧`）；
-  2. **图标化与用户语言**：全界面采用统一矢量图标体系，精简 ~65% 文案，主界面全面去除工程术语（技术指标统一收口至「本机诊断」）；
-  3. **稳健响应式布局**：严格约束最小窗口尺寸（`820×560`），`< 960px` 侧栏自动折叠为 `64px` 图标栏，分屏窄窗格 `< 560px` 工具栏自动折叠至 `⋯` 菜单，杜绝控件挤压与重叠；
-  4. **配对记忆与可选安装**：落地 `devices.json` 自动重连、一键忘记设备，以及首次无线配对时默认不勾选的可选 Companion APK 安装开关；
-  5. **手机端重做**：重构为「主页 / 权限 / 安全」三标签底栏、无固定像素宽度的 `320dp` 安全行布局及 Fold 8 展开态（`>= 680dp`）双栏自适应。
-  6. **设计词汇规范（V2.1）**：按 [design/README.md](design/README.md)「Design Vocabulary Audit」把圆角刻度、细线、分层阴影、三级文字色、等宽数字、动效曲线与按钮层级落为 `internal/gui/style.go` 命名 token；命令面板（`Ctrl K`）、快捷键提示与外部助手操作确认卡（Approval Gate）为待评审提案，实现并实测前不得标为已支持。
-- **进度（2026-11-25）**：V2.1 圆角刻度、文字层级、禁用色、动效时长与按压缩放等 token 已写入 `internal/gui/style.go`，现有视图已切换到 V2.1 配色；其余视图（第 1–5 项）尚未重做。
+#### 3. 前端收尾
+1. 在 `androfuse.exe` 中实测实时画面的窗格停靠、弹出与分屏（目前仅 `ui.NewTester` 渲染与停靠状态单元测试）；
+2. Fold 8 展开态（`>= 680dp`）手机端双栏布局实机检查；
+3. 命令面板（`Ctrl K`）、快捷键提示与外部助手操作确认卡（Approval Gate）仍为 [design/README.md](design/README.md) 中的待评审提案，实现并实测前不得标为已支持。
 
 ---
 

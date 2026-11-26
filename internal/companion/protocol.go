@@ -178,6 +178,10 @@ type PairRequest struct {
 type PairResponse struct {
 	Token           string `json:"token"`
 	CertFingerprint string `json:"cert_fingerprint"`
+	// Port is the Companion's random TCP port and Model the name it joins the mesh under, so the
+	// desktop can reach it again over LAN or the mesh without adb.
+	Port  int    `json:"port,omitempty"`
+	Model string `json:"model,omitempty"`
 }
 
 // MeshJoinRequest hands the desktop's EasyTier network to the phone so it joins the same mesh.

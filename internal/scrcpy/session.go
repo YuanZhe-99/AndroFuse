@@ -91,13 +91,14 @@ type Session struct {
 	recMu    sync.Mutex
 	recorder *MP4Recorder
 
-	ctrlMu  sync.Mutex
-	mu      sync.Mutex
-	stats   SessionStats
-	lastErr error
-	doneCh  chan struct{}
-	errCh   chan error
-	closed  bool
+	ctrlMu    sync.Mutex
+	mu        sync.Mutex
+	stats     SessionStats
+	lastFrame time.Time // when the last frame was decoded; Stats reports 0 fps once it is stale
+	lastErr   error
+	doneCh    chan struct{}
+	errCh     chan error
+	closed    bool
 }
 
 // BuildServerArgs constructs valid scrcpy-server v5.0.1 key=value options.
@@ -516,10 +517,16 @@ func (s *Session) Err() error {
 }
 
 // Stats returns a snapshot of honest runtime video telemetry (INV-05).
+// Notes: scrcpy sends no frames while the screen is still, so MeasuredFPS drops to 0 once no frame
+// has arrived for a second instead of repeating the rate of the last burst.
 func (s *Session) Stats() SessionStats {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.stats
+	st := s.stats
+	if time.Since(s.lastFrame) > time.Second {
+		st.MeasuredFPS = 0
+	}
+	return st
 }
 
 // WaitDecoded blocks until at least minFrames are decoded or timeout expires.
@@ -655,6 +662,7 @@ func (s *Session) videoLoop() {
 		now := time.Now()
 		s.mu.Lock()
 		s.stats.FramesDecoded++
+		s.lastFrame = now
 		if frame.Width > 0 && frame.Height > 0 {
 			s.stats.NegotiatedWidth = uint32(frame.Width)
 			s.stats.NegotiatedHeight = uint32(frame.Height)

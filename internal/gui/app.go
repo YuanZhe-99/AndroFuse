@@ -19,13 +19,11 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/YuanZhe-99/AndroFuse/internal/adb"
-	"github.com/YuanZhe-99/AndroFuse/internal/androidhost"
 	"github.com/YuanZhe-99/AndroFuse/internal/avbridge"
 	"github.com/YuanZhe-99/AndroFuse/internal/companion"
 	"github.com/YuanZhe-99/AndroFuse/internal/dex"
 	"github.com/YuanZhe-99/AndroFuse/internal/mcp"
 	"github.com/YuanZhe-99/AndroFuse/internal/mesh"
-	"github.com/YuanZhe-99/AndroFuse/internal/version"
 	"github.com/YuanZhe-99/AndroFuse/internal/vm"
 	L "github.com/YuanZhe-99/AndroFuse/locales"
 )
@@ -34,10 +32,10 @@ type navPage string
 
 const (
 	pageDevices     navPage = "devices"
-	pageModes       navPage = "modes"
+	pageApps        navPage = "apps"
+	pageCompanion   navPage = "companion"
 	pageDiagnostics navPage = "diagnostics"
 	pageSettings    navPage = "settings"
-	pageAbout       navPage = "about"
 )
 
 // Prefs stores persistent GUI preferences in stateDir/gui.json.
@@ -45,6 +43,10 @@ type Prefs struct {
 	Theme    string     `json:"theme,omitempty"`
 	Language string     `json:"language,omitempty"`
 	Mesh     *MeshPrefs `json:"mesh,omitempty"`
+	// StreamsInWindow and AppsInWindow open DeX, mirroring and camera sessions, and app windows,
+	// in their own windows instead of main-window panes (Settings › Windows and split).
+	StreamsInWindow bool `json:"streams_in_window,omitempty"`
+	AppsInWindow    bool `json:"apps_in_window,omitempty"`
 }
 
 // App holds the state of the AndroFuse UI shell.
@@ -64,40 +66,49 @@ type App struct {
 	langIndex  int
 	quitting   bool
 
-	rt              guiRuntime
-	scanningDevices bool
-	devices         []DiscoveredDevice
-	mdnsServices    []adb.MDNSService
-	deviceNotice    string
-	manualAddr      string
-	pairAddr        string
-	pairCode        string
-	appFilter       string
-	showSystemApps  bool
-	appIcons        map[string]*ui.Bitmap
-	dexRoutes       map[string]dex.RoutePreference
-	vmStatus        vm.Status
-	compAddr        string
-	compToken       string
-	compConnected   bool
-	compStatus      companion.DeviceStatus
-	compNotice      string
-	mcpStatus       mcp.Status
-	mcpAllowLaunch  bool
-	mcpNotice       string
-	cameraFacingIdx int
-	cameraBridgeURL string
-	vcamCap         avbridge.VirtualCameraCapability
-	meshNetName     string
-	meshSecret      string
-	meshPeer        string
-	meshAccept      bool // accept direct connections on a random high port
-	compJoinMesh    bool // first-pairing checkbox: also hand the running mesh to the phone
-	meshStatus      mesh.Status
-	meshNotice      string
-	micUplinkActive bool
-	micUplinkNotice string
-	sessions        map[string]*SessionWindow
+	rt               guiRuntime
+	scanningDevices  bool
+	devices          []DiscoveredDevice
+	mdnsServices     []adb.MDNSService
+	deviceNotice     string
+	manualAddr       string
+	pairAddr         string
+	pairCode         string
+	appFilter        string
+	showSystemApps   bool
+	appIcons         map[string]*ui.Bitmap
+	dexRoutes        map[string]dex.RoutePreference
+	vmStatus         vm.Status
+	compAddr         string
+	compToken        string
+	compConnected    bool
+	compStatus       companion.DeviceStatus
+	compNotice       string
+	mcpStatus        mcp.Status
+	mcpAllowLaunch   bool
+	mcpNotice        string
+	cameraFacingIdx  int
+	cameraBridgeURL  string
+	vcamCap          avbridge.VirtualCameraCapability
+	meshNetName      string
+	meshSecret       string
+	meshPeer         string
+	meshAccept       bool // accept direct connections on a random high port
+	compJoinMesh     bool // first-pairing checkbox: also hand the running mesh to the phone
+	meshStatus       mesh.Status
+	meshNotice       string
+	micUplinkActive  bool
+	micUplinkNotice  string
+	sessions         map[string]*SessionWindow
+	remembered       []RememberedDevice // devices.json
+	split            *paneSplit         // two docked sessions shown together (pageSplit)
+	connectOpen      bool               // the Connect device dialog is showing
+	connectTab       int                // 0 wireless phone, 1 Companion
+	settingsTab      string             // Settings category
+	appsDevice       string             // HardwareHash whose apps the Apps page lists
+	installCompanion bool               // Connect dialog: also install the Companion (unticked, INV-09)
+	customAPK        string             // a Companion installer the user chose (ChooseCompanionAPK)
+	bundledAPK       bool               // a same-version Companion APK ships with the app (checked once)
 }
 
 // DefaultStateDir returns the per-user state directory for AndroFuse.
@@ -139,6 +150,8 @@ func New(profile, stateDir string) *App {
 		sessions:   make(map[string]*SessionWindow),
 	}
 	a.loadPrefs()
+	a.loadDevices()
+	a.bundledAPK = companionAPK() != ""
 	if p := a.prefs.Mesh; p != nil {
 		a.meshNetName, a.meshPeer, a.meshAccept = p.NetworkName, p.Peer, p.Accept
 	}
@@ -234,10 +247,10 @@ func (a *App) RefreshDiagnostics() {
 func (a *App) openMainWindow() *mygo.Window {
 	opts := mygo.WindowOptions{
 		Title:     L.AppName(),
-		Width:     1080,
-		Height:    700,
-		MinWidth:  780,
-		MinHeight: 540,
+		Width:     mainDefW,
+		Height:    mainDefH,
+		MinWidth:  mainMinW,
+		MinHeight: mainMinH,
 		StateKey:  "main",
 		Content:   ui.View(a.view),
 	}
@@ -324,483 +337,6 @@ func (a *App) syncControlIndices() {
 		a.langIndex = 0
 	}
 }
-
-func (a *App) view(c *ui.Context) {
-	t := c.Theme()
-	k := tok(c)
-	if c.Vibrancy() {
-		c.Root().Background(ui.Transparent)
-	} else {
-		c.Root().Background(k.canvas)
-	}
-
-	w, _ := c.Size()
-	narrow := w < mobileBreak || runtime.GOOS == "android"
-
-	if narrow {
-		ui.Column(c.Key("mobile-shell")).Fill().Background(t.Background).Children(func() {
-			ui.Scroll(c.Key("mobile-content")).Grow(1).FillWidth().Padding(16).Children(func() {
-				a.pageBody(c, k)
-			})
-			a.bottomNav(c, k)
-		})
-		return
-	}
-
-	ui.Row(c.Key("desktop-shell")).Fill().AlignItems(ui.Stretch).Children(func() {
-		a.sidebar(c, k)
-		ui.Column(c.Key("main-pane-wrap")).Grow(1).MinWidth(0).MinHeight(0).Padding(paneMargin, paneMargin, paneMargin, 0).Children(func() {
-			ui.Column(c.Key("main-pane")).Grow(1).FillWidth().MinHeight(0).Radius(paneRadius).Clip().
-				Background(t.Background).Border(1, t.Border).Shadow(0, 6, 18, 0, paneShadow).Children(func() {
-				a.paneHeader(c)
-				ui.Scroll(c.Key("pane-scroll")).Grow(1).FillWidth().Padding(20).Children(func() {
-					a.pageBody(c, k)
-				})
-			})
-		})
-	})
-}
-
-func (a *App) sidebar(c *ui.Context, k tokens) {
-	t := c.Theme()
-	a.mu.Lock()
-	selected := a.page
-	a.mu.Unlock()
-
-	ui.Column(c.Key("sidebar")).Width(sidebarW).Shrink(0).FillHeight().Padding(14, 12, 14, 12).Gap(12).Children(func() {
-		ui.Row(c.Key("brand-row")).Gap(10).AlignItems(ui.Center).Padding(4, 6).DragWindow().Children(func() {
-			if appIconBitmap != nil {
-				ui.Image(c, appIconBitmap).Size(28, 28).Radius(7)
-			}
-			ui.Column(c.Key("brand-text")).Gap(1).Children(func() {
-				ui.Text(c, L.AppName()).Bold().FontSize(sizeHeading)
-				ui.Text(c, "v"+version.Version).FontSize(sizeSmall).TextColor(k.muted)
-			})
-		})
-
-		sb := ui.Sidebar(c.Key("nav-sidebar"), &selected, func() {
-			ui.SidebarSection(c.Key("nav-main"), "", nil, func() {
-				ui.SidebarItem(c, string(pageDevices), iconDevices, L.NavDevices())
-				ui.SidebarItem(c, string(pageModes), iconModes, L.NavModes())
-				ui.SidebarItem(c, string(pageDiagnostics), iconDiagnostics, L.NavDiagnostics())
-			})
-			ui.SidebarSection(c.Key("nav-app"), "", nil, func() {
-				ui.SidebarItem(c, string(pageSettings), iconSettings, L.NavSettings())
-				ui.SidebarItem(c, string(pageAbout), iconInfo, L.NavAbout())
-			})
-		}).Grow(1).FillWidth()
-		if sb.Changed() {
-			a.mu.Lock()
-			a.page = selected
-			a.mu.Unlock()
-		}
-
-		ui.Row(c.Key("sidebar-foot")).Padding(8, 10).Radius(10).Background(t.Surface).Border(1, t.Border).AlignItems(ui.Center).Gap(8).Children(func() {
-			ui.Icon(c, iconShield).Size(14, 14).TextColor(k.brand)
-			ui.Text(c, L.DevicesBadgePlanned()).FontSize(sizeSmall).TextColor(k.muted).SingleLine()
-		})
-	})
-}
-
-func (a *App) bottomNav(c *ui.Context, k tokens) {
-	t := c.Theme()
-	a.mu.Lock()
-	cur := a.page
-	a.mu.Unlock()
-
-	items := []struct {
-		id    navPage
-		icon  *ui.SVG
-		label string
-	}{
-		{pageDevices, iconDevices, L.NavDevices()},
-		{pageModes, iconModes, L.NavModes()},
-		{pageDiagnostics, iconDiagnostics, L.NavDiagnostics()},
-		{pageSettings, iconSettings, L.NavSettings()},
-	}
-	ui.Row(c.Key("mobile-bottom-nav")).FillWidth().Padding(8, 12).Gap(6).
-		Background(t.Surface).Border(1, t.Border).AlignItems(ui.Center).Children(func() {
-		for _, it := range items {
-			active := cur == string(it.id)
-			b := ui.ButtonBase(c.Key("mnav-"+string(it.id))).Grow(1).Radius(10).Padding(8, 6).Center().Label(it.label)
-			fg := k.muted
-			if active {
-				b.Background(k.brandSoft)
-				fg = k.brand
-			}
-			b.Children(func() {
-				ui.Column(c).Gap(3).AlignItems(ui.Center).Children(func() {
-					ui.Icon(c, it.icon).Size(16, 16).TextColor(fg)
-					ui.Text(c, it.label).FontSize(sizeSmall).TextColor(fg).SingleLine()
-				})
-			})
-			if b.Clicked() {
-				a.mu.Lock()
-				a.page = string(it.id)
-				a.mu.Unlock()
-			}
-		}
-	})
-}
-
-func (a *App) paneHeader(c *ui.Context) {
-	t := c.Theme()
-	title := a.currentTitle()
-	ui.Row(c.Key("pane-head")).Height(paneHeaderH).Shrink(0).FillWidth().Padding(0, 8, 0, 18).
-		AlignItems(ui.Center).Children(func() {
-		ui.Text(c, title).Bold().FontSize(sizeHeading).DragWindow()
-		ui.Box(c.Key("pane-drag")).Grow(1).FillHeight().DragWindow()
-		a.windowButtons(c)
-	})
-	ui.Box(c.Key("pane-divider")).Height(1).FillWidth().Background(t.Border)
-}
-
-func (a *App) windowButtons(c *ui.Context) {
-	if runtime.GOOS != "windows" {
-		return
-	}
-	t := c.Theme()
-	a.mu.Lock()
-	win := a.window
-	a.mu.Unlock()
-
-	btn := func(name string, glyph *ui.SVG) ui.Element {
-		b := ui.ButtonBase(c.Key("win-"+name)).Size(winButtonW, winButtonH).Radius(6).Center().Shrink(0).Label(name)
-		fg := t.TextMuted
-		if b.Hovered() {
-			if name == "close" {
-				b.Background(closeHover)
-				fg = closeHoverText
-			} else {
-				b.Background(t.SurfaceHover)
-				fg = t.Text
-			}
-		}
-		b.Children(func() { ui.Icon(c, glyph).Size(winGlyph, winGlyph).TextColor(fg) })
-		return b
-	}
-
-	if btn("min", winMinimize).Clicked() && win != nil {
-		win.Minimize()
-	}
-	maximized := win != nil && win.IsMaximized()
-	maxGlyph := winMaximize
-	if maximized {
-		maxGlyph = winRestore
-	}
-	if btn("max", maxGlyph).MaximizeButton().Clicked() && win != nil {
-		if maximized {
-			win.Unmaximize()
-		} else {
-			win.Maximize()
-		}
-	}
-	if btn("close", winClose).Clicked() && win != nil {
-		win.Close()
-	}
-}
-
-func (a *App) currentTitle() string {
-	a.mu.Lock()
-	p := a.page
-	a.mu.Unlock()
-	switch navPage(p) {
-	case pageModes:
-		return L.ModesTitle()
-	case pageDiagnostics:
-		return L.DiagTitle()
-	case pageSettings:
-		return L.SettingsTitle()
-	case pageAbout:
-		return L.AboutTitle()
-	default:
-		return L.DevicesTitle()
-	}
-}
-
-func (a *App) pageBody(c *ui.Context, k tokens) {
-	a.mu.Lock()
-	p := navPage(a.page)
-	a.mu.Unlock()
-	switch p {
-	case pageModes:
-		a.modesPage(c, k)
-	case pageDiagnostics:
-		a.diagnosticsPage(c, k)
-	case pageSettings:
-		a.settingsPage(c, k)
-	case pageAbout:
-		a.aboutPage(c, k)
-	default:
-		a.devicesPage(c, k)
-	}
-}
-
-func (a *App) devicesPage(c *ui.Context, k tokens) {
-	if runtime.GOOS == "android" {
-		androidhost.RenderCompanionView(c, a.ensureAndroidHost())
-		return
-	}
-	a.mu.Lock()
-	scanning := a.scanningDevices
-	devs := append([]DiscoveredDevice(nil), a.devices...)
-	mdns := append([]adb.MDNSService(nil), a.mdnsServices...)
-	notice := a.deviceNotice
-	vmSt := a.vmStatus
-	compConnected := a.compConnected
-	compSt := a.compStatus
-	compNotice := a.compNotice
-	sessList := make([]*SessionWindow, 0, len(a.sessions))
-	for _, s := range a.sessions {
-		sessList = append(sessList, s)
-	}
-	a.mu.Unlock()
-
-	ui.Column(c.Key("page-devices")).Gap(14).FillWidth().Children(func() {
-		ui.Row(c.Key("devices-topbar")).FillWidth().AlignItems(ui.Center).Gap(10).Children(func() {
-			ui.Text(c, L.DevicesSubtitle()).FontSize(sizeBody).TextColor(k.muted).Grow(1)
-			scanLbl := L.DevicesRefresh()
-			if scanning {
-				scanLbl = L.DevicesRefreshing()
-			}
-			rb := ui.Button(c.Key("btn-scan-devices"), scanLbl)
-			if scanning {
-				rb.Disabled(true)
-			}
-			if rb.Clicked() {
-				a.RefreshDevices()
-			}
-		})
-
-		if notice != "" {
-			card(c.Key("devices-notice")).Children(func() {
-				ui.Text(c, notice).FontSize(sizeSmall).TextColor(k.warn)
-			})
-		}
-
-		if len(sessList) > 0 {
-			card(c.Key("active-sessions-card")).Children(func() {
-				ui.Text(c, L.ActiveSessionsTitle()).Bold().FontSize(sizeHeading)
-				for _, sw := range sessList {
-					sw.mu.Lock()
-					nw, nh, fps := sw.negotiatedW, sw.negotiatedH, sw.measuredFPS
-					sessTransport := sw.spec.Transport
-					sw.mu.Unlock()
-					res := "--"
-					if nw > 0 && nh > 0 {
-						res = fmt.Sprintf("%d×%d · %.1f fps", nw, nh, fps)
-					}
-					ui.Row(c.Key("sess-row-" + sw.spec.ID)).FillWidth().AlignItems(ui.Center).Gap(8).Children(func() {
-						ui.Row(c).Padding(badgePadV, badgePadH).Radius(pillRadius).Background(k.brandSoft).Children(func() {
-							ui.Text(c, sessTransport).FontSize(sizeSmall).TextColor(k.brand).Bold().SingleLine()
-						})
-						ui.Text(c, sw.spec.Title).FontSize(sizeBody).Bold().Grow(1).SingleLine()
-						ui.Text(c, res).FontSize(sizeSmall).TextColor(k.muted).SingleLine()
-						if ui.Button(c.Key("focus-"+sw.spec.ID), L.ActionFocusWindow()).Clicked() {
-							sw.FocusWindow()
-						}
-						if ui.Button(c.Key("close-"+sw.spec.ID), L.ActionDisconnect()).Clicked() {
-							sw.Close()
-						}
-					})
-				}
-			})
-		}
-
-		card(c.Key("wireless-card")).Children(func() {
-			ui.Row(c).AlignItems(ui.Center).Gap(8).Children(func() {
-				ui.Icon(c, iconWifi).Size(18, 18).TextColor(k.brand)
-				ui.Text(c, L.WirelessCardTitle()).Bold().FontSize(sizeHeading)
-			})
-			ui.Text(c, L.WirelessCardDesc()).FontSize(sizeSmall).TextColor(k.muted)
-
-			if len(mdns) > 0 {
-				ui.Row(c.Key("mdns-chips")).Gap(8).Wrap().Children(func() {
-					for i, s := range mdns {
-						if s.CanConnect {
-							if ui.Button(c.Key(fmt.Sprintf("mdns-conn-%d", i)), L.WirelessMdnsConnect(s.MaskedAddr)).Clicked() {
-								a.ConnectWirelessTLS(s.Addr)
-							}
-						} else if s.CanPair {
-							if ui.Button(c.Key(fmt.Sprintf("mdns-pair-%d", i)), L.WirelessMdnsPairFound(s.MaskedAddr)).Clicked() {
-								a.mu.Lock()
-								a.pairAddr = s.Addr
-								a.mu.Unlock()
-							}
-						}
-					}
-				})
-			}
-
-			ui.Row(c.Key("manual-tls-row")).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
-				ui.TextInput(c.Key("manual-addr"), &a.manualAddr).Placeholder(L.WirelessManualAddrHint()).Grow(1)
-				if ui.Button(c.Key("btn-manual-tls"), L.WirelessConnectBtn()).Clicked() {
-					a.ConnectWirelessTLS(a.manualAddr)
-				}
-			})
-			ui.Row(c.Key("pair-tls-row")).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
-				ui.TextInput(c.Key("pair-addr"), &a.pairAddr).Placeholder(L.WirelessPairAddrHint()).Grow(2)
-				ui.TextInput(c.Key("pair-code"), &a.pairCode).Placeholder(L.WirelessPairCodeHint()).Grow(1)
-				if ui.Button(c.Key("btn-pair-tls"), L.WirelessPairBtn()).Clicked() {
-					a.PairWirelessTLS(a.pairAddr, a.pairCode)
-				}
-			})
-		})
-
-		a.vmCard(c, k, vmSt)
-		a.companionCard(c, k, compConnected, compSt, compNotice)
-
-		if len(devs) == 0 {
-			card(c.Key("devices-empty")).Children(func() {
-				ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
-					ui.Icon(c, iconDevices).Size(20, 20).TextColor(k.brand)
-					ui.Text(c, L.DevicesEmptyTitle()).Bold().FontSize(sizeHeading)
-				})
-				ui.Text(c, L.DevicesEmptyBody()).FontSize(sizeBody).TextColor(k.muted)
-			})
-			return
-		}
-
-		for _, dev := range devs {
-			d := dev
-			hwKey := d.HardwareHash
-			if hwKey == "" {
-				hwKey = d.Target.DeviceHash
-			}
-			devKey := "dev-" + hwKey
-			transports := d.Transports
-			if len(transports) == 0 {
-				transports = []adb.Device{d.Target}
-			}
-			usedStreams, limitStreams, atLimit, nearLimit := EncoderHeadroom(d.Profile, a.activeStreamCountFor(hwKey))
-			route := d.Route
-			if route.Label == "" {
-				route = dex.SelectRoute(d.Profile, d.DexProbe, d.Target.Transport, a.dexRoutePref(hwKey))
-			}
-			var wirelessSerial string
-			for _, tr := range transports {
-				if tr.State == "device" && (tr.Transport == adb.TransportTLSWiFi || tr.Transport == adb.TransportTCP) {
-					wirelessSerial = tr.Serial
-					break
-				}
-			}
-
-			card(c.Key(devKey)).Children(func() {
-				title := d.Target.Model
-				if title == "" {
-					title = d.Profile.Model
-				}
-				if title == "" {
-					title = d.Target.MaskedID
-				}
-				tIcon := iconUsb
-				if d.Target.Transport == adb.TransportTLSWiFi || d.Target.Transport == adb.TransportTCP {
-					tIcon = iconWifi
-				}
-				ui.Row(c.Key(devKey + "-head")).FillWidth().AlignItems(ui.Center).Gap(8).Wrap().Children(func() {
-					ui.Icon(c, tIcon).Size(18, 18).TextColor(k.brand)
-					ui.Text(c, title).Bold().FontSize(sizeHeading)
-					ui.Text(c, d.Target.MaskedID).FontSize(sizeSmall).TextColor(k.muted).Grow(1)
-					for _, tr := range transports {
-						ui.Row(c.Key(devKey+"-tr-"+string(tr.Transport)+"-"+tr.DeviceHash)).
-							Padding(badgePadV, badgePadH).Radius(pillRadius).Background(k.brandSoft).Children(func() {
-							ui.Text(c, transportLabel(tr.Transport)).FontSize(sizeSmall).TextColor(k.brand).Bold().SingleLine()
-						})
-					}
-					if len(transports) > 1 {
-						ui.Row(c.Key(devKey+"-handoff")).Padding(badgePadV, badgePadH).Radius(pillRadius).Background(k.brandSoft).Children(func() {
-							ui.Text(c, L.TransportHandoffReady()).FontSize(sizeSmall).TextColor(k.good).Bold().SingleLine()
-						})
-					}
-					if d.Probed {
-						streamColor := k.muted
-						if nearLimit || atLimit {
-							streamColor = k.warn
-						}
-						ui.Row(c.Key(devKey+"-enc")).Padding(badgePadV, badgePadH).Radius(pillRadius).Background(k.brandSoft).Children(func() {
-							ui.Text(c, L.EncoderStreamsBadge(usedStreams, limitStreams)).FontSize(sizeSmall).TextColor(streamColor).Bold().SingleLine()
-						})
-					}
-				})
-
-				if d.Target.State != "device" {
-					ui.Text(c, d.Target.State).FontSize(sizeSmall).TextColor(k.warn)
-					return
-				}
-				if d.Probed {
-					meta := fmt.Sprintf("%s · Android %s (SDK %d)", d.Profile.Manufacturer, d.Profile.AndroidRelease, d.Profile.SDKInt)
-					if uiVer := dex.FormatOneUIVersion(d.Profile.OneUIVersion); uiVer != "" {
-						meta += " · One UI " + uiVer
-					}
-					meta += " · " + route.Label
-					ui.Text(c, meta).FontSize(sizeSmall).TextColor(k.muted)
-					if route.Reason != "" {
-						ui.Text(c, route.Reason).FontSize(sizeSmall).TextColor(k.muted)
-					}
-				} else if d.ProbeErr != "" {
-					ui.Text(c, d.ProbeErr).FontSize(sizeSmall).TextColor(k.warn)
-				}
-
-				if d.Probed && route.CanUseNativeDeX && d.Target.Transport != adb.TransportEmulator {
-					pref := a.dexRoutePref(hwKey)
-					routeIdx := 0
-					switch pref {
-					case dex.RouteNativeDeX:
-						routeIdx = 1
-					case dex.RouteVirtualFallback:
-						routeIdx = 2
-					}
-					ui.Row(c.Key(devKey + "-route-row")).FillWidth().AlignItems(ui.Center).Gap(8).Children(func() {
-						ui.Text(c, L.DeXRouteLabel()).FontSize(sizeSmall).TextColor(k.muted)
-						rseg := ui.Segmented(c.Key(devKey+"-route-seg"), &routeIdx, L.DeXRouteAuto(), L.DeXRouteNative(), L.DeXRouteFallback())
-						if rseg.Changed() {
-							prefs := []dex.RoutePreference{dex.RouteAuto, dex.RouteNativeDeX, dex.RouteVirtualFallback}
-							a.setDexRoutePref(hwKey, prefs[routeIdx])
-						}
-					})
-				}
-
-				ui.Row(c.Key(devKey + "-modes")).Gap(8).Wrap().AlignItems(ui.Center).Children(func() {
-					if route.Backend == dex.BackendADBLoopback && route.IsGenuineDeX && d.Target.Transport != adb.TransportEmulator {
-						if ui.Button(c.Key(devKey+"-dex"), L.ActionLaunchDeX()).Children(func() {
-							ui.Icon(c, iconDex).Size(14, 14)
-						}).Clicked() {
-							a.LaunchDeX(d, false)
-						}
-					}
-					if ui.Button(c.Key(devKey+"-fallback"), L.ActionLaunchFallback()).Clicked() {
-						a.LaunchDeX(d, true)
-					}
-					if ui.Button(c.Key(devKey+"-mirror"), L.ActionLaunchMirror()).Clicked() {
-						a.LaunchMirror(d)
-					}
-					if d.Target.Transport != adb.TransportEmulator {
-						if ui.Button(c.Key(devKey+"-cam"), L.ActionLaunchCamera()).Clicked() {
-							a.mu.Lock()
-							fIdx := a.cameraFacingIdx
-							a.mu.Unlock()
-							facing := "back"
-							if fIdx == 1 {
-								facing = "front"
-							}
-							a.LaunchPhoneCamera(d, facing)
-						}
-					}
-					if wirelessSerial != "" {
-						if ui.Button(c.Key(devKey+"-disc"), L.ActionDisconnect()).Clicked() {
-							a.DisconnectWireless(wirelessSerial)
-						}
-					}
-				})
-
-				if len(d.Apps) > 0 {
-					a.appLauncherSection(c, k, devKey, d)
-				}
-			})
-		}
-	})
-}
-
 func (a *App) vmCard(c *ui.Context, k tokens, st vm.Status) {
 	if st.NativeABI == "" {
 		st.NativeABI, st.SystemImagePkg, _ = vm.NativeABIForArch(runtime.GOARCH)
@@ -961,6 +497,9 @@ func (a *App) companionCard(c *ui.Context, k tokens, connected bool, st companio
 						a.PairCompanionOverADB(d.Target.Serial, model, a.compJoinMesh && meshName != "")
 					}
 				}
+				if !a.bundledAPK && ui.Button(c.Key("comp-choose-apk"), L.CompanionChooseApk()).Clicked() {
+					a.ChooseCompanionAPK()
+				}
 			})
 		}
 
@@ -1097,7 +636,7 @@ func (a *App) appLauncherSection(c *ui.Context, k tokens, devKey string, d Disco
 					})
 				})
 				if tile.Clicked() {
-					a.LaunchAppWindow(d, appItem)
+					a.LaunchAppWindow(d, appItem, OpenDefault)
 				}
 			}
 		})
@@ -1115,76 +654,6 @@ func appInitial(label string) string {
 	}
 	return strings.ToUpper(string(r))
 }
-
-func (a *App) modesPage(c *ui.Context, k tokens) {
-	a.mu.Lock()
-	devs := append([]DiscoveredDevice(nil), a.devices...)
-	a.mu.Unlock()
-
-	modes := []struct {
-		key, title, badge, desc string
-	}{
-		{"dex", L.ModeDexTitle(), L.ModeDexBadge(), L.ModeDexDesc()},
-		{"mirror", L.ModeMirrorTitle(), L.ModeMirrorBadge(), L.ModeMirrorDesc()},
-		{"apps", L.ModeAppsTitle(), L.ModeAppsBadge(), L.ModeAppsDesc()},
-	}
-	ui.Column(c.Key("page-modes")).Gap(14).FillWidth().Children(func() {
-		ui.Text(c, L.ModesSubtitle()).FontSize(sizeBody).TextColor(k.muted)
-		for _, m := range modes {
-			card(c.Key("mode-" + m.key)).Children(func() {
-				ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
-					ui.Text(c, m.title).Bold().FontSize(sizeHeading).Grow(1)
-					ui.Row(c).Padding(4, 10).Radius(999).Background(k.brandSoft).Children(func() {
-						ui.Text(c, m.badge).FontSize(sizeSmall).TextColor(k.brand).Bold()
-					})
-				})
-				ui.Text(c, m.desc).FontSize(sizeBody).TextColor(k.muted)
-			})
-		}
-		card(c.Key("mode-live-coexist")).Children(func() {
-			ui.Text(c, L.ModesLiveStatusTitle()).Bold().FontSize(sizeHeading)
-			if len(devs) == 0 {
-				ui.Text(c, L.ModesLiveStatusEmpty()).FontSize(sizeBody).TextColor(k.muted)
-			} else {
-				for _, d := range devs {
-					hwKey := d.HardwareHash
-					if hwKey == "" {
-						hwKey = d.Target.DeviceHash
-					}
-					used, limit, atLimit, nearLimit := EncoderHeadroom(d.Profile, a.activeStreamCountFor(hwKey))
-					name := d.Profile.Model
-					if name == "" {
-						name = d.Target.Model
-					}
-					if name == "" {
-						name = d.Target.MaskedID
-					}
-					route := d.Route
-					if route.Label == "" {
-						route = dex.SelectRoute(d.Profile, d.DexProbe, d.Target.Transport, a.dexRoutePref(hwKey))
-					}
-					badgeColor := k.brand
-					if nearLimit || atLimit {
-						badgeColor = k.warn
-					}
-					ui.Row(c.Key("mode-dev-" + hwKey)).FillWidth().AlignItems(ui.Center).Gap(8).Children(func() {
-						ui.Text(c, name).Bold().FontSize(sizeBody)
-						ui.Text(c, route.Label).FontSize(sizeSmall).TextColor(k.muted).Grow(1).SingleLine()
-						ui.Row(c).Padding(badgePadV, badgePadH).Radius(pillRadius).Background(k.brandSoft).Children(func() {
-							ui.Text(c, L.EncoderStreamsBadge(used, limit)).FontSize(sizeSmall).TextColor(badgeColor).Bold().SingleLine()
-						})
-					})
-				}
-			}
-		})
-		a.avBridgeCard(c, k)
-		card(c.Key("mode-coexist")).Children(func() {
-			ui.Text(c, L.ModeCoexistenceNote()).Bold().FontSize(sizeBody)
-			ui.Text(c, L.ModeCoexistenceDesc()).FontSize(sizeBody).TextColor(k.muted)
-		})
-	})
-}
-
 func (a *App) avBridgeCard(c *ui.Context, k tokens) {
 	a.mu.Lock()
 	facingIdx := a.cameraFacingIdx
@@ -1296,44 +765,6 @@ func diagRow(c *ui.Context, k tokens, label, value string, ok bool) {
 		ui.Text(c, value).FontSize(sizeBody).TextColor(k.muted).Grow(1)
 	})
 }
-
-func (a *App) settingsPage(c *ui.Context, k tokens) {
-	ui.Column(c.Key("page-settings")).Gap(14).FillWidth().Children(func() {
-		ui.Text(c, L.SettingsSubtitle()).FontSize(sizeBody).TextColor(k.muted)
-		card(c.Key("settings-appearance")).Children(func() {
-			ui.Text(c, L.SettingsAppearance()).Bold().FontSize(sizeBody)
-			seg := ui.Segmented(c.Key("theme-seg"), &a.themeIndex, L.ThemeSystem(), L.ThemeLight(), L.ThemeDark()).FillEqually()
-			if seg.Changed() {
-				themes := []string{"system", "light", "dark"}
-				a.mu.Lock()
-				a.prefs.Theme = themes[a.themeIndex]
-				a.savePrefs()
-				a.mu.Unlock()
-				ApplyTheme(a.prefs.Theme)
-			}
-
-			ui.Text(c, L.SettingsLanguage()).Bold().FontSize(sizeBody)
-			lseg := ui.Segmented(c.Key("lang-seg"), &a.langIndex, L.LangSystem(), L.LangEnglish(), L.LangZhHans()).FillEqually()
-			if lseg.Changed() {
-				langs := []string{"", "en", "zh-Hans"}
-				a.mu.Lock()
-				a.prefs.Language = langs[a.langIndex]
-				a.savePrefs()
-				a.mu.Unlock()
-				mygo.App.SetLocale(a.prefs.Language)
-			}
-		})
-
-		a.mcpSettingsCard(c, k)
-		a.meshSettingsCard(c, k)
-
-		card(c.Key("settings-security")).Children(func() {
-			ui.Text(c, L.SettingsSecurityTitle()).Bold().FontSize(sizeBody)
-			ui.Text(c, L.SettingsSecurityBody()).FontSize(sizeBody).TextColor(k.muted)
-		})
-	})
-}
-
 func (a *App) mcpSettingsCard(c *ui.Context, k tokens) {
 	a.mu.Lock()
 	st := a.mcpStatus
@@ -1453,25 +884,6 @@ func (a *App) meshSettingsCard(c *ui.Context, k tokens) {
 					go a.StopMesh()
 				}
 			}
-		})
-	})
-}
-
-func (a *App) aboutPage(c *ui.Context, k tokens) {
-	ui.Column(c.Key("page-about")).Gap(14).FillWidth().Children(func() {
-		card(c.Key("about-card")).Children(func() {
-			ui.Row(c).Gap(14).AlignItems(ui.Center).Children(func() {
-				if appIconBitmap != nil {
-					ui.Image(c, appIconBitmap).Size(56, 56).Radius(12)
-				}
-				ui.Column(c).Gap(4).Grow(1).Children(func() {
-					ui.Text(c, L.AppName()).Bold().FontSize(sizeTitle)
-					ui.Text(c, L.AboutVersion(version.Version)).FontSize(sizeBody).TextColor(k.brand)
-					ui.Text(c, L.AppTagline()).FontSize(sizeBody).TextColor(k.muted)
-				})
-			})
-			ui.Text(c, L.AboutLicense()).FontSize(sizeBody)
-			ui.Text(c, L.AboutTrademarks()).FontSize(sizeSmall).TextColor(k.muted)
 		})
 	})
 }

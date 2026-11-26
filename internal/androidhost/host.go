@@ -54,6 +54,8 @@ type Host struct {
 	network      string // default network kind from the Android NetworkCallback
 	stopNetWatch func()
 	pair         *pairPrompt
+	tab          string // Companion tab shown on phones (tabHome when "")
+	beaconCheck  string // outcome of the last wireless debugging port check
 	mesh         meshRuntime
 }
 

@@ -50,6 +50,7 @@ AndroFuse 在 Rust（`core/androfuse-core`）与 Go（`internal/adb`、`internal
 - **分级授权开关与异网 ADB 端口信标（`INV-09`、`INV-11`）**：`status.get`、`clipboard.set`、`notification.reply`、`app.continuity`、`file.push`（路径穿越拦截 + SHA-256 校验）、`display.guard` 与动态 `_adb-tls-connect._tcp` 端口信标均由手机伴侣端独立开关门控；卸载 Companion APK 时基础有线/无线投屏与 DeX 仍完全可用。
 - **经 adb 首次配对（数字比对，`INV-09`）**：电脑用 `adb install -r` 安装伴侣，以不含任何密钥的 `androfuse://pair` 打开它（仅启动伴侣服务），再 `adb forward` 伴侣的本地套接字并发送 `pair.request {client_name, code}`。伴侣只在**本地套接字或回环连接**上接受该帧（局域网设备无法弹出提示），在手机上显示电脑名称与 6 位码，用户点「允许」后才返回 `{token, cert_fingerprint}`；拒绝或 `PairWait`（60 秒）超时则失败。电脑核对 TLS 指纹后用该令牌正常连接。
 - **组网交接（`mesh.join`，`INV-07`、`INV-08`）**：仅当电脑用户勾选「同时加入组网」且电脑组网正在运行时发送 `{network_name, network_secret, peers}`。`peers` 为电脑的中继，以及把电脑监听地址中的通配主机替换为本机局域网 IPv4 后的地址。手机用 Android Keystore AES-GCM 密钥密封后保存密钥，以无 TUN、无监听端口的方式加入，并在每次启动伴侣服务时自动重连；手机上可随时退出组网。电脑开启「允许其他设备直接连接」时，在 20000–48999 范围内随机选取 TCP/UDP 均空闲的高端口（低于 Windows 动态端口段，并跳过被占用或保留的端口），之后在仍空闲时沿用。EasyTier 自身报告的错误（如监听端口被占用）经 `mesh.status` 的 `error` 字段显示，此时不视为运行中。
+- **免 adb 重连与省电**：`pair.res` 还带回伴侣的 TCP `port` 和它加入组网所用的名称 `model`。电脑将二者连同固定的指纹、经 DPAPI 密封的令牌保存在 `devices.json`；之后手机连着 adb 时经 adb 本地套接字重连，否则按该名称在 EasyTier 路由中查到手机的组网 IPv4（`Manager.PeerIPv4`），再添加一条到它的 `127.0.0.1` 端口转发（`INV-07`）。除非用户关闭「省电模式」，手机以省电方式运行组网：`mesh.start` 的 `low_power` 会设置 EasyTier 的 `multi_thread = false`、`lazy_p2p`、`disable_upnp` 与 `disable_sym_hole_punching`。
 
 ## 7. 默认关闭的可授权本地 MCP 控制接口（`internal/mcp`）
 

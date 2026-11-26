@@ -8,7 +8,9 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/i18n"
 	"github.com/egoist/mygo/ui"
@@ -202,12 +204,15 @@ func TestEncoderHeadroom(t *testing.T) {
 }
 
 func TestViewsRender(t *testing.T) {
-	pages := []navPage{pageDevices, pageModes, pageDiagnostics, pageSettings, pageAbout}
+	pages := []string{string(pageDevices), string(pageApps), string(pageCompanion), string(pageDiagnostics),
+		string(pageSettings), "settings/" + setWindows, "settings/" + setNetwork, "settings/" + setLocal,
+		"settings/" + setSecurity, "settings/" + setAbout, panePrefix + "s1", pageSplit}
 	sizes := []struct {
 		name string
 		w, h int
 	}{
-		{"desktop", 1080, 700},
+		{"desktop", mainDefW, mainDefH},
+		{"rail", mainMinW, mainMinH},
 		{"mobile", 412, 915},
 	}
 
@@ -217,7 +222,12 @@ func TestViewsRender(t *testing.T) {
 			for _, dark := range []bool{false, true} {
 				for _, pg := range pages {
 					a := testApp(t)
-					a.page = string(pg)
+					a.page = pg
+					if cat, ok := strings.CutPrefix(pg, "settings/"); ok {
+						a.page, a.settingsTab = string(pageSettings), cat
+					}
+					a.connectOpen = pg == string(pageDevices) && dark
+					dockTestSessions(a)
 					tt := ui.NewTester(a.view, sz.w, sz.h)
 					tt.SetDark(dark)
 					tt.Frame()
@@ -372,5 +382,74 @@ func TestSessionWindowRenderAndInputMapping(t *testing.T) {
 				t.Fatalf("unexpected appWin bounds: %v", tt.Image().Bounds())
 			}
 		}
+	}
+}
+
+// dockTestSessions opens two docked sessions, s1 and s2, split side by side for pageSplit.
+func dockTestSessions(a *App) {
+	for _, id := range []string{"s1", "s2"} {
+		sw := newSessionWindow(a, SessionSpec{ID: id, Mode: SessionModeMirror, Title: "Pixel " + id, Transport: "USB", BackendLabel: "Phone mirror"})
+		sw.docked = true
+		sw.negotiatedW, sw.negotiatedH, sw.measuredFPS = 1080, 2400, 59.8
+		a.sessions[id] = sw
+	}
+	a.split = &paneSplit{A: "s1", B: "s2", Percent: 50}
+}
+
+// TestPaneDocking checks that docking, splitting, popping out and closing keep the main window
+// on a page that exists.
+func TestPaneDocking(t *testing.T) {
+	a := testApp(t)
+	dockTestSessions(a)
+	a.split = nil
+	a.dockLocked("s1", false)
+	if a.page != panePrefix+"s1" {
+		t.Fatalf("dock s1: page = %q", a.page)
+	}
+	a.dockLocked("s2", true)
+	if a.page != pageSplit || a.split == nil || a.split.A != "s1" || a.split.B != "s2" {
+		t.Fatalf("dock s2 beside s1: page = %q split = %+v", a.page, a.split)
+	}
+	a.undockSession("s1") // s1 pops out
+	if a.page != panePrefix+"s2" || a.split != nil {
+		t.Fatalf("pop out s1: page = %q split = %+v", a.page, a.split)
+	}
+	a.removeSession("s2")
+	if a.page != string(pageDevices) {
+		t.Fatalf("close s2: page = %q", a.page)
+	}
+}
+
+// TestRememberedDevices checks that online phones are remembered, survive a restart, are listed
+// while offline, and that Forget can be undone.
+func TestRememberedDevices(t *testing.T) {
+	dir := t.TempDir()
+	a := New("test", dir)
+	fold := DiscoveredDevice{
+		HardwareHash: "hw-fold", Probed: true,
+		Target:     adb.Device{Serial: "R5", State: "device", Transport: adb.TransportUSB},
+		Transports: []adb.Device{{Serial: "R5", State: "device", Transport: adb.TransportUSB}, {Serial: "192.0.2.4:37099", State: "device", Transport: adb.TransportTLSWiFi}},
+		Profile:    adb.DeviceProfile{Model: "Galaxy Z Fold 8"},
+	}
+	a.rememberDevices([]DiscoveredDevice{fold}, time.Now())
+
+	b := New("test", dir)
+	r, ok := b.RememberedFor("hw-fold")
+	if !ok || r.Name != "Galaxy Z Fold 8" || r.Endpoint != "192.0.2.4:37099" || !r.AutoReconnect {
+		t.Fatalf("remembered after restart = %+v, %v", r, ok)
+	}
+	if off := b.offlineRemembered(nil); len(off) != 1 {
+		t.Fatalf("offline list = %+v", off)
+	}
+	if off := b.offlineRemembered([]DiscoveredDevice{fold}); len(off) != 0 {
+		t.Fatalf("an online phone must not be listed offline: %+v", off)
+	}
+	gone, ok := b.ForgetDevice("hw-fold")
+	if _, still := b.RememberedFor("hw-fold"); !ok || still {
+		t.Fatal("Forget must remove the phone")
+	}
+	b.RestoreDevice(gone)
+	if _, back := New("test", dir).RememberedFor("hw-fold"); !back {
+		t.Fatal("Undo must restore and save the phone")
 	}
 }

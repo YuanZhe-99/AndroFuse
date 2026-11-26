@@ -48,6 +48,11 @@ pub struct MeshConfig {
     pub listeners: Vec<String>,
     #[serde(default)]
     pub port_forwards: Vec<PortForward>,
+    /// Trades connection set-up speed for fewer background wakeups (phones on battery): one runtime
+    /// thread, direct links built only when traffic needs them, no UPnP and no symmetric-NAT
+    /// hole punching.
+    #[serde(default)]
+    pub low_power: bool,
 }
 
 /// `mesh.status` / `mesh.start` result.
@@ -107,6 +112,11 @@ pub fn build_toml(cfg: &MeshConfig) -> Result<String, String> {
         q(cfg.network_secret.trim())
     ));
     t.push_str("\n[flags]\nno_tun = true\n");
+    if cfg.low_power {
+        t.push_str(
+            "multi_thread = false\nlazy_p2p = true\ndisable_upnp = true\ndisable_sym_hole_punching = true\n",
+        );
+    }
 
     for peer in cfg.peers.iter().map(|p| p.trim()).filter(|p| !p.is_empty()) {
         if !peer.contains("://") {
@@ -254,6 +264,7 @@ mod tests {
                 remote_host: "10.126.126.2".into(),
                 remote_port: 37000,
             }],
+            low_power: false,
         };
         let t = build_toml(&cfg).unwrap();
         assert!(t.contains("[flags]\nno_tun = true"));
@@ -262,12 +273,22 @@ mod tests {
         assert!(t.contains("dst_addr = \"10.126.126.2:37000\""));
         assert!(!t.contains("0.0.0.0"));
         assert!(t.contains("listeners = []"));
-        assert!(t.contains("listeners = []"));
         // EasyTier itself must accept the generated config.
         let c = CString::new(t).unwrap();
         // SAFETY: `c` is a valid NUL-terminated string for the duration of the call.
         let rc = unsafe { easytier_ffi::parse_config(c.as_ptr()) };
         assert_eq!(rc, 0, "{}", last_error("parse"));
+
+        let low = build_toml(&MeshConfig {
+            low_power: true,
+            ..cfg
+        })
+        .unwrap();
+        assert!(low.contains("multi_thread = false\nlazy_p2p = true"));
+        let c = CString::new(low).unwrap();
+        // SAFETY: `c` is a valid NUL-terminated string for the duration of the call.
+        let rc = unsafe { easytier_ffi::parse_config(c.as_ptr()) };
+        assert_eq!(rc, 0, "{}", last_error("parse low-power"));
     }
 
     #[test]

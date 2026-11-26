@@ -3,6 +3,7 @@ package gui
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"math/big"
 	"net"
@@ -11,6 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/egoist/mygo"
 
 	"github.com/YuanZhe-99/AndroFuse/internal/adb"
 	"github.com/YuanZhe-99/AndroFuse/internal/companion"
@@ -52,7 +55,12 @@ func (a *App) PairCompanionOverADB(serial, model string, joinMesh bool) {
 			note(err.Error())
 			return
 		}
-		apk := companionAPK()
+		a.mu.Lock()
+		apk := a.customAPK
+		a.mu.Unlock()
+		if apk == "" {
+			apk = companionAPK()
+		}
 		if apk == "" {
 			note(L.CompanionApkMissing())
 			return
@@ -82,7 +90,18 @@ func (a *App) PairCompanionOverADB(serial, model string, joinMesh bool) {
 
 		a.mu.Lock()
 		cfg := a.rt.meshCfg
+		hash := ""
+		for _, d := range a.devices {
+			for _, tr := range d.Transports {
+				if tr.Serial == serial {
+					hash = d.HardwareHash
+				}
+			}
+		}
 		a.mu.Unlock()
+		if hash != "" && res.Port > 0 {
+			a.bindCompanion(hash, res.Port, res.CertFingerprint, res.Token, res.Model)
+		}
 		if !joinMesh || cfg.NetworkName == "" {
 			return
 		}
@@ -188,4 +207,137 @@ func lanIPv4() []string {
 		}
 	}
 	return out
+}
+
+// ReconnectCompanion connects again to the paired Companion of the remembered phone hash, without
+// a new pairing: over adb's local socket while the phone is on adb, otherwise through the mesh,
+// where a loopback port forward reaches the phone's random Companion port at its mesh address
+// (`INV-07`: no TUN, nothing listens beyond 127.0.0.1).
+// Side effects: may restart the running mesh with the added forward; replaces the current
+// Companion connection; progress goes to the Companion card's notice.
+func (a *App) ReconnectCompanion(hash string) {
+	note := func(s string) { a.update(func() { a.compNotice = s }) }
+	r, ok := a.RememberedFor(hash)
+	if !ok || r.Companion == nil {
+		note(L.CompanionNotPaired())
+		return
+	}
+	b := *r.Companion
+	go func() {
+		tok, err := openSecret(b.SealedToken)
+		if err != nil {
+			note(err.Error())
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+		defer cancel()
+		addr, err := a.companionRoute(ctx, hash, b)
+		if err != nil {
+			note(err.Error())
+			return
+		}
+		var c *companion.Client
+		for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(time.Second) {
+			dctx, dcancel := context.WithTimeout(ctx, 5*time.Second)
+			c, err = companion.Dial(dctx, addr, string(tok), b.Fingerprint)
+			dcancel()
+			// A new mesh forward needs a moment while the instance reconnects.
+			if err == nil || time.Now().After(deadline) {
+				break
+			}
+		}
+		if err != nil {
+			note(err.Error())
+			return
+		}
+		st, _ := c.GetStatus(ctx)
+		a.rt.coreMu.Lock()
+		old := a.rt.compClient
+		a.rt.compClient = c
+		a.rt.coreMu.Unlock()
+		if old != nil {
+			_ = old.Close()
+		}
+		a.update(func() {
+			a.compConnected = true
+			a.compStatus = st
+			a.compAddr = addr
+			a.compToken = string(tok)
+			a.compNotice = L.CompanionPaired(r.Name)
+		})
+	}()
+}
+
+// companionRoute returns a loopback address that reaches b's Companion: an adb forward of its
+// local socket when the phone is on adb, else a mesh port forward to its mesh IPv4.
+func (a *App) companionRoute(ctx context.Context, hash string, b CompanionBinding) (string, error) {
+	a.mu.Lock()
+	serial := ""
+	for _, d := range a.devices {
+		if d.HardwareHash == hash && d.Target.State == "device" {
+			serial = d.Target.Serial
+		}
+	}
+	cfg := a.rt.meshCfg
+	a.mu.Unlock()
+	if serial != "" {
+		client, _, err := a.ensureADBAndLeases()
+		if err != nil {
+			return "", err
+		}
+		port, err := client.ForwardPort(ctx, serial, 0, "localabstract:"+companion.LocalSocket)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("127.0.0.1:%d", port), nil
+	}
+
+	a.rt.coreMu.Lock()
+	mgr := a.rt.meshMgr
+	a.rt.coreMu.Unlock()
+	if mgr == nil || cfg.NetworkName == "" || b.MeshHost == "" {
+		return "", errors.New(L.CompanionNoRoute())
+	}
+	ip, ok := mgr.PeerIPv4(b.MeshHost)
+	if !ok {
+		return "", errors.New(L.CompanionNoRoute())
+	}
+	for _, pf := range cfg.PortForwards {
+		if pf.RemoteHost == ip && pf.RemotePort == b.Port {
+			return fmt.Sprintf("127.0.0.1:%d", pf.LocalPort), nil
+		}
+	}
+	local, err := companion.PickPort(0)
+	if err != nil {
+		return "", err
+	}
+	cfg.PortForwards = append(cfg.PortForwards, mesh.PortForward{LocalPort: local, RemoteHost: ip, RemotePort: b.Port})
+	if err := mgr.Start(cfg); err != nil {
+		return "", err
+	}
+	a.mu.Lock()
+	a.rt.meshCfg = cfg
+	a.meshStatus = mgr.Status()
+	a.mu.Unlock()
+	return fmt.Sprintf("127.0.0.1:%d", local), nil
+}
+
+// ChooseCompanionAPK lets the user pick a Companion installer when none ships next to the app.
+// Side effects: opens the system file dialog off the UI thread; the choice is used by later
+// PairCompanionOverADB calls of this run.
+func (a *App) ChooseCompanionAPK() {
+	go func() {
+		paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
+			Parent:  a.mainWindow(),
+			Title:   L.CompanionChooseApk(),
+			Filters: []mygo.FileFilter{{Name: "Android", Extensions: []string{"apk"}}},
+		})
+		if err != nil || len(paths) == 0 {
+			return
+		}
+		a.update(func() {
+			a.customAPK = paths[0]
+			a.compNotice = L.CompanionApkChosen(filepath.Base(paths[0]))
+		})
+	}()
 }

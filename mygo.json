@@ -11,6 +11,11 @@
     "dir": "locales",
     "source": "en"
   },
+  "updates": {
+    "publicKey": "/F3rPe1Zk1wc72mIdI7hJFa2rBmlbmEOe0P2AREoRV0=",
+    "github": "YuanZhe-99/AndroFuse",
+    "changelog": "doc/en-us/version-history.md"
+  },
   "description": "Samsung DeX, Android screen mirroring, and independent app windows for Windows",
   "android": {
     "minSdk": 26,

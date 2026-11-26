@@ -17,6 +17,8 @@ type MeshSettings struct {
 	NetworkName  string   `json:"network_name"`
 	Peers        []string `json:"peers,omitempty"`
 	SealedSecret []byte   `json:"sealed_secret"`
+	// FullSpeed turns the low-power mesh off (it is on by default on the phone).
+	FullSpeed bool `json:"full_speed,omitempty"`
 }
 
 // pairPrompt is an adb pairing request waiting for the phone's user.
@@ -44,9 +46,12 @@ func (h *Host) JoinMesh(req companion.MeshJoinRequest) (companion.MeshJoinRespon
 	if err != nil {
 		return companion.MeshJoinResponse{}, err
 	}
-	running, err := h.startMesh(name, req.NetworkSecret, req.Peers)
 	h.mu.Lock()
-	h.cfg.Mesh = &MeshSettings{NetworkName: name, Peers: req.Peers, SealedSecret: sealed}
+	full := h.cfg.Mesh != nil && h.cfg.Mesh.FullSpeed
+	h.mu.Unlock()
+	running, err := h.startMesh(name, req.NetworkSecret, req.Peers, full)
+	h.mu.Lock()
+	h.cfg.Mesh = &MeshSettings{NetworkName: name, Peers: req.Peers, SealedSecret: sealed, FullSpeed: full}
 	h.appendAuditLocked(fmt.Sprintf("joined mesh %q from paired computer", name))
 	h.saveConfigLocked()
 	h.mu.Unlock()
@@ -70,7 +75,7 @@ func (h *Host) resumeMesh() {
 		h.setMeshErr(err)
 		return
 	}
-	_, _ = h.startMesh(s.NetworkName, string(secret), s.Peers)
+	_, _ = h.startMesh(s.NetworkName, string(secret), s.Peers, s.FullSpeed)
 }
 
 // LeaveMesh stops the embedded mesh and forgets the network.
@@ -108,8 +113,8 @@ func (h *Host) MeshState() (name string, running bool, errMsg string) {
 }
 
 // startMesh opens the core on first use and starts the mesh with no listeners (the phone only
-// dials out, `INV-07`).
-func (h *Host) startMesh(name, secret string, peers []string) (bool, error) {
+// dials out, `INV-07`), in low-power mode unless fullSpeed.
+func (h *Host) startMesh(name, secret string, peers []string, fullSpeed bool) (bool, error) {
 	h.mu.Lock()
 	if h.mesh.lib == nil {
 		lib, err := openCore(h.stateDir)
@@ -126,7 +131,7 @@ func (h *Host) startMesh(name, secret string, peers []string) (bool, error) {
 	h.mu.Unlock()
 
 	model, _, _ := deviceIdentity()
-	err := mgr.Start(mesh.Config{Enabled: true, NetworkName: name, NetworkSecret: secret, DeviceName: model, Peers: peers})
+	err := mgr.Start(mesh.Config{Enabled: true, NetworkName: name, NetworkSecret: secret, DeviceName: model, Peers: peers, LowPower: !fullSpeed})
 	h.setMeshErr(err)
 	return err == nil && mgr.Status().Running, err
 }
@@ -190,4 +195,26 @@ func (h *Host) PendingPair() (companion.PairRequest, bool) {
 		return companion.PairRequest{}, false
 	}
 	return h.pair.req, true
+}
+
+// SetMeshFullSpeed switches the joined mesh between low-power (the default) and full speed.
+// Side effects: saves the choice and restarts the running mesh with it.
+func (h *Host) SetMeshFullSpeed(full bool) {
+	h.mu.Lock()
+	if h.cfg.Mesh == nil || h.cfg.Mesh.FullSpeed == full {
+		h.mu.Unlock()
+		return
+	}
+	h.cfg.Mesh.FullSpeed = full
+	h.saveConfigLocked()
+	h.mu.Unlock()
+	h.notify()
+	go h.resumeMesh()
+}
+
+// MeshFullSpeed reports whether the joined mesh runs at full speed instead of low-power.
+func (h *Host) MeshFullSpeed() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.cfg.Mesh != nil && h.cfg.Mesh.FullSpeed
 }

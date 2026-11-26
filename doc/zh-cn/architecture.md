@@ -19,7 +19,7 @@
 | `internal/localapi` | 同用户 AF_UNIX NDJSON 服务（`SIO_AF_UNIX_GETPEERPID` + Windows SID 校验），提供含 `unified_devices` 的设备列表与 `vm.*` 虚拟机控制 |
 | `internal/vm` | 按需下载的轻量无头 Android 虚拟机管理器（`%LOCALAPPDATA%\AndroFuse\vm`，原生 `arm64-v8a` / `x86_64`，`INV-03`、`INV-10`） |
 | `internal/companion` | 桌面与 Android APK 共用的 TLS 1.3 加密 Companion NDJSON 协议（遥测、剪贴板、通知回复、文件传输、应用接力、显示守护与 ADB 信标；`INV-07`、`INV-09`）；`pair.request`（仅经 adb 转发：本地套接字或回环；双方核对 6 位确认码）与 `mesh.join` |
-| `internal/androidhost` | 可选 Android 伴侣端宿主服务、配置持久化、sysfs 电量/温控探针、脱敏审计日志与 MyGo 分级授权界面（`INV-09`、`INV-11`）；可选后台待机与仅在传输期间持有的唤醒锁/Wi-Fi 锁活动租约（PLAN §9.1-3）；加入电脑交来的组网（密钥以 Android Keystore 密封保存，启动时自动重连）与 adb 配对确认 |
+| `internal/androidhost` | 可选 Android 伴侣端宿主服务、配置持久化、sysfs 电量/温控探针、脱敏审计日志与 MyGo 分级授权界面（`INV-09`、`INV-11`）；可选后台待机与仅在传输期间持有的唤醒锁/Wi-Fi 锁活动租约；加入电脑交来的组网（密钥以 Android Keystore 密封保存，启动时自动重连）与 adb 配对确认；伴侣界面分主页、权限、安全三个标签（680 dp 起双栏），组网默认省电（省电模式：单线程运行时、按需建立直连、不用 UPnP） |
 | `internal/androidbridge` | 平台安全的 Android 系统服务能力探测包，与 `CompanionServices.kt`（`NotificationListenerService`、`TileService`、`MediaProjection`、`SAF`、`AppWidgetProvider`）协同工作；MyGo 移动插件 `androfusePower`（`android/Power.kt`：待机前台服务、`NetworkCallback` 事件、活动租约） |
 | `internal/androidcore` | MyGo Kotlin 原生模块：把内置 EasyTier 的 `libandrofuse_core.so`（`scripts/build-android-core.sh` 构建）打进 APK 并加载，另提供 Android Keystore 密封（`Vault`） |
 | `internal/avbridge` | M5 双向音视频桥接：手机摄像头本地防越权 MJPEG 流、系统 `MFCreateVirtualCamera` 探测与加密 PC→Android 麦克风/摄像头传入链路 |
@@ -29,9 +29,9 @@
 | `internal/adb` | 无 Shell 参数向量 `adb` 客户端、`MergeDevices`（USB 与 TLS 无线去重合并，`INV-02`）、mDNS TLS 无线连接配对、`MaskSerial`/`MaskEndpoint` 脱敏、`emulator-*` 分类与 `--user 0` 应用枚举；mDNS `adb-<ro.serialno>-…` 实例映射到 `HardwareHash`，用于热切换重连 |
 | `internal/sysproc` | `HideConsole`：所有控制台子进程（adb、emulator、sdkmanager）均以 `CREATE_NO_WINDOW` 启动，不再弹出控制台或 Windows Terminal 窗口 |
 | `internal/lease` | 原子 `leases.json` 账本，确保虚拟显示、DeX 回环与端口转发完整回收（`INV-03`） |
-| `internal/scrcpy` | `scrcpy-server v5.0.1` 线协议编解码、鼠标/触控/滚动/键盘与 `flex_display` 会话、原始 PCM 音频、`MP4Recorder` 与离线样本 |
+| `internal/scrcpy` | `scrcpy-server v5.0.1` 线协议编解码、鼠标/触控/滚动/键盘与 `flex_display` 会话、原始 PCM 音频、`MP4Recorder`、离线样本与实测遥测（`Stats`：已解码帧数、平均解码耗时，以及在 1 秒内没有新帧时归零的实测帧率，因为静止画面不发帧；`INV-05`） |
 | `internal/dex` | Samsung Native DeX 调度器（`server/dexhelper` 回环 + 30 秒宽限 `Reattach`）、真实应用名称与 96x96 PNG 图标缓存（`ListAppsWithIcons`）、`SelectRoute` 及 `EvaluateTruth` 校验（`INV-06`；Miracast 已隐藏） |
-| `internal/gui` | MyGo 原生 UI 外壳、USB+Wi-Fi 热切换统一设备卡片与编码流余量检查（`INV-01`/`INV-02`）、DeX 路由选择器（`INV-06`）、应用启动器网格、无边框 `SessionModeApp` 与 `SessionWindow` 视频窗口、`SaveNV12AsPNG`、剪贴板/音频控制、托盘与主机诊断；首次经 adb 安装伴侣并配对（`PairCompanionOverADB`），可选把运行中的组网交给手机；组网设置像 Kyokai 一样保存在 `gui.json`（密钥经 DPAPI 密封） |
+| `internal/gui` | MyGo 原生 UI 外壳、USB+Wi-Fi 热切换统一设备卡片与编码流余量检查（`INV-01`/`INV-02`）、DeX 路由选择器（`INV-06`）、应用启动器网格、无边框 `SessionModeApp` 与 `SessionWindow` 视频窗口、`SaveNV12AsPNG`、剪贴板/音频控制、托盘与主机诊断；首次经 adb 安装伴侣并配对（`PairCompanionOverADB`），可选把运行中的组网交给手机；组网设置像 Kyokai 一样保存在 `gui.json`（密钥经 DPAPI 密封）；V2.1 界面外壳：窗口宽度低于 960 DIP 时侧栏收为 64 DIP 图标栏，投屏默认在主窗口以窗格打开（设置 › 窗口与分屏），可左右或上下分屏（每半至少 360×280），并可弹出为独立窗口或放回主窗口而不断流；已记住的手机保存在 `devices.json`，支持自动重连、可撤销的「忘记此设备」，以及经 adb 或组网重连伴侣 |
 | `locales` | 英文（`en`）与简体中文（`zh-Hans`）ARB 词条目录及生成访问器 |
 | `server/dexhelper` | 洁净室 Java UID 2000 `app_process` 辅助器（`probe`、`apps`、`serve`、`attach`、`recover`），驱动 `SemWifiDisplayConfig` 回环、宽限期控制端重附着与图标提取 |
 | `tools/fetchdeps` | 下载并校验 SHA-256 后缓存 `scrcpy-server-v5.0.1` 与构建期 `protoc` 36.2 至 `.dev/cache/`；`-check-upstream` 报告更新的 EasyTier 版本 |
@@ -81,6 +81,6 @@
 
 | 路径 | 用途 |
 |---|---|
-| `%APPDATA%\AndroFuse\`（`AndroFuse-<profile>`） | 用户级界面偏好（`gui.json`）与运行日志（`logs/`） |
+| `%APPDATA%\AndroFuse\`（`AndroFuse-<profile>`） | 用户级界面偏好（`gui.json`）、已记住的设备（`devices.json`，伴侣令牌经 DPAPI 密封）与运行日志（`logs/`） |
 | `%LOCALAPPDATA%\AndroFuse\` | 设备配置、DPAPI 加密凭据与虚拟显示租约账本（`leases.json`） |
 | `%LOCALAPPDATA%\AndroFuse\vm\` | 按需下载的可选内建 Android 虚拟机（`sdk/` 与 `avd/`），支持通过虚拟机管理器一键清理 |
