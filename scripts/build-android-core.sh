@@ -31,9 +31,8 @@ host=$(ls "$ndk/toolchains/llvm/prebuilt" | head -1)
 bin="$ndk/toolchains/llvm/prebuilt/$host/bin"
 ext=""
 [ -e "$bin/clang.exe" ] && ext=".cmd"
-# Off Windows, bindgen uses the NDK's own libclang when it ships one, so its builtin headers match
-# the ones passed below; with a system libclang it keeps that libclang's own builtin headers.
-resource_arg=""
+# Off Windows, bindgen prefers the NDK's own libclang when it ships one, so the builtin headers
+# passed below match its version.
 if [ -z "$ext" ] && [ -z "${LIBCLANG_PATH:-}" ]; then
 	for d in "$ndk/toolchains/llvm/prebuilt/$host/lib" "$ndk/toolchains/llvm/prebuilt/$host/lib64"; do
 		if ls "$d"/libclang.so* >/dev/null 2>&1; then
@@ -57,13 +56,13 @@ for abi in "${abis[@]}"; do
 	export "AR_$env=$bin/llvm-ar"
 	export "CARGO_TARGET_${upper}_LINKER=$bin/$target$api-clang$ext"
 	export "CARGO_TARGET_${upper}_RUSTFLAGS=-C link-arg=-Wl,-z,max-page-size=16384"
-	# bindgen (EasyTier's kcp-sys) parses C headers with libclang: give it the NDK's target,
-	# sysroot and, for the NDK's own (or the Windows) libclang, the NDK clang's builtin headers.
-	if [ -n "$ext" ] || [ -n "${LIBCLANG_PATH:-}" ]; then
-		resource=$(ls -d "$ndk/toolchains/llvm/prebuilt/$host/lib/clang/"*/include | sort -V | tail -1)
-		resource_arg="-isystem $resource"
-	fi
-	export "BINDGEN_EXTRA_CLANG_ARGS_$env=--target=$target$api --sysroot=$ndk/toolchains/llvm/prebuilt/$host/sysroot $resource_arg"
+	# bindgen (EasyTier's kcp-sys) parses C headers with libclang: give it the NDK's target, sysroot
+	# and builtin headers. -resource-dir replaces libclang's own builtin directory; adding the NDK's
+	# with -isystem instead leaves two stdint.h on the path, and the first one's include guard keeps
+	# #include_next from ever reaching bionic's (uint32_t unknown).
+	resource=$("$bin/clang${ext:+.exe}" -print-resource-dir)
+	command -v cygpath >/dev/null && resource=$(cygpath -m "$resource")
+	export "BINDGEN_EXTRA_CLANG_ARGS_$env=--target=$target$api --sysroot=$ndk/toolchains/llvm/prebuilt/$host/sysroot -resource-dir=$resource"
 	cargo build --manifest-path "$root/core/Cargo.toml" -p androfuse-core --release --target "$target"
 	out="$root/internal/androidcore/kotlin/src/main/jniLibs/$abi"
 	mkdir -p "$out"
