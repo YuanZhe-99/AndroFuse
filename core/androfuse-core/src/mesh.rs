@@ -42,6 +42,10 @@ pub struct MeshConfig {
     pub device_name: String,
     #[serde(default)]
     pub peers: Vec<String>,
+    /// Addresses this node accepts connections on (`tcp://0.0.0.0:<random high port>`); empty by default,
+    /// so the node only dials out (`INV-07`).
+    #[serde(default)]
+    pub listeners: Vec<String>,
     #[serde(default)]
     pub port_forwards: Vec<PortForward>,
 }
@@ -55,6 +59,10 @@ pub struct MeshStatus {
     /// must scrub it before logging (`INV-08`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub info: Option<serde_json::Value>,
+    /// EasyTier's own error for the instance (for example a listener port already in use); the
+    /// instance is not `running` while it is set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 /// Engine label reported in status so the UI can name the embedded EasyTier build.
@@ -77,7 +85,22 @@ pub fn build_toml(cfg: &MeshConfig) -> Result<String, String> {
     if !cfg.device_name.trim().is_empty() {
         t.push_str(&format!("hostname = {}\n", q(cfg.device_name.trim())));
     }
-    t.push_str("dhcp = true\nlisteners = []\n\n[network_identity]\n");
+    let mut listeners = Vec::new();
+    for l in cfg
+        .listeners
+        .iter()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty())
+    {
+        if !l.contains("://") {
+            return Err("listener must be a URI such as tcp://0.0.0.0:34567".into());
+        }
+        listeners.push(q(l));
+    }
+    t.push_str(&format!(
+        "dhcp = true\nlisteners = [{}]\n\n[network_identity]\n",
+        listeners.join(", ")
+    ));
     t.push_str(&format!("network_name = {}\n", q(name)));
     t.push_str(&format!(
         "network_secret = {}\n",
@@ -166,6 +189,14 @@ pub fn status() -> MeshStatus {
         if key == INSTANCE_NAME {
             out.running = true;
             out.info = serde_json::from_str(&value).ok();
+            out.error = out
+                .info
+                .as_ref()
+                .and_then(|i| i.get("error_msg"))
+                .and_then(|e| e.as_str())
+                .filter(|e| !e.is_empty())
+                .map(str::to_owned);
+            out.running = out.error.is_none();
         }
     }
     out
@@ -217,6 +248,7 @@ mod tests {
             network_secret: "p\"w\\d".into(),
             device_name: "Fold 8".into(),
             peers: vec!["tcp://relay.example.org:11010".into()],
+            listeners: vec![],
             port_forwards: vec![PortForward {
                 local_port: 41235,
                 remote_host: "10.126.126.2".into(),
@@ -229,6 +261,8 @@ mod tests {
         assert!(t.contains("bind_addr = \"127.0.0.1:41235\""));
         assert!(t.contains("dst_addr = \"10.126.126.2:37000\""));
         assert!(!t.contains("0.0.0.0"));
+        assert!(t.contains("listeners = []"));
+        assert!(t.contains("listeners = []"));
         // EasyTier itself must accept the generated config.
         let c = CString::new(t).unwrap();
         // SAFETY: `c` is a valid NUL-terminated string for the duration of the call.

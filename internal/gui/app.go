@@ -42,8 +42,9 @@ const (
 
 // Prefs stores persistent GUI preferences in stateDir/gui.json.
 type Prefs struct {
-	Theme    string `json:"theme,omitempty"`
-	Language string `json:"language,omitempty"`
+	Theme    string     `json:"theme,omitempty"`
+	Language string     `json:"language,omitempty"`
+	Mesh     *MeshPrefs `json:"mesh,omitempty"`
 }
 
 // App holds the state of the AndroFuse UI shell.
@@ -90,6 +91,8 @@ type App struct {
 	meshNetName     string
 	meshSecret      string
 	meshPeer        string
+	meshAccept      bool // accept direct connections on a random high port
+	compJoinMesh    bool // first-pairing checkbox: also hand the running mesh to the phone
 	meshStatus      mesh.Status
 	meshNotice      string
 	micUplinkActive bool
@@ -136,6 +139,10 @@ func New(profile, stateDir string) *App {
 		sessions:   make(map[string]*SessionWindow),
 	}
 	a.loadPrefs()
+	if p := a.prefs.Mesh; p != nil {
+		a.meshNetName, a.meshPeer, a.meshAccept = p.NetworkName, p.Peer, p.Accept
+	}
+	a.compJoinMesh = true
 	a.syncControlIndices()
 	return a
 }
@@ -166,6 +173,7 @@ func (a *App) Start() {
 	a.RefreshDiagnostics()
 	a.RefreshDevices()
 	a.RefreshVMStatus()
+	go a.resumeMesh()
 }
 
 // Focus creates (when closed to tray) or raises the main application window.
@@ -932,6 +940,30 @@ func (a *App) companionCard(c *ui.Context, k tokens, connected bool, st companio
 			}
 		})
 
+		if !connected {
+			a.mu.Lock()
+			devs := append([]DiscoveredDevice(nil), a.devices...)
+			meshName := a.rt.meshCfg.NetworkName
+			a.mu.Unlock()
+			if meshName != "" {
+				ui.Checkbox(c.Key("comp-join-mesh"), &a.compJoinMesh, L.CompanionJoinMesh(meshName))
+			}
+			ui.Row(c.Key("comp-pair-row")).Gap(8).Wrap().Children(func() {
+				for _, d := range devs {
+					if d.Target.State != "device" {
+						continue
+					}
+					model := d.Profile.Model
+					if model == "" {
+						model = d.Target.Model
+					}
+					if ui.Button(c.Key("comp-pair-"+d.HardwareHash), L.CompanionInstallPair(model)).Clicked() {
+						a.PairCompanionOverADB(d.Target.Serial, model, a.compJoinMesh && meshName != "")
+					}
+				}
+			})
+		}
+
 		if connected {
 			ui.Row(c.Key("comp-actions-row")).Gap(8).Wrap().AlignItems(ui.Center).Children(func() {
 				if st.ForegroundPackage != "" {
@@ -1379,12 +1411,27 @@ func (a *App) meshSettingsCard(c *ui.Context, k tokens) {
 		} else {
 			ui.Text(c, L.MeshStatusStopped()).FontSize(sizeBody).TextColor(k.muted)
 		}
+		if st.LastError != "" {
+			ui.Text(c, st.LastError).FontSize(sizeSmall).TextColor(k.warn)
+		}
 
 		ui.Row(c.Key("mesh-fields-row")).FillWidth().Gap(8).Children(func() {
 			ui.TextInput(c.Key("mesh-net"), &a.meshNetName).Placeholder(L.MeshNetNameHint()).Grow(1)
 			ui.TextInput(c.Key("mesh-sec"), &a.meshSecret).Placeholder(L.MeshSecretHint()).Grow(1)
 			ui.TextInput(c.Key("mesh-peer"), &a.meshPeer).Placeholder(L.MeshPeerHint()).Grow(1)
 		})
+		ui.Checkbox(c.Key("mesh-accept"), &a.meshAccept, L.MeshAcceptLabel())
+		if st.Running {
+			a.mu.Lock()
+			port := 0
+			if p := a.prefs.Mesh; p != nil && p.Accept {
+				port = p.ListenPort
+			}
+			a.mu.Unlock()
+			if port > 0 {
+				ui.Text(c, L.MeshListenPort(port)).FontSize(sizeSmall).TextColor(k.muted)
+			}
+		}
 
 		if notice != "" {
 			ui.Text(c, notice).FontSize(sizeSmall).TextColor(k.warn)
@@ -1397,8 +1444,9 @@ func (a *App) meshSettingsCard(c *ui.Context, k tokens) {
 					netName := a.meshNetName
 					secret := a.meshSecret
 					peer := a.meshPeer
+					accept := a.meshAccept
 					a.mu.Unlock()
-					go a.StartMesh(netName, secret, peer)
+					go a.StartMesh(netName, secret, peer, accept)
 				}
 			} else {
 				if ui.Button(c.Key("mesh-stop-btn"), L.MeshStopBtn()).Clicked() {

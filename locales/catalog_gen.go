@@ -1476,11 +1476,11 @@ func (msgs Messages) CompanionSubtitle() string {
 	return Catalog.Format(msgs.locale, "CompanionSubtitle", nil)
 }
 
-// CompanionStatusRunning says "Listening on port {port}"
+// CompanionStatusRunning says "Listening on port {port, number, ::group-off}"
 // in the language the app shows.
 func CompanionStatusRunning(port int) string { return In(i18n.Locale()).CompanionStatusRunning(port) }
 
-// CompanionStatusRunning says "Listening on port {port}"
+// CompanionStatusRunning says "Listening on port {port, number, ::group-off}"
 // in the language of msgs.
 func (msgs Messages) CompanionStatusRunning(port int) string {
 	return Catalog.Format(msgs.locale, "CompanionStatusRunning", map[string]any{"port": port})
@@ -1866,6 +1866,190 @@ func PermMediaBridge() string { return In(i18n.Locale()).PermMediaBridge() }
 // in the language of msgs.
 func (msgs Messages) PermMediaBridge() string {
 	return Catalog.Format(msgs.locale, "PermMediaBridge", nil)
+}
+
+// MeshAcceptLabel says "Let other devices connect directly (random high port)"
+// in the language the app shows.
+func MeshAcceptLabel() string { return In(i18n.Locale()).MeshAcceptLabel() }
+
+// MeshAcceptLabel says "Let other devices connect directly (random high port)"
+// in the language of msgs.
+func (msgs Messages) MeshAcceptLabel() string {
+	return Catalog.Format(msgs.locale, "MeshAcceptLabel", nil)
+}
+
+// MeshListenPort says "Accepting connections on random port {port, number, ::group-off}"
+// in the language the app shows.
+func MeshListenPort(port int) string { return In(i18n.Locale()).MeshListenPort(port) }
+
+// MeshListenPort says "Accepting connections on random port {port, number, ::group-off}"
+// in the language of msgs.
+func (msgs Messages) MeshListenPort(port int) string {
+	return Catalog.Format(msgs.locale, "MeshListenPort", map[string]any{"port": port})
+}
+
+// CompanionInstallPair says "Install Companion and pair · {model}"
+// in the language the app shows.
+func CompanionInstallPair(model string) string { return In(i18n.Locale()).CompanionInstallPair(model) }
+
+// CompanionInstallPair says "Install Companion and pair · {model}"
+// in the language of msgs.
+func (msgs Messages) CompanionInstallPair(model string) string {
+	return Catalog.Format(msgs.locale, "CompanionInstallPair", map[string]any{"model": model})
+}
+
+// CompanionJoinMesh says "Also join the mesh {name}"
+// in the language the app shows.
+func CompanionJoinMesh(name string) string { return In(i18n.Locale()).CompanionJoinMesh(name) }
+
+// CompanionJoinMesh says "Also join the mesh {name}"
+// in the language of msgs.
+func (msgs Messages) CompanionJoinMesh(name string) string {
+	return Catalog.Format(msgs.locale, "CompanionJoinMesh", map[string]any{"name": name})
+}
+
+// CompanionInstalling says "Installing the Companion on the phone…"
+// in the language the app shows.
+func CompanionInstalling() string { return In(i18n.Locale()).CompanionInstalling() }
+
+// CompanionInstalling says "Installing the Companion on the phone…"
+// in the language of msgs.
+func (msgs Messages) CompanionInstalling() string {
+	return Catalog.Format(msgs.locale, "CompanionInstalling", nil)
+}
+
+// CompanionConfirmCode says "Allow pairing on the phone. It shows the code {code}."
+// in the language the app shows.
+func CompanionConfirmCode(code string) string { return In(i18n.Locale()).CompanionConfirmCode(code) }
+
+// CompanionConfirmCode says "Allow pairing on the phone. It shows the code {code}."
+// in the language of msgs.
+func (msgs Messages) CompanionConfirmCode(code string) string {
+	return Catalog.Format(msgs.locale, "CompanionConfirmCode", map[string]any{"code": code})
+}
+
+// CompanionPaired says "Paired with {model}"
+// in the language the app shows.
+func CompanionPaired(model string) string { return In(i18n.Locale()).CompanionPaired(model) }
+
+// CompanionPaired says "Paired with {model}"
+// in the language of msgs.
+func (msgs Messages) CompanionPaired(model string) string {
+	return Catalog.Format(msgs.locale, "CompanionPaired", map[string]any{"model": model})
+}
+
+// CompanionMeshJoined says "{model} joined the mesh {name}"
+// in the language the app shows.
+func CompanionMeshJoined(model string, name string) string {
+	return In(i18n.Locale()).CompanionMeshJoined(model, name)
+}
+
+// CompanionMeshJoined says "{model} joined the mesh {name}"
+// in the language of msgs.
+func (msgs Messages) CompanionMeshJoined(model string, name string) string {
+	return Catalog.Format(msgs.locale, "CompanionMeshJoined", map[string]any{"model": model, "name": name})
+}
+
+// CompanionApkMissing says "Companion installer not found next to AndroFuse"
+// in the language the app shows.
+func CompanionApkMissing() string { return In(i18n.Locale()).CompanionApkMissing() }
+
+// CompanionApkMissing says "Companion installer not found next to AndroFuse"
+// in the language of msgs.
+func (msgs Messages) CompanionApkMissing() string {
+	return Catalog.Format(msgs.locale, "CompanionApkMissing", nil)
+}
+
+// PairPromptTitle says "Pair with this computer?"
+// in the language the app shows.
+func PairPromptTitle() string { return In(i18n.Locale()).PairPromptTitle() }
+
+// PairPromptTitle says "Pair with this computer?"
+// in the language of msgs.
+func (msgs Messages) PairPromptTitle() string {
+	return Catalog.Format(msgs.locale, "PairPromptTitle", nil)
+}
+
+// PairPromptBody says "{name} is connected over USB. Check that the computer shows the code {code}."
+// in the language the app shows.
+func PairPromptBody(name string, code string) string {
+	return In(i18n.Locale()).PairPromptBody(name, code)
+}
+
+// PairPromptBody says "{name} is connected over USB. Check that the computer shows the code {code}."
+// in the language of msgs.
+func (msgs Messages) PairPromptBody(name string, code string) string {
+	return Catalog.Format(msgs.locale, "PairPromptBody", map[string]any{"name": name, "code": code})
+}
+
+// PairAllow says "Allow"
+// in the language the app shows.
+func PairAllow() string { return In(i18n.Locale()).PairAllow() }
+
+// PairAllow says "Allow"
+// in the language of msgs.
+func (msgs Messages) PairAllow() string {
+	return Catalog.Format(msgs.locale, "PairAllow", nil)
+}
+
+// PairDecline says "Decline"
+// in the language the app shows.
+func PairDecline() string { return In(i18n.Locale()).PairDecline() }
+
+// PairDecline says "Decline"
+// in the language of msgs.
+func (msgs Messages) PairDecline() string {
+	return Catalog.Format(msgs.locale, "PairDecline", nil)
+}
+
+// MeshPhoneTitle says "Cross-network mesh"
+// in the language the app shows.
+func MeshPhoneTitle() string { return In(i18n.Locale()).MeshPhoneTitle() }
+
+// MeshPhoneTitle says "Cross-network mesh"
+// in the language of msgs.
+func (msgs Messages) MeshPhoneTitle() string {
+	return Catalog.Format(msgs.locale, "MeshPhoneTitle", nil)
+}
+
+// MeshPhoneJoined says "Joined {name}"
+// in the language the app shows.
+func MeshPhoneJoined(name string) string { return In(i18n.Locale()).MeshPhoneJoined(name) }
+
+// MeshPhoneJoined says "Joined {name}"
+// in the language of msgs.
+func (msgs Messages) MeshPhoneJoined(name string) string {
+	return Catalog.Format(msgs.locale, "MeshPhoneJoined", map[string]any{"name": name})
+}
+
+// MeshPhoneConnecting says "Connecting to the mesh…"
+// in the language the app shows.
+func MeshPhoneConnecting() string { return In(i18n.Locale()).MeshPhoneConnecting() }
+
+// MeshPhoneConnecting says "Connecting to the mesh…"
+// in the language of msgs.
+func (msgs Messages) MeshPhoneConnecting() string {
+	return Catalog.Format(msgs.locale, "MeshPhoneConnecting", nil)
+}
+
+// MeshPhoneNone says "Not joined. Your computer can add this phone when you pair them."
+// in the language the app shows.
+func MeshPhoneNone() string { return In(i18n.Locale()).MeshPhoneNone() }
+
+// MeshPhoneNone says "Not joined. Your computer can add this phone when you pair them."
+// in the language of msgs.
+func (msgs Messages) MeshPhoneNone() string {
+	return Catalog.Format(msgs.locale, "MeshPhoneNone", nil)
+}
+
+// MeshPhoneLeave says "Leave"
+// in the language the app shows.
+func MeshPhoneLeave() string { return In(i18n.Locale()).MeshPhoneLeave() }
+
+// MeshPhoneLeave says "Leave"
+// in the language of msgs.
+func (msgs Messages) MeshPhoneLeave() string {
+	return Catalog.Format(msgs.locale, "MeshPhoneLeave", nil)
 }
 
 // StandbyTitle says "Background standby"

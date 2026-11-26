@@ -5,6 +5,7 @@
   "copyright": "Copyright (C) 2026 YuanZhe",
   "license": "GPL-3.0-only",
   "main": "./cmd/androfuse",
+  "urlSchemes": ["androfuse"],
   "out": "build",
   "i18n": {
     "dir": "locales",

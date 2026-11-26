@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"math/big"
 	"net"
+	"net/netip"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -34,6 +35,10 @@ type Handler struct {
 	OnFilePush          func(name string, data []byte, shaHex string) (FilePushResponse, error)
 	OnDisplayGuard      func(DisplayGuardRequest) (DisplayGuardResponse, error)
 	OnMediaFrame        func(MediaFrameRequest) (MediaFrameResponse, error)
+	OnMeshJoin          func(MeshJoinRequest) (MeshJoinResponse, error)
+	// OnPairRequest asks the phone's user to allow an adb-connected desktop; it blocks until
+	// they answer (or the host gives up) and reports whether they allowed it.
+	OnPairRequest func(PairRequest) bool
 }
 
 // Server serves authenticated TLS 1.3 Companion NDJSON requests.
@@ -45,11 +50,11 @@ type Server struct {
 	sdkInt      int
 	handler     Handler
 
-	mu       sync.Mutex
-	token    string
-	listener net.Listener
-	closed   bool
-	wg       sync.WaitGroup
+	mu        sync.Mutex
+	token     string
+	listeners []net.Listener
+	closed    bool
+	wg        sync.WaitGroup
 }
 
 // GenerateSelfSignedCert creates an in-memory ECDSA P-256 certificate and colon-separated SHA-256 fingerprint.
@@ -124,29 +129,38 @@ func NewServer(token, deviceModel, androidRel string, sdk int, handler Handler) 
 	}, nil
 }
 
-// Listen binds TLS 1.3 on addr (for example `0.0.0.0:27189` or `127.0.0.1:0`).
+// Listen adds a TLS 1.3 listener on addr: a TCP address (for example `0.0.0.0:34567` or
+// `127.0.0.1:0`), or `@name` for a Linux abstract local socket, which `adb forward
+// localabstract:name` reaches without a fixed TCP port (see LocalSocket).
+// Notes: call it once per address before Serve; every listener shares the certificate and token.
 func (s *Server) Listen(addr string) error {
 	cfg := &tls.Config{
 		MinVersion:   tls.VersionTLS13,
 		Certificates: []tls.Certificate{s.cert},
 	}
-	ln, err := tls.Listen("tcp", addr, cfg)
+	network := "tcp"
+	if strings.HasPrefix(addr, "@") {
+		network = "unix"
+	}
+	raw, err := net.Listen(network, addr)
 	if err != nil {
 		return err
 	}
 	s.mu.Lock()
-	s.listener = ln
+	s.listeners = append(s.listeners, tls.NewListener(raw, cfg))
 	s.closed = false
 	s.mu.Unlock()
 	return nil
 }
 
-// Serve accepts authenticated TLS clients until ctx is cancelled or Close is called.
+// Serve accepts authenticated TLS clients on every listener until ctx is cancelled or Close is
+// called.
+// Returns: nil after Close, or the first accept error that was not caused by closing.
 func (s *Server) Serve(ctx context.Context) error {
 	s.mu.Lock()
-	ln := s.listener
+	lns := append([]net.Listener(nil), s.listeners...)
 	s.mu.Unlock()
-	if ln == nil {
+	if len(lns) == 0 {
 		return errors.New("companion server not listening")
 	}
 
@@ -155,6 +169,23 @@ func (s *Server) Serve(ctx context.Context) error {
 		_ = s.Close()
 	}()
 
+	errs := make(chan error, len(lns))
+	for _, ln := range lns {
+		go func() { errs <- s.accept(ctx, ln) }()
+	}
+	var first error
+	for range lns {
+		if err := <-errs; err != nil && first == nil {
+			first = err
+			_ = s.Close()
+		}
+	}
+	s.wg.Wait()
+	return first
+}
+
+// accept serves connections from ln until it is closed.
+func (s *Server) accept(ctx context.Context, ln net.Listener) error {
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
@@ -162,7 +193,6 @@ func (s *Server) Serve(ctx context.Context) error {
 			closed := s.closed
 			s.mu.Unlock()
 			if closed || errors.Is(err, net.ErrClosed) {
-				s.wg.Wait()
 				return nil
 			}
 			return err
@@ -183,7 +213,7 @@ func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 	return s.Serve(ctx)
 }
 
-// Close closes the TLS listener and waits for active client handlers.
+// Close closes every TLS listener and waits for active client handlers.
 func (s *Server) Close() error {
 	s.mu.Lock()
 	if s.closed {
@@ -191,25 +221,27 @@ func (s *Server) Close() error {
 		return nil
 	}
 	s.closed = true
-	ln := s.listener
-	s.listener = nil
+	lns := s.listeners
+	s.listeners = nil
 	s.mu.Unlock()
 	var err error
-	if ln != nil {
-		err = ln.Close()
+	for _, ln := range lns {
+		err = errors.Join(err, ln.Close())
 	}
 	s.wg.Wait()
 	return err
 }
 
-// Addr returns the bound listener address, or "" if stopped.
+// Addr returns the bound TCP listener address, or "" if stopped or listening only locally.
 func (s *Server) Addr() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.listener == nil {
-		return ""
+	for _, ln := range s.listeners {
+		if ln.Addr().Network() == "tcp" {
+			return ln.Addr().String()
+		}
 	}
-	return s.listener.Addr().String()
+	return ""
 }
 
 // Fingerprint returns the server's SHA-256 certificate fingerprint.
@@ -255,7 +287,11 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 		return
 	}
 	var authEnv Envelope
-	if err := json.Unmarshal(sc.Bytes(), &authEnv); err != nil || authEnv.Type != "auth" {
+	if err := json.Unmarshal(sc.Bytes(), &authEnv); err == nil && authEnv.Type == "pair.request" {
+		s.handlePair(conn, enc, authEnv)
+		return
+	}
+	if authEnv.Type != "auth" {
 		_ = enc.Encode(Envelope{Type: "auth.res", Error: "auth frame required"})
 		return
 	}
@@ -399,6 +435,20 @@ func (s *Server) dispatch(env Envelope) Envelope {
 			return Envelope{ID: env.ID, Type: "file.push.res", Error: err.Error()}
 		}
 		return mustEnvelope(env.ID, "file.push.res", res)
+
+	case "mesh.join":
+		var req MeshJoinRequest
+		if err := json.Unmarshal(env.Payload, &req); err != nil {
+			return Envelope{ID: env.ID, Type: "mesh.join.res", Error: err.Error()}
+		}
+		if s.handler.OnMeshJoin == nil {
+			return Envelope{ID: env.ID, Type: "mesh.join.res", Error: "this companion cannot join a mesh"}
+		}
+		res, err := s.handler.OnMeshJoin(req)
+		if err != nil {
+			return Envelope{ID: env.ID, Type: "mesh.join.res", Error: err.Error()}
+		}
+		return mustEnvelope(env.ID, "mesh.join.res", res)
 
 	case "display.guard":
 		if !perms.DisplayGuard {
@@ -594,6 +644,73 @@ func (c *Client) RunDisplayGuard(ctx context.Context) (DisplayGuardResponse, err
 	return res, err
 }
 
+// handlePair answers a `pair.request` frame: only over the local socket or loopback (`adb
+// forward`) and only after the phone's user allowed it, it returns the pairing token and
+// certificate fingerprint.
+func (s *Server) handlePair(conn net.Conn, enc *json.Encoder, env Envelope) {
+	if !isLocal(conn.RemoteAddr()) {
+		_ = enc.Encode(Envelope{ID: env.ID, Type: "pair.res", Error: "pairing requests are only accepted over adb"})
+		return
+	}
+	var req PairRequest
+	if err := json.Unmarshal(env.Payload, &req); err != nil || s.handler.OnPairRequest == nil {
+		_ = enc.Encode(Envelope{ID: env.ID, Type: "pair.res", Error: "pairing is not available"})
+		return
+	}
+	_ = conn.SetDeadline(time.Now().Add(PairWait + 10*time.Second))
+	if !s.handler.OnPairRequest(req) {
+		_ = enc.Encode(Envelope{ID: env.ID, Type: "pair.res", Error: "pairing was declined on the phone"})
+		return
+	}
+	s.mu.Lock()
+	tok := s.token
+	s.mu.Unlock()
+	_ = writeEnvelope(enc, env.ID, "pair.res", PairResponse{Token: tok, CertFingerprint: s.fingerprint}, "")
+}
+
+// RequestPairing asks the phone at addr (an `adb forward` of the Companion LocalSocket) to pair, showing
+// clientName and code there; it waits for the phone's user to answer.
+// Returns: the pairing token and the certificate fingerprint, already checked against the TLS
+// connection, for Dial.
+func RequestPairing(ctx context.Context, addr, clientName, code string) (PairResponse, error) {
+	var gotFP string
+	dialer := &tls.Dialer{Config: &tls.Config{
+		MinVersion:         tls.VersionTLS13,
+		InsecureSkipVerify: true, // The fingerprint is returned to the caller and pinned for Dial.
+		VerifyConnection: func(cs tls.ConnectionState) error {
+			if len(cs.PeerCertificates) == 0 {
+				return errors.New("missing companion peer certificate")
+			}
+			gotFP = certFingerprint(cs.PeerCertificates[0].Raw)
+			return nil
+		},
+	}}
+	raw, err := dialer.DialContext(ctx, "tcp", strings.TrimSpace(addr))
+	if err != nil {
+		return PairResponse{}, err
+	}
+	conn := raw.(*tls.Conn)
+	defer conn.Close()
+	sc := bufio.NewScanner(conn)
+	c := &Client{conn: conn, sc: sc, enc: json.NewEncoder(conn)}
+	var res PairResponse
+	if err := c.call(ctx, "pair.request", PairRequest{ClientName: clientName, Code: code}, &res); err != nil {
+		return PairResponse{}, err
+	}
+	if !strings.EqualFold(res.CertFingerprint, gotFP) {
+		return PairResponse{}, errors.New("companion certificate changed during pairing")
+	}
+	return res, nil
+}
+
+// JoinMesh asks the phone to join the desktop's EasyTier network (sent only when the user chose
+// to during pairing, `INV-07`).
+func (c *Client) JoinMesh(ctx context.Context, req MeshJoinRequest) (MeshJoinResponse, error) {
+	var res MeshJoinResponse
+	err := c.call(ctx, "mesh.join", req, &res)
+	return res, err
+}
+
 // PushMediaFrame delivers a PC mic PCM or webcam JPEG frame to Android Companion (`INV-09`).
 func (c *Client) PushMediaFrame(ctx context.Context, req MediaFrameRequest) (MediaFrameResponse, error) {
 	var res MediaFrameResponse
@@ -639,4 +756,14 @@ func (c *Client) call(ctx context.Context, typ string, payload any, dst any) err
 		}
 	}
 	return nil
+}
+
+// isLocal reports whether a peer reached the server over the local socket or loopback, which is
+// how `adb forward` delivers it.
+func isLocal(a net.Addr) bool {
+	if a.Network() == "unix" {
+		return true
+	}
+	ap, err := netip.ParseAddrPort(a.String())
+	return err == nil && ap.Addr().Unmap().IsLoopback()
 }

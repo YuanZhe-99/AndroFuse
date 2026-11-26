@@ -18,9 +18,10 @@
 | `internal/core` | `androfuse_core` C ABI v6 加载器、`NV12Ring` 零分配帧环、`AudioPlayer` 与 `MicCapturer` |
 | `internal/localapi` | 同用户 AF_UNIX NDJSON 服务（`SIO_AF_UNIX_GETPEERPID` + Windows SID 校验），提供含 `unified_devices` 的设备列表与 `vm.*` 虚拟机控制 |
 | `internal/vm` | 按需下载的轻量无头 Android 虚拟机管理器（`%LOCALAPPDATA%\AndroFuse\vm`，原生 `arm64-v8a` / `x86_64`，`INV-03`、`INV-10`） |
-| `internal/companion` | 桌面与 Android APK 共用的 TLS 1.3 加密 Companion NDJSON 协议（遥测、剪贴板、通知回复、文件传输、应用接力、显示守护与 ADB 信标；`INV-07`、`INV-09`） |
-| `internal/androidhost` | 可选 Android 伴侣端宿主服务、配置持久化、sysfs 电量/温控探针、脱敏审计日志与 MyGo 分级授权界面（`INV-09`、`INV-11`）；可选后台待机与仅在传输期间持有的唤醒锁/Wi-Fi 锁活动租约（PLAN §9.1-3） |
+| `internal/companion` | 桌面与 Android APK 共用的 TLS 1.3 加密 Companion NDJSON 协议（遥测、剪贴板、通知回复、文件传输、应用接力、显示守护与 ADB 信标；`INV-07`、`INV-09`）；`pair.request`（仅经 adb 转发：本地套接字或回环；双方核对 6 位确认码）与 `mesh.join` |
+| `internal/androidhost` | 可选 Android 伴侣端宿主服务、配置持久化、sysfs 电量/温控探针、脱敏审计日志与 MyGo 分级授权界面（`INV-09`、`INV-11`）；可选后台待机与仅在传输期间持有的唤醒锁/Wi-Fi 锁活动租约（PLAN §9.1-3）；加入电脑交来的组网（密钥以 Android Keystore 密封保存，启动时自动重连）与 adb 配对确认 |
 | `internal/androidbridge` | 平台安全的 Android 系统服务能力探测包，与 `CompanionServices.kt`（`NotificationListenerService`、`TileService`、`MediaProjection`、`SAF`、`AppWidgetProvider`）协同工作；MyGo 移动插件 `androfusePower`（`android/Power.kt`：待机前台服务、`NetworkCallback` 事件、活动租约） |
+| `internal/androidcore` | MyGo Kotlin 原生模块：把内置 EasyTier 的 `libandrofuse_core.so`（`scripts/build-android-core.sh` 构建）打进 APK 并加载，另提供 Android Keystore 密封（`Vault`） |
 | `internal/avbridge` | M5 双向音视频桥接：手机摄像头本地防越权 MJPEG 流、系统 `MFCreateVirtualCamera` 探测与加密 PC→Android 麦克风/摄像头传入链路 |
 | `internal/mcp` | 默认关闭的本机回环（`127.0.0.1`）HTTP JSON-RPC 2.0 本地 MCP 服务，带 30 分钟临时密钥、工具白名单、紧急停止与脱敏审计（`INV-07`、`INV-08`） |
 | `internal/mesh` | 内置于核心库、默认关闭的 EasyTier v2.7.1 组网客户端（`androfuse_call` `mesh.*`；无 TUN，仅回环端口转发；`INV-07`、`INV-08`） |
@@ -30,7 +31,7 @@
 | `internal/lease` | 原子 `leases.json` 账本，确保虚拟显示、DeX 回环与端口转发完整回收（`INV-03`） |
 | `internal/scrcpy` | `scrcpy-server v5.0.1` 线协议编解码、鼠标/触控/滚动/键盘与 `flex_display` 会话、原始 PCM 音频、`MP4Recorder` 与离线样本 |
 | `internal/dex` | Samsung Native DeX 调度器（`server/dexhelper` 回环 + 30 秒宽限 `Reattach`）、真实应用名称与 96x96 PNG 图标缓存（`ListAppsWithIcons`）、`SelectRoute` 及 `EvaluateTruth` 校验（`INV-06`；Miracast 已隐藏） |
-| `internal/gui` | MyGo 原生 UI 外壳、USB+Wi-Fi 热切换统一设备卡片与编码流余量检查（`INV-01`/`INV-02`）、DeX 路由选择器（`INV-06`）、应用启动器网格、无边框 `SessionModeApp` 与 `SessionWindow` 视频窗口、`SaveNV12AsPNG`、剪贴板/音频控制、托盘与主机诊断 |
+| `internal/gui` | MyGo 原生 UI 外壳、USB+Wi-Fi 热切换统一设备卡片与编码流余量检查（`INV-01`/`INV-02`）、DeX 路由选择器（`INV-06`）、应用启动器网格、无边框 `SessionModeApp` 与 `SessionWindow` 视频窗口、`SaveNV12AsPNG`、剪贴板/音频控制、托盘与主机诊断；首次经 adb 安装伴侣并配对（`PairCompanionOverADB`），可选把运行中的组网交给手机；组网设置像 Kyokai 一样保存在 `gui.json`（密钥经 DPAPI 密封） |
 | `locales` | 英文（`en`）与简体中文（`zh-Hans`）ARB 词条目录及生成访问器 |
 | `server/dexhelper` | 洁净室 Java UID 2000 `app_process` 辅助器（`probe`、`apps`、`serve`、`attach`、`recover`），驱动 `SemWifiDisplayConfig` 回环、宽限期控制端重附着与图标提取 |
 | `tools/fetchdeps` | 下载并校验 SHA-256 后缓存 `scrcpy-server-v5.0.1` 与构建期 `protoc` 36.2 至 `.dev/cache/`；`-check-upstream` 报告更新的 EasyTier 版本 |

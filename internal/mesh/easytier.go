@@ -20,12 +20,14 @@ type PortForward struct {
 
 // Config configures the embedded mesh. It is only applied when Enabled is true (`INV-07`).
 type Config struct {
-	Enabled       bool          `json:"enabled"`
-	NetworkName   string        `json:"network_name"`
-	NetworkSecret string        `json:"-"`
-	DeviceName    string        `json:"device_name,omitempty"`
-	Peers         []string      `json:"peers,omitempty"`
-	PortForwards  []PortForward `json:"port_forwards,omitempty"`
+	Enabled       bool     `json:"enabled"`
+	NetworkName   string   `json:"network_name"`
+	NetworkSecret string   `json:"-"`
+	DeviceName    string   `json:"device_name,omitempty"`
+	Peers         []string `json:"peers,omitempty"`
+	// Listeners are addresses this node accepts connections on; empty by default (`INV-07`).
+	Listeners    []string      `json:"listeners,omitempty"`
+	PortForwards []PortForward `json:"port_forwards,omitempty"`
 }
 
 // Status summarizes the embedded mesh for the UI.
@@ -42,6 +44,7 @@ type startParams struct {
 	NetworkSecret string        `json:"network_secret"`
 	DeviceName    string        `json:"device_name,omitempty"`
 	Peers         []string      `json:"peers,omitempty"`
+	Listeners     []string      `json:"listeners,omitempty"`
 	PortForwards  []PortForward `json:"port_forwards,omitempty"`
 }
 
@@ -49,6 +52,7 @@ type startParams struct {
 type coreStatus struct {
 	Running bool   `json:"running"`
 	Engine  string `json:"engine"`
+	Error   string `json:"error,omitempty"`
 }
 
 // Manager controls the single embedded mesh instance of a loaded core library.
@@ -76,11 +80,12 @@ func (m *Manager) Start(cfg Config) error {
 		NetworkSecret: cfg.NetworkSecret,
 		DeviceName:    cfg.DeviceName,
 		Peers:         cfg.Peers,
+		Listeners:     cfg.Listeners,
 		PortForwards:  cfg.PortForwards,
 	}, &st)
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.status = Status{Enabled: err == nil, Running: st.Running, Engine: st.Engine}
+	m.status = Status{Enabled: err == nil, Running: st.Running, Engine: st.Engine, LastError: st.Error}
 	if err != nil {
 		m.status.LastError = err.Error()
 	}
@@ -109,6 +114,7 @@ func (m *Manager) Status() Status {
 	if err == nil {
 		m.status.Running = st.Running
 		m.status.Engine = st.Engine
+		m.status.LastError = st.Error
 	}
 	return m.status
 }

@@ -255,7 +255,7 @@
   "TrayQuit": "Quit AndroFuse",
   "CompanionTitle": "AndroFuse Companion (Android)",
   "CompanionSubtitle": "Optional TLS 1.3 companion for telemetry, notifications, files, continuity, and cross-network ADB discovery.",
-  "CompanionStatusRunning": "Listening on port {port}",
+  "CompanionStatusRunning": "Listening on port {port, number, ::group-off}",
   "@CompanionStatusRunning": {
     "placeholders": {
       "port": { "type": "int" }
@@ -316,6 +316,67 @@
   },
   "MCPAuditTitle": "Recent Local MCP Audit",
   "PermMediaBridge": "PC Camera & Mic Uplink Bridge",
+  "MeshAcceptLabel": "Let other devices connect directly (random high port)",
+  "MeshListenPort": "Accepting connections on random port {port, number, ::group-off}",
+  "@MeshListenPort": {
+    "placeholders": {
+      "port": { "type": "int" }
+    }
+  },
+  "CompanionInstallPair": "Install Companion and pair · {model}",
+  "@CompanionInstallPair": {
+    "placeholders": {
+      "model": { "type": "String" }
+    }
+  },
+  "CompanionJoinMesh": "Also join the mesh {name}",
+  "@CompanionJoinMesh": {
+    "placeholders": {
+      "name": { "type": "String" }
+    }
+  },
+  "CompanionInstalling": "Installing the Companion on the phone…",
+  "CompanionConfirmCode": "Allow pairing on the phone. It shows the code {code}.",
+  "@CompanionConfirmCode": {
+    "placeholders": {
+      "code": { "type": "String" }
+    }
+  },
+  "CompanionPaired": "Paired with {model}",
+  "@CompanionPaired": {
+    "placeholders": {
+      "model": { "type": "String" }
+    }
+  },
+  "CompanionMeshJoined": "{model} joined the mesh {name}",
+  "@CompanionMeshJoined": {
+    "placeholders": {
+      "model": { "type": "String" },
+      "name": { "type": "String" }
+    }
+  },
+  "CompanionApkMissing": "Companion installer not found next to AndroFuse",
+
+  "PairPromptTitle": "Pair with this computer?",
+  "PairPromptBody": "{name} is connected over USB. Check that the computer shows the code {code}.",
+  "@PairPromptBody": {
+    "placeholders": {
+      "name": { "type": "String" },
+      "code": { "type": "String" }
+    }
+  },
+  "PairAllow": "Allow",
+  "PairDecline": "Decline",
+  "MeshPhoneTitle": "Cross-network mesh",
+  "MeshPhoneJoined": "Joined {name}",
+  "@MeshPhoneJoined": {
+    "placeholders": {
+      "name": { "type": "String" }
+    }
+  },
+  "MeshPhoneConnecting": "Connecting to the mesh…",
+  "MeshPhoneNone": "Not joined. Your computer can add this phone when you pair them.",
+  "MeshPhoneLeave": "Leave",
   "StandbyTitle": "Background standby",
   "StandbyDesc": "Lets your PC reach this phone after you close the app. Shows a quiet notification.",
   "StandbyNotifTitle": "AndroFuse is on standby",

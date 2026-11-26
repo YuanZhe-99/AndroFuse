@@ -46,8 +46,10 @@ AndroFuse 在 Rust（`core/androfuse-core`）与 Go（`internal/adb`、`internal
 
 ## 6. 可选 Android Companion TLS 1.3 协同协议（`internal/companion`）
 
-- **认证加密通道（`INV-07`）**：`internal/androidhost` 默认在 `27189` 端口托管可选 ECDSA P-256 TLS 1.3 服务并支持 SHA-256 证书指纹固定；首帧 `auth` 必须通过常量时间配对码校验（`subtle.ConstantTimeCompare`）。
+- **认证加密通道（`INV-07`）**：`internal/androidhost` 托管可选 ECDSA P-256 TLS 1.3 服务，共两个监听：在所有网卡上监听 20000–48999 内的随机高端口 TCP（`companion.PickPort`，保存在 `companion.json`，仍空闲时一直沿用，已配对电脑保存的局域网或组网地址因此持续有效；伴侣界面会显示该端口），以及电脑用 `adb forward tcp:0 localabstract:androfuse-companion` 访问的抽象本地套接字 `@androfuse-companion`，经 adb 配对因此无需固定端口。其 SHA-256 证书指纹由调用方固定；首帧 `auth` 必须通过常量时间配对码校验（`subtle.ConstantTimeCompare`）。
 - **分级授权开关与异网 ADB 端口信标（`INV-09`、`INV-11`）**：`status.get`、`clipboard.set`、`notification.reply`、`app.continuity`、`file.push`（路径穿越拦截 + SHA-256 校验）、`display.guard` 与动态 `_adb-tls-connect._tcp` 端口信标均由手机伴侣端独立开关门控；卸载 Companion APK 时基础有线/无线投屏与 DeX 仍完全可用。
+- **经 adb 首次配对（数字比对，`INV-09`）**：电脑用 `adb install -r` 安装伴侣，以不含任何密钥的 `androfuse://pair` 打开它（仅启动伴侣服务），再 `adb forward` 伴侣的本地套接字并发送 `pair.request {client_name, code}`。伴侣只在**本地套接字或回环连接**上接受该帧（局域网设备无法弹出提示），在手机上显示电脑名称与 6 位码，用户点「允许」后才返回 `{token, cert_fingerprint}`；拒绝或 `PairWait`（60 秒）超时则失败。电脑核对 TLS 指纹后用该令牌正常连接。
+- **组网交接（`mesh.join`，`INV-07`、`INV-08`）**：仅当电脑用户勾选「同时加入组网」且电脑组网正在运行时发送 `{network_name, network_secret, peers}`。`peers` 为电脑的中继，以及把电脑监听地址中的通配主机替换为本机局域网 IPv4 后的地址。手机用 Android Keystore AES-GCM 密钥密封后保存密钥，以无 TUN、无监听端口的方式加入，并在每次启动伴侣服务时自动重连；手机上可随时退出组网。电脑开启「允许其他设备直接连接」时，在 20000–48999 范围内随机选取 TCP/UDP 均空闲的高端口（低于 Windows 动态端口段，并跳过被占用或保留的端口），之后在仍空闲时沿用。EasyTier 自身报告的错误（如监听端口被占用）经 `mesh.status` 的 `error` 字段显示，此时不视为运行中。
 
 ## 7. 默认关闭的可授权本地 MCP 控制接口（`internal/mcp`）
 

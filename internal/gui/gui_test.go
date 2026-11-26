@@ -27,7 +27,7 @@ import (
 func testApp(t *testing.T) *App {
 	t.Helper()
 	a := New("test", t.TempDir())
-	a.compAddr = "100.64.0.2:27189"
+	a.compAddr = "100.64.0.2:38412"
 	a.compConnected = true
 	a.compStatus = companion.DeviceStatus{
 		BatteryPct:        88,

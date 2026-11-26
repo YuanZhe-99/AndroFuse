@@ -43,6 +43,7 @@ func main() {
 	}
 
 	mygo.App.OnSecondInstance(func([]string, string) { app.Focus() })
+	mygo.App.OnOpenURL(app.HandleURL)
 	mygo.App.OnActivate(func(hasVisibleWindows bool) {
 		if !hasVisibleWindows {
 			app.Focus()

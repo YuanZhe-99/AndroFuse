@@ -25,6 +25,8 @@ func RenderCompanionView(c *ui.Context, h *Host) {
 	audit := append([]string(nil), h.audit...)
 	fp := h.FingerprintLocked()
 	h.mu.Unlock()
+	pairReq, pairing := h.PendingPair()
+	meshName, meshRunning, meshErr := h.MeshState()
 
 	card := func(ctx *ui.Context) ui.Element {
 		return ui.Column(ctx).FillWidth().Padding(14).Gap(10).Radius(12).
@@ -32,6 +34,22 @@ func RenderCompanionView(c *ui.Context, h *Host) {
 	}
 
 	ui.Column(c.Key("android-companion-root")).FillWidth().Gap(14).Children(func() {
+		if pairing {
+			card(c.Key("comp-pair-card")).Border(2, t.Accent).Children(func() {
+				ui.Text(c, L.PairPromptTitle()).Bold().FontSize(16)
+				ui.Text(c, L.PairPromptBody(pairReq.ClientName, pairReq.Code)).FontSize(13)
+				ui.Text(c.Key("comp-pair-code"), pairReq.Code).Bold().FontSize(24)
+				ui.Row(c.Key("comp-pair-actions")).Gap(8).Children(func() {
+					if ui.Button(c.Key("comp-pair-allow"), L.PairAllow()).Clicked() {
+						go h.AnswerPair(true)
+					}
+					if ui.Button(c.Key("comp-pair-decline"), L.PairDecline()).Clicked() {
+						go h.AnswerPair(false)
+					}
+				})
+			})
+		}
+
 		card(c.Key("comp-header-card")).Children(func() {
 			ui.Text(c, L.CompanionTitle()).Bold().FontSize(18)
 			ui.Text(c, L.CompanionSubtitle()).FontSize(13).TextColor(t.TextMuted)
@@ -96,6 +114,29 @@ func RenderCompanionView(c *ui.Context, h *Host) {
 						h.SetPermission(p.key, cur)
 					}
 				})
+			}
+		})
+
+		card(c.Key("comp-mesh-card")).Children(func() {
+			ui.Text(c, L.MeshPhoneTitle()).Bold().FontSize(15)
+			switch {
+			case meshName == "":
+				ui.Text(c, L.MeshPhoneNone()).FontSize(12).TextColor(t.TextMuted)
+			default:
+				ui.Row(c.Key("comp-mesh-row")).FillWidth().AlignItems(ui.Center).Gap(10).Children(func() {
+					ui.Column(c.Key("comp-mesh-text")).Grow(1).Gap(2).Children(func() {
+						ui.Text(c, L.MeshPhoneJoined(meshName)).FontSize(13)
+						if !meshRunning {
+							ui.Text(c, L.MeshPhoneConnecting()).FontSize(12).TextColor(t.TextMuted)
+						}
+					})
+					if ui.Button(c.Key("comp-mesh-leave"), L.MeshPhoneLeave()).Clicked() {
+						go h.LeaveMesh()
+					}
+				})
+			}
+			if meshErr != "" {
+				ui.Text(c, meshErr).FontSize(12).TextColor(t.Danger)
 			}
 		})
 

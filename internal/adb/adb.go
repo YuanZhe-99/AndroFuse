@@ -604,6 +604,25 @@ func (c *Client) ForwardTCP(ctx context.Context, serial string, localPort int, s
 	return localPort, nil
 }
 
+// ForwardPort sets up `adb -s <serial> forward tcp:<localPort> <remote>`, where remote is an adb
+// socket spec such as `tcp:8080` or `localabstract:name`; localPort 0 lets
+// adb pick one.
+// Returns: the local port in use.
+func (c *Client) ForwardPort(ctx context.Context, serial string, localPort int, remote string) (int, error) {
+	out, err := c.Run(ctx, "-s", serial, "forward", fmt.Sprintf("tcp:%d", localPort), remote)
+	if err != nil {
+		return 0, err
+	}
+	if localPort != 0 {
+		return localPort, nil
+	}
+	p, err := strconv.Atoi(strings.TrimSpace(out))
+	if err != nil {
+		return 0, fmt.Errorf("parse allocated adb forward port %q: %w", out, err)
+	}
+	return p, nil
+}
+
 // RemoveForward deletes a local TCP forward previously created by ForwardTCP.
 func (c *Client) RemoveForward(ctx context.Context, serial string, localPort int) error {
 	if localPort <= 0 {

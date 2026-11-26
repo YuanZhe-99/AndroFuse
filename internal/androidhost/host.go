@@ -19,8 +19,13 @@ import (
 	L "github.com/YuanZhe-99/AndroFuse/locales"
 )
 
+// legacyListenPort is the fixed TCP port builds before random ports used and saved.
+const legacyListenPort = 27189
+
 // Config persists per-user Android Companion settings under `<stateDir>/companion.json`.
 type Config struct {
+	// ListenPort is the random high TCP port (companion.PickPort) the Companion keeps while it
+	// stays free, so a paired desktop's saved LAN or mesh address keeps working; 0 until chosen.
 	ListenPort      int                   `json:"listen_port"`
 	Token           string                `json:"token"`
 	Permissions     companion.Permissions `json:"permissions"`
@@ -28,6 +33,8 @@ type Config struct {
 	// Standby keeps the Companion reachable in the background through a minimum-importance
 	// foreground service; off by default (PLAN §9.1-3).
 	Standby bool `json:"standby,omitempty"`
+	// Mesh is the EasyTier network handed over by a paired desktop; nil when not joined.
+	Mesh *MeshSettings `json:"mesh,omitempty"`
 }
 
 // Host owns the Android-side TLS 1.3 Companion server, persisted permissions, and audit log.
@@ -46,6 +53,8 @@ type Host struct {
 	receiveBytes int64
 	network      string // default network kind from the Android NetworkCallback
 	stopNetWatch func()
+	pair         *pairPrompt
+	mesh         meshRuntime
 }
 
 // New constructs an Android Companion Host rooted at stateDir and loads saved config.
@@ -58,14 +67,14 @@ func New(stateDir string, onChange func()) *Host {
 		stateDir: stateDir,
 		onChange: onChange,
 		cfg: Config{
-			ListenPort:  companion.DefaultPort,
 			Token:       tok,
 			Permissions: companion.DefaultPermissions(),
 		},
 	}
 	h.loadConfig()
-	if h.cfg.ListenPort <= 0 {
-		h.cfg.ListenPort = companion.DefaultPort
+	if h.cfg.ListenPort == legacyListenPort {
+		// Builds before random ports saved the old fixed port; draw a random one instead.
+		h.cfg.ListenPort = 0
 	}
 	if strings.TrimSpace(h.cfg.Token) == "" {
 		h.cfg.Token = tok
@@ -119,7 +128,10 @@ func (h *Host) notify() {
 	}
 }
 
-// StartServer binds the TLS 1.3 Companion listener (`0.0.0.0:<ListenPort>` or `:0`).
+// StartServer binds the TLS 1.3 Companion listeners: TCP on all interfaces at ListenPort (a random
+// high port, kept while free) for LAN and mesh peers, and, on Android, the abstract local socket
+// companion.LocalSocket that `adb forward` reaches.
+// Side effects: saves a newly drawn ListenPort.
 func (h *Host) StartServer() error {
 	h.mu.Lock()
 	if h.running && h.srv != nil {
@@ -195,6 +207,8 @@ func (h *Host) StartServer() error {
 			h.notify()
 			return companion.DisplayGuardResponse{CleanedCount: 0, Message: "virtual display check complete"}, nil
 		},
+		OnPairRequest: h.askPair,
+		OnMeshJoin:    h.JoinMesh,
 		OnMediaFrame: func(req companion.MediaFrameRequest) (companion.MediaFrameResponse, error) {
 			androidbridge.TouchActive()
 			rawLen := len(req.DataBase64) * 3 / 4
@@ -214,11 +228,15 @@ func (h *Host) StartServer() error {
 		return err
 	}
 
-	addr := fmt.Sprintf(":%d", port)
-	if port == 0 {
-		addr = "127.0.0.1:0"
+	port, err = companion.PickPort(port)
+	if err == nil {
+		err = srv.Listen(fmt.Sprintf(":%d", port))
 	}
-	if err := srv.Listen(addr); err != nil {
+	if err == nil && localSocketAddr != "" {
+		err = srv.Listen(localSocketAddr)
+	}
+	if err != nil {
+		_ = srv.Close()
 		h.mu.Lock()
 		h.lastErr = err.Error()
 		h.mu.Unlock()
@@ -232,6 +250,10 @@ func (h *Host) StartServer() error {
 	h.cancelSrv = cancel
 	h.running = true
 	h.lastErr = ""
+	if h.cfg.ListenPort != port {
+		h.cfg.ListenPort = port
+		h.saveConfigLocked()
+	}
 	wPort := h.cfg.WirelessADBPort
 	standby := h.cfg.Standby
 	h.appendAuditLocked("TLS 1.3 companion listening on " + srv.Addr())
@@ -246,6 +268,7 @@ func (h *Host) StartServer() error {
 	h.mu.Lock()
 	h.stopNetWatch = stopNet
 	h.mu.Unlock()
+	go h.resumeMesh()
 	androidbridge.SyncCompanionWidget(true, wPort, readDeviceTelemetry().BatteryPct)
 	h.notify()
 

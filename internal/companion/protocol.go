@@ -9,17 +9,22 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 const (
 	// ProtocolVersion is the NDJSON Companion wire schema version.
 	ProtocolVersion = 1
-	// DefaultPort is the default TLS port the Android Companion listens on.
-	DefaultPort = 27189
+	// LocalSocket is the abstract local socket the Android Companion also listens on, so the
+	// desktop reaches it with `adb forward tcp:0 localabstract:<LocalSocket>` whatever random TCP
+	// port (PickPort) it uses for LAN and mesh connections.
+	LocalSocket = "androfuse-companion"
 	// MaxFilePushBytes caps a single inlined FilePushRequest payload at 16 MiB.
 	MaxFilePushBytes = 16 << 20
 	// MaxMediaFrameBytes caps a single PC->Android camera JPEG or mic PCM frame at 2 MiB.
 	MaxMediaFrameBytes = 2 << 20
+	// PairWait is how long the phone waits for its user to answer an adb pairing request.
+	PairWait = 60 * time.Second
 )
 
 // Permissions controls graded, opt-in Companion capabilities enforced server-side (`INV-09`).
@@ -158,6 +163,36 @@ type MediaFrameResponse struct {
 	OK            bool   `json:"ok"`
 	ReceivedBytes int    `json:"received_bytes"`
 	Message       string `json:"message,omitempty"`
+}
+
+// PairRequest asks the phone's user to pair with a desktop reached over adb (`adb forward`).
+// Notes: accepted only as the first frame of a loopback connection, so LAN peers cannot raise
+// prompts; the phone shows ClientName and Code and the user compares the code with the one the
+// desktop shows (`INV-09`).
+type PairRequest struct {
+	ClientName string `json:"client_name"`
+	Code       string `json:"code"`
+}
+
+// PairResponse carries the pairing token after the phone's user allowed the request.
+type PairResponse struct {
+	Token           string `json:"token"`
+	CertFingerprint string `json:"cert_fingerprint"`
+}
+
+// MeshJoinRequest hands the desktop's EasyTier network to the phone so it joins the same mesh.
+// Notes: the desktop sends it only after its user chose to (first-pairing checkbox, `INV-07`);
+// the secret travels inside the authenticated TLS 1.3 channel and is never logged (`INV-08`).
+type MeshJoinRequest struct {
+	NetworkName   string   `json:"network_name"`
+	NetworkSecret string   `json:"network_secret"`
+	Peers         []string `json:"peers,omitempty"`
+}
+
+// MeshJoinResponse reports whether the phone's embedded mesh is now running.
+type MeshJoinResponse struct {
+	Running bool   `json:"running"`
+	Message string `json:"message,omitempty"`
 }
 
 // SanitizeFileName enforces a single clean basename without traversal (`..`, separators, or NUL).

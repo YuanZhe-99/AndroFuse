@@ -16,3 +16,4 @@ mygo_windows_*.syso
 *.jks
 local.properties
 key.properties
+/internal/androidcore/kotlin/src/main/jniLibs/

@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -83,6 +84,7 @@ type guiRuntime struct {
 	compClient      *companion.Client
 	mcpServer       *mcp.Server
 	meshMgr         *mesh.Manager
+	meshCfg         mesh.Config // the running mesh, with its secret, for handing it to a paired phone
 	micUplink       *avbridge.UplinkBridge
 	micUplinkCancel context.CancelFunc
 	recoverRan      bool
@@ -98,6 +100,16 @@ func (a *App) ensureAndroidHost() *androidhost.Host {
 	h := a.rt.androidHost
 	a.rt.coreMu.Unlock()
 	return h
+}
+
+// HandleURL handles `androfuse://` deep links. On Android, `androfuse://pair` (opened over adb by
+// a desktop installing the Companion) starts the Companion service so that desktop can request
+// pairing; the link carries no secret, and pairing still needs the phone user's consent.
+func (a *App) HandleURL(u string) {
+	if runtime.GOOS != "android" || !strings.HasPrefix(u, "androfuse://pair") {
+		return
+	}
+	go func() { _ = a.ensureAndroidHost().StartServer() }()
 }
 
 // ConnectCompanion establishes an authenticated TLS 1.3 connection to an optional Android Companion APK.
@@ -1349,8 +1361,25 @@ func (a *App) LaunchPhoneCamera(d DiscoveredDevice, facing string) {
 // meshDeviceName is the EasyTier hostname the desktop announces on the mesh.
 const meshDeviceName = "androfuse-desktop"
 
-// StartMesh starts the default-disabled EasyTier mesh embedded in the core (`INV-07`).
-func (a *App) StartMesh(netName, secret, peer string) {
+// MeshPrefs is the desktop's EasyTier network, kept in gui.json like Kyokai's networks. The
+// secret is stored only sealed with DPAPI for the current Windows user (`INV-08`); On remembers
+// whether the user left the mesh running, which is off until they start it (`INV-07`).
+type MeshPrefs struct {
+	On          bool   `json:"on"`
+	NetworkName string `json:"network_name"`
+	Peer        string `json:"peer,omitempty"`
+	// Accept lets other devices connect directly, on ListenPort: a random high port chosen the
+	// first time and kept while it stays free, so a paired phone's saved address stays valid.
+	Accept       bool   `json:"accept,omitempty"`
+	ListenPort   int    `json:"listen_port,omitempty"`
+	SealedSecret []byte `json:"sealed_secret,omitempty"`
+}
+
+// StartMesh starts the default-disabled EasyTier mesh embedded in the core (`INV-07`) and
+// remembers the network. An empty secret reuses the saved one of the same network.
+// Inputs: accept opens TCP and UDP listeners on a random high port (see companion.PickPort); off,
+// the desktop only dials out.
+func (a *App) StartMesh(netName, secret, peer string, accept bool) {
 	a.rt.coreMu.Lock()
 	lib, lErr := a.ensureCoreLocked()
 	if lErr == nil && a.rt.meshMgr == nil {
@@ -1363,14 +1392,33 @@ func (a *App) StartMesh(netName, secret, peer string) {
 		return
 	}
 
-	cfg := mesh.Config{
-		Enabled:       true,
-		NetworkName:   strings.TrimSpace(netName),
-		NetworkSecret: strings.TrimSpace(secret),
-		DeviceName:    meshDeviceName,
+	netName, secret, peer = strings.TrimSpace(netName), strings.TrimSpace(secret), strings.TrimSpace(peer)
+	a.mu.Lock()
+	saved := a.prefs.Mesh
+	a.mu.Unlock()
+	if secret == "" && saved != nil && saved.NetworkName == netName && len(saved.SealedSecret) > 0 {
+		if b, err := openSecret(saved.SealedSecret); err == nil {
+			secret = string(b)
+		}
 	}
-	if p := strings.TrimSpace(peer); p != "" {
-		cfg.Peers = []string{p}
+
+	cfg := mesh.Config{Enabled: true, NetworkName: netName, NetworkSecret: secret, DeviceName: meshDeviceName}
+	if peer != "" {
+		cfg.Peers = []string{peer}
+	}
+	port := 0
+	if accept {
+		prev := 0
+		if saved != nil {
+			prev = saved.ListenPort
+		}
+		p, pErr := companion.PickPort(prev)
+		if pErr != nil {
+			a.update(func() { a.meshNotice = pErr.Error() })
+			return
+		}
+		port = p
+		cfg.Listeners = []string{fmt.Sprintf("tcp://0.0.0.0:%d", port), fmt.Sprintf("udp://0.0.0.0:%d", port)}
 	}
 	err := mgr.Start(cfg)
 
@@ -1380,9 +1428,27 @@ func (a *App) StartMesh(netName, secret, peer string) {
 		a.meshNotice = err.Error()
 	} else {
 		a.meshNotice = ""
+		a.rt.meshCfg = cfg
+		sealed, sErr := sealSecret([]byte(secret))
+		if sErr != nil {
+			sealed = nil
+		}
+		a.prefs.Mesh = &MeshPrefs{On: true, NetworkName: netName, Peer: peer, Accept: accept, ListenPort: port, SealedSecret: sealed}
+		a.savePrefs()
 	}
 	a.mu.Unlock()
 	a.runOnMain(func() {})
+}
+
+// resumeMesh restarts the remembered mesh at launch when the user left it running.
+func (a *App) resumeMesh() {
+	a.mu.Lock()
+	p := a.prefs.Mesh
+	a.mu.Unlock()
+	if p == nil || !p.On {
+		return
+	}
+	a.StartMesh(p.NetworkName, "", p.Peer, p.Accept)
 }
 
 // StopMesh stops the embedded EasyTier mesh.
@@ -1400,6 +1466,11 @@ func (a *App) StopMesh() {
 		a.meshNotice = err.Error()
 	} else {
 		a.meshNotice = ""
+		a.rt.meshCfg = mesh.Config{}
+		if a.prefs.Mesh != nil {
+			a.prefs.Mesh.On = false
+			a.savePrefs()
+		}
 	}
 	a.mu.Unlock()
 	a.runOnMain(func() {})

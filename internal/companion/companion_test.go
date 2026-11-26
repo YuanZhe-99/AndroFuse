@@ -122,3 +122,56 @@ func TestTLSCompanionAuthAndP1Roundtrip(t *testing.T) {
 		t.Fatalf("RunDisplayGuard: %+v err=%v", guard, err)
 	}
 }
+
+// TestADBPairingAndMeshJoin checks the adb pairing path end to end over loopback: the phone's
+// answer gates the token, a declined request gets nothing, and an authenticated desktop can hand
+// over its mesh.
+func TestADBPairingAndMeshJoin(t *testing.T) {
+	allow := true
+	var asked PairRequest
+	var joined MeshJoinRequest
+	srv, err := NewServer("PAIRADB1", "SM-F971U1", "17", 37, Handler{
+		GetPermissions: func() Permissions { return DefaultPermissions() },
+		OnPairRequest: func(r PairRequest) bool {
+			asked = r
+			return allow
+		},
+		OnMeshJoin: func(r MeshJoinRequest) (MeshJoinResponse, error) {
+			joined = r
+			return MeshJoinResponse{Running: true}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.Listen("127.0.0.1:0"); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	go func() { _ = srv.Serve(ctx) }()
+	defer srv.Close()
+
+	res, err := RequestPairing(ctx, srv.Addr(), "Desk", "123456")
+	if err != nil {
+		t.Fatalf("RequestPairing: %v", err)
+	}
+	if res.Token != "PAIRADB1" || res.CertFingerprint != srv.Fingerprint() || asked.Code != "123456" || asked.ClientName != "Desk" {
+		t.Fatalf("pairing result %+v asked %+v", res, asked)
+	}
+
+	allow = false
+	if _, err := RequestPairing(ctx, srv.Addr(), "Desk", "654321"); err == nil || !strings.Contains(err.Error(), "declined") {
+		t.Fatalf("declined pairing must fail, got %v", err)
+	}
+
+	c, err := Dial(ctx, srv.Addr(), res.Token, res.CertFingerprint)
+	if err != nil {
+		t.Fatalf("Dial with paired token: %v", err)
+	}
+	defer c.Close()
+	jr, err := c.JoinMesh(ctx, MeshJoinRequest{NetworkName: "home", NetworkSecret: "s3cret", Peers: []string{"tcp://relay:11010"}})
+	if err != nil || !jr.Running || joined.NetworkName != "home" || joined.NetworkSecret != "s3cret" {
+		t.Fatalf("JoinMesh = %+v, %v; handler got %+v", jr, err, joined)
+	}
+}

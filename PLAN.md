@@ -283,11 +283,12 @@ flowchart TB
 基于 2026-11-25 真机核查与用户反馈，以下五项工作作为下一阶段核心实施计划：
 
 #### 1. 内置集成式 EasyTier 组网（替代外部 CLI 进程托管）
-- **已落地（2026-11-25，Windows 桌面端）**：EasyTier v2.7.1（LGPL-3.0，与 `GPL-3.0-only` 兼容）经上游 `easytier-ffi` 静态链接进 `core/androfuse-core`（`mesh.rs`，固定修订 `0d9c52b`，未启用 `c-abi` 以免导出通用符号）；C ABI v6 新增 `androfuse_call` 方法 `mesh.start` / `mesh.stop` / `mesh.status`，强制 `no_tun`、无监听端口、端口转发仅绑定 `127.0.0.1`（`INV-07`）；`internal/mesh` 改为核心库客户端，桌面端 GUI 已切换，外部 `easytier-core.exe` 依赖移除；`packet.dll` 改为延迟加载；`core/deny.toml` 按用户批准仅放行 EasyTier 组织 git 源并显式允许其传递依赖的宽松许可证；`tools/fetchdeps` 固定 `protoc` 36.2，`-check-upstream` 与发布流程警告用于随 App 更新及时升级 EasyTier。
+- **已落地（2026-11-25，Windows 桌面端）**：EasyTier v2.7.1（LGPL-3.0，与 `GPL-3.0-only` 兼容）经上游 `easytier-ffi` 静态链接进 `core/androfuse-core`（`mesh.rs`，固定修订 `0d9c52b`，未启用 `c-abi` 以免导出通用符号）；C ABI v6 新增 `androfuse_call` 方法 `mesh.start` / `mesh.stop` / `mesh.status`，强制 `no_tun`、默认无监听端口、端口转发仅绑定 `127.0.0.1`（`INV-07`）；`internal/mesh` 改为核心库客户端，桌面端 GUI 已切换，外部 `easytier-core.exe` 依赖移除；`packet.dll` 改为延迟加载；`core/deny.toml` 按用户批准仅放行 EasyTier 组织 git 源并显式允许其传递依赖的宽松许可证；`tools/fetchdeps` 固定 `protoc` 36.2，`-check-upstream` 与发布流程警告用于随 App 更新及时升级 EasyTier。
+- **已落地（2026-11-25，Android 与首次配对自动入网）**：`scripts/build-android-core.sh` 用 NDK 构建内置 EasyTier 的 `libandrofuse_core.so`，由 MyGo 原生模块 `internal/androidcore` 打进 APK 并加载；电脑端组网设置像 Kyokai 一样保存在 `gui.json`（密钥 DPAPI 密封，开启状态启动时自动恢复）；首次经 adb 安装伴侣后以数字比对（`pair.request`，仅回环）配对，用户勾选「同时加入组网」时经 `mesh.join` 把组网交给手机，手机以 Android Keystore 密封保存并自动重连；`Pixel_9a_API_36` 端到端实测通过；所有监听均无固定端口：电脑组网的可选直连与手机伴侣 TCP 使用 20000–48999 内的随机高端口（空闲时沿用），经 adb 配对走 `localabstract:androfuse-companion` 本地套接字，随机端口下重跑同样通过。
 - **剩余**：
-  1. **Android Companion 接入**：为 `aarch64-linux-android` 构建 `libandrofuse_core.so` 并在 Companion 中加载（当前 Companion 尚未加载核心库）；
-  2. **跨网联调**：桌面端与手机端在同一组网下经公网中继实测 ADB TLS 与 Companion TLS 端口转发；
-  3. **CI 验证**：推送后确认 `windows-11-arm` / `windows-latest` 运行器的 clang 与 `protoc` 前置步骤生效。
+  1. **跨网联调**：电脑与真机经公网中继实测 ADB TLS 与 Companion TLS 端口转发；
+  2. **CI 验证**：推送后确认 Windows 运行器的 clang\/`protoc` 前置步骤与 Android 任务的核心库构建（`libclang`）生效；
+  3. **发布打包**：Windows 安装包需在 `companion/` 目录附带同版本伴侣 APK，桌面端「安装伴侣并配对」才能离线使用。
 
 #### 2. 手机端自连本地 Wi-Fi ADB 调研与设计（`INV-09`、`INV-13` 合规）
 - **已知结论（基于公开 AOSP 行为与开源先例，未参考商业代码）**：

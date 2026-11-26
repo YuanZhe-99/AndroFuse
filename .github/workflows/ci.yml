@@ -183,6 +183,14 @@ jobs:
           sdk="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
           yes | "$sdk/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null
           "$sdk/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0" "ndk;29.0.14206865" >/dev/null
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: stable
+          targets: aarch64-linux-android
+      - name: Rust core for Android (embedded EasyTier)
+        run: |
+          go run ./tools/fetchdeps
+          bash scripts/build-android-core.sh arm64-v8a
       - name: Android companion vet & APK
         env:
           KEYSTORE_B64: ${{ secrets.ANDROFUSE_ANDROID_KEYSTORE }}
