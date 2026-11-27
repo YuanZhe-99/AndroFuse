@@ -1,0 +1,10 @@
+title = "AndroFuse gitleaks config"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Dummy sequential hex fixture DeviceKey/Hash in Go tests"
+condition = "AND"
+paths = ['''_test\.go$''']
+regexes = ['''^0123456789abcdef$''']
