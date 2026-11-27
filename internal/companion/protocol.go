@@ -42,10 +42,14 @@ type Permissions struct {
 	ScreenShare bool `json:"screen_share"`
 }
 
-// DefaultPermissions returns conservative defaults (telemetry enabled; sensitive hooks opt-in).
+// DefaultPermissions returns safe defaults: telemetry, TLS ADB tunnel, and MediaProjection screen
+// viewing are enabled so first-time setup works smoothly while sensitive clipboard, notification,
+// file, continuity, and mic/camera permissions remain opt-in (`INV-07`, `INV-09`).
 func DefaultPermissions() Permissions {
 	return Permissions{
-		Telemetry: true,
+		Telemetry:   true,
+		ADBBeacon:   true,
+		ScreenShare: true,
 	}
 }
 
@@ -71,6 +75,9 @@ type AuthRequest struct {
 type AuthResponse struct {
 	OK              bool        `json:"ok"`
 	DeviceModel     string      `json:"device_model"`
+	DeviceName      string      `json:"device_name,omitempty"`
+	Manufacturer    string      `json:"manufacturer,omitempty"`
+	Brand           string      `json:"brand,omitempty"`
 	AndroidRelease  string      `json:"android_release"`
 	SDKInt          int         `json:"sdk_int"`
 	CertFingerprint string      `json:"cert_fingerprint"`
@@ -81,7 +88,7 @@ type AuthResponse struct {
 	Error    string `json:"error,omitempty"`
 }
 
-// DeviceStatus reports battery, thermal, foreground app, and cross-network ADB beacon state.
+// DeviceStatus reports battery, thermal, foreground app, and live ADB/Enhanced-mode availability.
 type DeviceStatus struct {
 	BatteryPct        int     `json:"battery_pct"`
 	Charging          bool    `json:"charging"`
@@ -91,6 +98,15 @@ type DeviceStatus struct {
 	WifiIPv4          string  `json:"wifi_ipv4,omitempty"`
 	ForegroundPackage string  `json:"foreground_package,omitempty"`
 	WirelessADBPort   int     `json:"wireless_adb_port,omitempty"`
+	// WirelessADBPairPort is this phone's live `_adb-tls-pairing._tcp` port while Android's
+	// Wireless debugging pairing dialog is open, 0 otherwise.
+	WirelessADBPairPort int `json:"wireless_adb_pair_port,omitempty"`
+	// USBDebugOn and WirelessDebugOn mirror Android global developer settings so the desktop
+	// knows whether ADB is enabled before prompting the user.
+	USBDebugOn         bool `json:"usb_debug_on,omitempty"`
+	WirelessDebugOn    bool `json:"wireless_debug_on,omitempty"`
+	ADBTunnelAllowed   bool `json:"adb_tunnel_allowed,omitempty"`
+	ScreenShareAllowed bool `json:"screen_share_allowed,omitempty"`
 	// MeshNetwork is the EasyTier network name the phone joined ("" for none) and MeshRunning
 	// whether it runs, so a desktop sees when the phone is not in its network (never the secret).
 	MeshNetwork string `json:"mesh_network,omitempty"`
@@ -237,16 +253,23 @@ type PairRequest struct {
 	ComputerID string `json:"computer_id,omitempty"`
 }
 
-// PairResponse carries the pairing token after the phone's user allowed the request.
+// PairResponse carries the pairing token, identity metadata, and optional initial status after the
+// phone's user allowed the request.
 type PairResponse struct {
 	Token           string `json:"token"`
 	CertFingerprint string `json:"cert_fingerprint"`
 	// Port is the Companion's random TCP port and Model the name it joins the mesh under, so the
 	// desktop can reach it again over LAN or the mesh without adb; MeshHost is its EasyTier
 	// hostname (mesh.Hostname).
-	Port     int    `json:"port,omitempty"`
-	Model    string `json:"model,omitempty"`
-	MeshHost string `json:"mesh_host,omitempty"`
+	Port           int           `json:"port,omitempty"`
+	Model          string        `json:"model,omitempty"`
+	DeviceName     string        `json:"device_name,omitempty"`
+	Manufacturer   string        `json:"manufacturer,omitempty"`
+	Brand          string        `json:"brand,omitempty"`
+	AndroidRelease string        `json:"android_release,omitempty"`
+	SDKInt         int           `json:"sdk_int,omitempty"`
+	MeshHost       string        `json:"mesh_host,omitempty"`
+	Status         *DeviceStatus `json:"status,omitempty"`
 }
 
 // MeshJoinRequest hands the desktop's EasyTier network to the phone so it joins the same mesh.

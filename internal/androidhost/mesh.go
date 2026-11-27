@@ -6,9 +6,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/YuanZhe-99/AndroFuse/internal/androidbridge"
 	"github.com/YuanZhe-99/AndroFuse/internal/companion"
 	"github.com/YuanZhe-99/AndroFuse/internal/core"
 	"github.com/YuanZhe-99/AndroFuse/internal/mesh"
+	L "github.com/YuanZhe-99/AndroFuse/locales"
 )
 
 // MeshSettings is the EasyTier network a paired desktop handed over (PLAN §9.1-1).
@@ -189,6 +191,8 @@ func (h *Host) askPair(req companion.PairRequest) bool {
 	h.pair = p
 	h.mu.Unlock()
 	h.notify()
+	androidbridge.ShowPairNotification(L.PairNotifTitle(), L.PairNotifBody(req.ClientName, spaced(req.Code)))
+	defer androidbridge.CancelPairNotification()
 
 	var ok bool
 	select {
@@ -199,7 +203,7 @@ func (h *Host) askPair(req companion.PairRequest) bool {
 	if h.pair == p {
 		h.pair = nil
 	}
-	h.appendAuditLocked(fmt.Sprintf("pairing with %q over adb: allowed=%v", req.ClientName, ok))
+	h.appendAuditLocked(fmt.Sprintf("pairing with %q: allowed=%v", req.ClientName, ok))
 	h.mu.Unlock()
 	h.notify()
 	return ok
@@ -214,6 +218,7 @@ func (h *Host) AnswerPair(allow bool) {
 	if p != nil {
 		p.answer <- allow
 	}
+	androidbridge.CancelPairNotification()
 	h.notify()
 }
 

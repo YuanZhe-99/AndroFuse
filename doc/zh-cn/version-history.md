@@ -1,5 +1,13 @@
 # 版本历史
 
+## v0.2.1（2026-11-27）
+
+- **零配置托管 ADB（`internal/adb` 与发行打包）**：Windows 发行包现在将官方 Android Platform Tools 随附于 `resources/windows/platform-tools/`（含 `NOTICE.txt` 且与 `bin/` 隔离），同时桌面端通过 `adb.FindClient` 与 `adb.InstallPlatformTools` 在普通用户电脑缺少 ADB 时自动经 Google HTTPS 下载并安全校验（防 Zip-Slip）解压；主页在工具就绪时保持安静，仅在缺失或下载中显示清晰提示与重试入口。
+- **免 ADB 跨网络首次配对与事后无损合并（`PairMeshPhone`）**：新增 `PairMeshPhone` 与 `rememberMeshPhone` / `mergeMeshRememberedLocked`，使已加入 EasyTier 组网且尚未插线的手机可直接经组网发起首次配对，手机端弹出 `IMPORTANCE_HIGH` 悬浮通知（`Power.showPairNotification`）并随 `PairResponse` 返回身份与实时状态，桌面先记入临时 `mesh:<devID>`，日后连上 ADB 时无损合并为真实硬件哈希（`ro.serialno`）。
+- **手机端 ADB 状态反馈与按需一次拉起增强协同**：新装伴侣按 `PermDefaultsV2` 默认开启遥测、无线调试信标与移动网络投屏；`Power.kt` 上报 `USBDebugOn`、`WirelessDebugOn` 及 NSD 发现的 `_adb-tls-pairing._tcp` 配对端口（`WirelessADBPairPort`），`tunnel.open` 支持连接与配对双重端口转发；桌面通过静默连接或实时轮询的「开启增强协同」弹窗（`EnsureEnhancedAndRun` / `ActivatePairAndBootstrap`）一次引导拉起 `dex.StartDaemon`。
+- **面向普通用户的界面与文案重制**：重构精简主页（「我的手机」标题栏、USB 授权提示、免裸 IP 的自动「发现的新手机」区域），新增侧栏「添加手机」与三标签添加向导弹窗（USB / 同 Wi-Fi 免输 IP 配对 / 跨网络组网及可折叠高级连接，`internal/gui/wizard.go`），配对等待卡片支持取消，将本机技术概览收纳到「设置 › 关于与更新」，并全面重写 604 条 `en` / `zh-Hans` 消费级交互文案。
+- **已知边界与已核对上游**：Android 伴侣真机端到端配对实测（`Power.kt`）与 CI 打包流水线随本次标签发布验证。已核对上游版本：Go `1.27.4` / MyGo `v0.10.0` / Rust `1.99.1` / scrcpy `v5.0.1` / EasyTier `v2.7.1` / Kyokai `v0.8.1`（核对日期 `2026-11-27`）。
+
 ## v0.2.0（2026-11-27）
 
 - **UID 2000 常驻增强协同守护进程（`INV-01`、`INV-03`）**：新增 `server/dexhelper` `Daemon.java`、`Daemon.kt` 与 `AndroFuseDaemonProvider`，通过内核 UID 校验的作用域 `IBinder` 交接（`getContentProviderExternal`）、`ADD_TRUSTED_DISPLAY` 探测、`Os.socketpair` `ParcelFileDescriptor` 零拷贝通道（`TX_ECHO_FD`）及 `linkToDeath` 自动重连，在免无线调试下经 Companion TLS 1.3 提供完整交互式手机镜像、三星原生 DeX（`dex:1920x1080/160` / `FlexDisplay`）与无边框独立应用窗口（`start_app` + `apps.list` / `TX_LIST_APPS` + 分设备 `icon-cache/<hwHash>/apps.json`）。

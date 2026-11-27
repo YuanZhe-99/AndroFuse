@@ -15,6 +15,14 @@ func deviceIdentity() (name, model, release string, sdk int) {
 	return "Android Companion (" + runtime.GOOS + ")", "Android Companion", "16", 36
 }
 
+func deviceDetails() (name, manufacturer, brand, model, release string, sdk int) {
+	return "Android Companion (" + runtime.GOOS + ")", "Google", "google", "Android Companion", "16", 36
+}
+
+func readADBSettings() (usbDebug, wirelessDebug bool) {
+	return false, false
+}
+
 func readDeviceTelemetry() companion.DeviceStatus {
 	return companion.DeviceStatus{
 		BatteryPct:  92,

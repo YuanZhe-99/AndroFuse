@@ -39,6 +39,11 @@ import org.json.JSONObject
 
 /** Plugin entry point; methods run on the UI thread. */
 class AndroFusePowerPlugin : MyGoPlugin {
+    companion object {
+        private const val CHANNEL_PAIR = "androfuse_pair"
+        private const val NOTIFICATION_ID_PAIR = 0x4147
+    }
+
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
     private var netCallback: ConnectivityManager.NetworkCallback? = null
@@ -89,9 +94,22 @@ class AndroFusePowerPlugin : MyGoPlugin {
             "globalAction" -> reply.success(AndroFuseShare.globalAction(args.optString("action")))
             "identity" -> reply.success(JSONObject()
                 .put("name", Settings.Global.getString(ctx.contentResolver, "device_name")?.takeIf { it.isNotBlank() } ?: Build.MODEL)
+                .put("manufacturer", Build.MANUFACTURER)
+                .put("brand", Build.BRAND)
                 .put("model", Build.MODEL)
                 .put("release", Build.VERSION.RELEASE)
                 .put("sdk", Build.VERSION.SDK_INT))
+            "adbSettings" -> {
+                val usbDebug = try {
+                    Settings.Global.getInt(ctx.contentResolver, Settings.Global.ADB_ENABLED, 0) == 1
+                } catch (_: Exception) { false }
+                val wirelessDebug = try {
+                    Settings.Global.getInt(ctx.contentResolver, "adb_wifi_enabled", 0) == 1
+                } catch (_: Exception) { false }
+                reply.success(JSONObject()
+                    .put("usbDebug", usbDebug)
+                    .put("wirelessDebug", wirelessDebug))
+            }
             "battery" -> {
                 // The sticky ACTION_BATTERY_CHANGED broadcast: no receiver is registered.
                 val b = ctx.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
@@ -161,6 +179,15 @@ class AndroFusePowerPlugin : MyGoPlugin {
                     .put("standby", AndroFuseStandbyService.running)
                     .put("network", currentNetwork(ctx)))
             }
+            "showPairNotification" -> {
+                showPairNotification(ctx, args.optString("title", "AndroFuse"), args.optString("body", ""))
+                reply.success(true)
+            }
+            "cancelPairNotification" -> {
+                val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                nm.cancel(NOTIFICATION_ID_PAIR)
+                reply.success(true)
+            }
             else -> reply.failure(PluginFailure("unknown_method", method))
         }
     }
@@ -206,44 +233,85 @@ class AndroFusePowerPlugin : MyGoPlugin {
         netCallback = cb
     }
 
-    // Wireless debugging advertises itself as _adb-tls-connect._tcp on the LAN with a port the system
-    // picks anew each time it starts. The phone discovers its own advertisement (the one whose
-    // address is one of this phone's), so the computer is told the port without the user typing it.
+    // Wireless debugging advertises itself as _adb-tls-connect._tcp (and temporary pairing dialogs
+    // as _adb-tls-pairing._tcp) on the LAN. The phone discovers its own advertisements so the PC
+    // receives updated ports without manual typing.
     private var nsdListener: NsdManager.DiscoveryListener? = null
+    private var nsdPairListener: NsdManager.DiscoveryListener? = null
     private var ownAdbService: String? = null
+    private var ownAdbPairService: String? = null
 
     private fun restartWirelessDebugging(ctx: Context) {
         val nsd = ctx.getSystemService(Context.NSD_SERVICE) as NsdManager
-        nsdListener?.let { old ->
-            try { nsd.stopServiceDiscovery(old) } catch (_: Exception) {}
-        }
+        nsdListener?.let { old -> try { nsd.stopServiceDiscovery(old) } catch (_: Exception) {} }
+        nsdPairListener?.let { old -> try { nsd.stopServiceDiscovery(old) } catch (_: Exception) {} }
         nsdListener = null
+        nsdPairListener = null
         ownAdbService = null
+        ownAdbPairService = null
+        PluginHost.emit("androfusePower", "adbPairPort", 0)
         watchWirelessDebugging(ctx)
     }
 
     private fun watchWirelessDebugging(ctx: Context) {
-        if (nsdListener != null) return
         val nsd = ctx.getSystemService(Context.NSD_SERVICE) as NsdManager
-        val l = object : NsdManager.DiscoveryListener {
-            override fun onDiscoveryStarted(serviceType: String) {}
-            override fun onDiscoveryStopped(serviceType: String) {}
-            override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) { nsdListener = null }
-            override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) {}
-            override fun onServiceFound(info: NsdServiceInfo) = resolveOwn(ctx, nsd, info)
-            override fun onServiceLost(info: NsdServiceInfo) {
-                if (info.serviceName == ownAdbService) {
-                    ownAdbService = null
-                    PluginHost.emit("androfusePower", "adbPort", 0)
-                }
-            }
+        if (nsdListener == null) {
+            nsdListener = startOwnDiscovery(ctx, nsd, "_adb-tls-connect._tcp",
+                onFoundPort = { svc, port ->
+                    ownAdbService = svc
+                    PluginHost.emit("androfusePower", "adbPort", port)
+                },
+                onLostSvc = { name ->
+                    if (name == ownAdbService) {
+                        ownAdbService = null
+                        PluginHost.emit("androfusePower", "adbPort", 0)
+                    }
+                },
+                onFail = { nsdListener = null })
         }
-        nsd.discoverServices("_adb-tls-connect._tcp", NsdManager.PROTOCOL_DNS_SD, l)
-        nsdListener = l
+        if (nsdPairListener == null) {
+            nsdPairListener = startOwnDiscovery(ctx, nsd, "_adb-tls-pairing._tcp",
+                onFoundPort = { svc, port ->
+                    ownAdbPairService = svc
+                    PluginHost.emit("androfusePower", "adbPairPort", port)
+                },
+                onLostSvc = { name ->
+                    if (name == ownAdbPairService) {
+                        ownAdbPairService = null
+                        PluginHost.emit("androfusePower", "adbPairPort", 0)
+                    }
+                },
+                onFail = { nsdPairListener = null })
+        }
+    }
+
+    private fun startOwnDiscovery(
+        ctx: Context,
+        nsd: NsdManager,
+        serviceType: String,
+        onFoundPort: (String, Int) -> Unit,
+        onLostSvc: (String) -> Unit,
+        onFail: () -> Unit,
+    ): NsdManager.DiscoveryListener? {
+        val l = object : NsdManager.DiscoveryListener {
+            override fun onDiscoveryStarted(st: String) {}
+            override fun onDiscoveryStopped(st: String) {}
+            override fun onStartDiscoveryFailed(st: String, errorCode: Int) { onFail() }
+            override fun onStopDiscoveryFailed(st: String, errorCode: Int) {}
+            override fun onServiceFound(info: NsdServiceInfo) = resolveOwn(ctx, nsd, info, onFoundPort)
+            override fun onServiceLost(info: NsdServiceInfo) = onLostSvc(info.serviceName)
+        }
+        return try {
+            nsd.discoverServices(serviceType, NsdManager.PROTOCOL_DNS_SD, l)
+            l
+        } catch (_: Exception) {
+            onFail()
+            null
+        }
     }
 
     @Suppress("DEPRECATION")
-    private fun resolveOwn(ctx: Context, nsd: NsdManager, info: NsdServiceInfo) {
+    private fun resolveOwn(ctx: Context, nsd: NsdManager, info: NsdServiceInfo, onFoundPort: (String, Int) -> Unit) {
         if (Build.VERSION.SDK_INT >= 34) {
             var ref: NsdManager.ServiceInfoCallback? = null
             val cb = object : NsdManager.ServiceInfoCallback {
@@ -251,8 +319,7 @@ class AndroFusePowerPlugin : MyGoPlugin {
                 override fun onServiceUpdated(s: NsdServiceInfo) {
                     val own = s.hostAddresses.any { isOwnAddress(it) } || (s.host?.let { isOwnAddress(it) } == true)
                     if (own && s.port > 0) {
-                        ownAdbService = s.serviceName
-                        PluginHost.emit("androfusePower", "adbPort", s.port)
+                        onFoundPort(s.serviceName, s.port)
                         ref?.let { c -> try { nsd.unregisterServiceInfoCallback(c) } catch (_: Exception) {} }
                     }
                 }
@@ -270,8 +337,7 @@ class AndroFusePowerPlugin : MyGoPlugin {
             override fun onServiceResolved(s: NsdServiceInfo) {
                 val host = s.host ?: return
                 if (!isOwnAddress(host)) return
-                ownAdbService = s.serviceName
-                PluginHost.emit("androfusePower", "adbPort", s.port)
+                onFoundPort(s.serviceName, s.port)
             }
         })
     }
@@ -304,6 +370,33 @@ class AndroFusePowerPlugin : MyGoPlugin {
             caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> "ethernet"
             caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "cellular"
             else -> "other"
+        }
+    }
+
+    private fun showPairNotification(ctx: Context, title: String, body: String) {
+        val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        if (Build.VERSION.SDK_INT >= 26 && nm.getNotificationChannel(CHANNEL_PAIR) == null) {
+            nm.createNotificationChannel(
+                NotificationChannel(CHANNEL_PAIR, "Pairing requests", NotificationManager.IMPORTANCE_HIGH)
+                    .apply { enableVibration(true) })
+        }
+        val builder = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(ctx, CHANNEL_PAIR)
+            else @Suppress("DEPRECATION") Notification.Builder(ctx)
+        builder
+            .setSmallIcon(ctx.applicationInfo.icon)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(Notification.BigTextStyle().bigText(body))
+            .setCategory(Notification.CATEGORY_MESSAGE)
+            .setAutoCancel(true)
+            .setContentIntent(openApp(ctx))
+        if (Build.VERSION.SDK_INT < 26) {
+            @Suppress("DEPRECATION")
+            builder.setPriority(Notification.PRIORITY_HIGH).setDefaults(Notification.DEFAULT_ALL)
+        }
+        try {
+            nm.notify(NOTIFICATION_ID_PAIR, builder.build())
+        } catch (_: SecurityException) {
         }
     }
 }

@@ -17,9 +17,9 @@ import (
 	L "github.com/YuanZhe-99/AndroFuse/locales"
 )
 
-// homePane is the Home pane: "This computer" and "Connect a phone" side by side (one above the
-// other when narrow), then one card per phone, then the phones of the joined networks this
-// computer never connected to.
+// homePane is the consumer Home pane: hero header with network & Add a phone controls,
+// conditional ADB/USB-auth banners, remembered/online phone cards, and automatically
+// discovered Wi-Fi/network phones ready to pair.
 func (a *App) homePane(c *ui.Context, k tokens) {
 	t := c.Theme()
 	ui.Column(c.Key("home-pane")).Grow(1).FillWidth().MinHeight(0).Radius(paneRadius).Clip().
@@ -32,94 +32,150 @@ func (a *App) homePane(c *ui.Context, k tokens) {
 		})
 		ui.Box(c.Key("home-line")).Height(1).FillWidth().Background(t.Border)
 		ui.Scroll(c.Key("home-scroll")).Grow(1).FillWidth().Children(func() {
-			ui.Column(c.Key("home-body")).FillWidth().MaxWidth(homeMaxW).Padding(24, 28, 32, 28).Gap(12).AlignSelf(ui.Center).Children(func() {
-				w, _ := c.Size()
-				narrow := w < 1000
-				dir := ui.Row
-				if narrow {
-					dir = ui.Column
-				}
-				dir(c.Key("home-top")).FillWidth().Gap(homeGap).AlignItems(ui.Stretch).Children(func() {
-					a.thisComputerCard(c, k, narrow)
-					a.connectCard(c, k, narrow)
-				})
+			ui.Column(c.Key("home-body")).FillWidth().MaxWidth(homeMaxW).Padding(24, 28, 32, 28).Gap(14).AlignSelf(ui.Center).Children(func() {
+				a.homeHero(c, k)
+				a.adbBanner(c, k)
 				a.phonesSection(c, k)
 			})
 		})
 	})
 }
 
-// homeCard is one of Home's top cards.
-func homeCard(c *ui.Context, key string, grow float32, narrow bool) ui.Element {
-	t := c.Theme()
-	e := ui.Column(c.Key(key)).Padding(cardPad).Gap(gap).Radius(cardRadius).Background(t.Surface).Border(1, t.Border).MinWidth(0)
-	if narrow {
-		return e.FillWidth()
-	}
-	return e.Grow(grow).Basis(0)
-}
-
-// cardTitle is a card's title row with an icon; extra goes on its right.
-func cardTitle(c *ui.Context, k tokens, key string, icon *ui.SVG, title string, extra func()) {
-	ui.Row(c.Key(key)).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
-		ui.Icon(c, icon).Size(18, 18).TextColor(k.text2)
-		ui.Text(c, title).Bold().FontSize(sizeHeading).Grow(1).SingleLine()
-		if extra != nil {
-			extra()
-		}
-	})
-}
-
-// thisComputerCard is "This computer": whether it is ready, how pictures decode, the networks, and
-// Android on this PC.
-func (a *App) thisComputerCard(c *ui.Context, k tokens, narrow bool) {
+// homeHero renders Home's clean top header: "My phones", phone count pill, network status, All/Online
+// filter, refresh, and the primary "+ Add a phone" action.
+func (a *App) homeHero(c *ui.Context, k tokens) {
 	a.mu.Lock()
-	ready, d, vmSt := a.diagReady, a.diag, a.vmStatus
+	devs := append([]DiscoveredDevice(nil), a.devices...)
+	onlineOnly := a.prefs.HomeOnlineOnly
+	scanning := a.scanningDevices
 	a.mu.Unlock()
-	vmSt = a.vmLive(vmSt)
+	offline := a.offlineRemembered(devs)
+	count := len(devs) + len(offline)
 	dot, netWords := a.networkSummary(k)
-	homeCard(c, "home-pc", 1, narrow).Children(func() {
-		cardTitle(c, k, "pc-title", iconDex, L.HomeThisComputer(), func() {
-			switch {
-			case !ready:
-				pill(c, "pc-state", L.ReadyChecking(), k.sunk, k.text2)
-			case d.CoreLoaded && d.ADBFound && !d.SelfCheck.IsEmulated:
-				pill(c, "pc-state", L.ReadyOK(), k.good.Alpha(0.14), k.goodText)
-			default:
-				pill(c, "pc-state", L.ReadyAttention(), k.warn.Alpha(0.16), k.warnText)
-			}
-		})
-		kv := func(key, label string, value func(), action func()) {
-			ui.Row(c.Key(key)).FillWidth().Gap(12).AlignItems(ui.Center).MinHeight(32).Children(func() {
-				ui.Text(c, label).FontSize(sizeSmall).TextColor(k.text3).Width(108).Shrink(0).SingleLine()
-				ui.Row(c).Grow(1).MinWidth(0).Gap(6).AlignItems(ui.Center).Children(value)
-				if action != nil {
-					action()
-				}
+
+	ui.Row(c.Key("home-hero")).FillWidth().Gap(12).AlignItems(ui.Center).Wrap().Children(func() {
+		ui.Column(c.Key("home-hero-l")).Grow(1).MinWidth(0).Gap(2).Children(func() {
+			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+				ui.Text(c, L.HomeMyPhones()).Bold().FontSize(sizeTitle)
+				pill(c, "home-count", strconv.Itoa(count), k.sunk, k.text2)
 			})
-		}
-		kv("pc-picture", L.HomePicture(), func() {
-			txt := L.HomeDecodeSoftware()
-			switch {
-			case d.SelfCheck.H264HWDecoder && d.SelfCheck.HEVCHWDecoder:
-				txt = L.HomeDecodeHardwareBoth()
-			case d.SelfCheck.H264HWDecoder:
-				txt = L.HomeDecodeHardwareH264()
+			ui.Text(c, L.HomeMyPhonesSub()).FontSize(sizeSmall).TextColor(k.text3)
+		})
+		ui.Row(c.Key("home-hero-r")).Gap(8).AlignItems(ui.Center).Wrap().Children(func() {
+			t := c.Theme()
+			nb := ui.ButtonBase(c.Key("home-net-btn")).Height(32).Padding(0, 10).Radius(radiusMD).Background(t.Surface).Border(1, t.Border).Label(netWords)
+			if nb.Hovered() {
+				nb.Background(t.SurfaceHover)
 			}
-			ui.Text(c, txt).FontSize(sizeBody).MaxLines(2)
-		}, nil)
-		kv("pc-net", L.HomeNetwork(), func() {
-			statusDot(c, dot)
-			ui.Text(c, netWords).FontSize(sizeBody).SingleLine()
-		}, func() {
-			if ui.Button(c.Key("pc-net-btn"), L.HomeNetworkSettings()).Clicked() {
+			nb.Children(func() {
+				ui.Row(c).FillHeight().Gap(6).AlignItems(ui.Center).Children(func() {
+					statusDot(c, dot)
+					ui.Text(c, netWords).FontSize(sizeSmall).SingleLine()
+				})
+			})
+			if nb.Clicked() {
 				a.openSettings(setNetwork)
 			}
+
+			idx := 0
+			if onlineOnly {
+				idx = 1
+			}
+			if ui.Segmented(c.Key("phones-filter"), &idx, L.HomeAll(), L.HomeOnline()).Changed() {
+				a.mu.Lock()
+				a.prefs.HomeOnlineOnly = idx == 1
+				a.savePrefs()
+				a.mu.Unlock()
+			}
+			rb := iconBtn(c, "phones-refresh", iconRefresh, L.DevicesRefresh(), false)
+			if scanning {
+				rb.Disabled(true)
+			}
+			if rb.Clicked() {
+				a.RefreshDevices()
+			}
+			if ui.PrimaryButton(c.Key("home-add-btn"), "+ "+L.NavAddPhone()).Clicked() {
+				a.OpenAddWizard(0)
+			}
 		})
-		kv("pc-vm", L.VMTitle(), func() {
-			ui.Text(c, vmStateWords(vmSt)).FontSize(sizeBody).TextColor(k.text2).SingleLine()
-		}, func() { a.vmAction(c, "pc-vm-btn", vmSt) })
 	})
+}
+
+// adbBanner shows a quiet progress or retry card on Home ONLY when managed phone connection tools
+// (ADB) are missing, currently downloading, or failed to download (`INV-10`). When ready, renders nothing.
+func (a *App) adbBanner(c *ui.Context, k tokens) {
+	a.mu.Lock()
+	missing, installing, pct, errMsg := a.adbMissing, a.adbInstalling, a.adbInstallPct, a.adbInstallErr
+	a.mu.Unlock()
+	if !missing && !installing && errMsg == "" {
+		return
+	}
+	t := c.Theme()
+	ui.Row(c.Key("adb-banner")).FillWidth().Radius(cardRadius).Background(t.Surface).Border(1, t.Border).Clip().Children(func() {
+		edge := k.brand
+		if !installing {
+			edge = k.warn
+		}
+		ui.Box(c).Width(noticeEdge).FillHeight().Background(edge)
+		ui.Column(c).Grow(1).MinWidth(0).Padding(12, 16).Gap(8).Children(func() {
+			switch {
+			case installing:
+				ui.Row(c).FillWidth().Gap(10).AlignItems(ui.Center).Children(func() {
+					ui.Spinner(c).Size(16, 16)
+					ui.Column(c).Grow(1).MinWidth(0).Gap(2).Children(func() {
+						ui.Text(c, L.ADBDownloadingTitle(pct)).Bold().FontSize(sizeBody)
+						ui.Text(c, L.ADBDownloadingSub()).FontSize(sizeSmall).TextColor(k.text2)
+					})
+				})
+				ui.Progress(c.Key("adb-dl-prog"), float64(pct)/100.0).FillWidth()
+			case errMsg != "":
+				ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
+					ui.Icon(c, iconWarn).Size(18, 18).TextColor(k.warnText)
+					ui.Column(c).Grow(1).MinWidth(0).Gap(2).Children(func() {
+						ui.Text(c, errMsg).Bold().FontSize(sizeBody)
+						ui.Text(c, L.ADBDownloadFailedSub()).FontSize(sizeSmall).TextColor(k.text2)
+					})
+					if ui.PrimaryButton(c.Key("adb-retry-btn"), L.ADBActionRetry()).Clicked() {
+						a.InstallADB()
+					}
+				})
+			default:
+				ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
+					ui.Icon(c, iconDownload).Size(18, 18).TextColor(k.warnText)
+					ui.Column(c).Grow(1).MinWidth(0).Gap(2).Children(func() {
+						ui.Text(c, L.CheckToolsMissing()).Bold().FontSize(sizeBody)
+						ui.Text(c, L.ADBDownloadingSub()).FontSize(sizeSmall).TextColor(k.text2)
+					})
+					if ui.PrimaryButton(c.Key("adb-dl-btn"), L.ADBActionDownload()).Clicked() {
+						a.InstallADB()
+					}
+				})
+			}
+		})
+	})
+}
+
+// usbAuthBanner prompts the user cleanly on Home whenever a plugged USB phone is awaiting
+// the phone-side "Allow USB debugging" confirmation.
+func (a *App) usbAuthBanner(c *ui.Context, k tokens, devs []DiscoveredDevice) {
+	for _, d := range devs {
+		hasUnauth := false
+		for _, tr := range d.Transports {
+			if tr.Transport == adb.TransportUSB && tr.State == "unauthorized" {
+				hasUnauth = true
+				break
+			}
+		}
+		if !hasUnauth {
+			continue
+		}
+		noticeCard(c, k, "usb-auth-"+d.HardwareHash, iconShield, true, L.USBAuthBannerTitle(), L.USBAuthBannerSub(a.phoneName(d)), func() {
+			if ui.Button(c.Key("usb-auth-ref-"+d.HardwareHash), L.DevicesRefresh()).Clicked() {
+				a.RefreshDevices()
+			}
+		})
+		break
+	}
 }
 
 // vmStateWords is the managed VM's state in words.
@@ -179,14 +235,13 @@ func (a *App) vmAction(c *ui.Context, key string, st vm.Status) {
 	}
 }
 
-// connectCard is "Connect a phone": one field for an address or a name (no port needed), Connect,
-// and "Open as"; below it the search's progress, pairing, or the port the phone shows.
-func (a *App) connectCard(c *ui.Context, k tokens, narrow bool) {
+// connectAdvancedBody renders the manual wireless address/port and pairing fields inside the
+// "+ Add a phone" wizard's collapsible Advanced section.
+func (a *App) connectAdvancedBody(c *ui.Context, k tokens) {
 	a.mu.Lock()
 	f := a.connect
 	a.mu.Unlock()
-	homeCard(c, "home-connect", 1, narrow).Children(func() {
-		cardTitle(c, k, "conn-title", iconLink, L.ConnectPhone(), nil)
+	ui.Column(c.Key("home-connect")).FillWidth().Gap(gap).Children(func() {
 		ui.Row(c.Key("conn-row")).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
 			in := ui.TextInput(c.Key("conn-input"), &a.connect.Input).Placeholder(L.ConnectPlaceholder()).Grow(1).MinWidth(0)
 			if in.Submitted() {
@@ -269,50 +324,20 @@ func (a *App) pairForm(c *ui.Context, k tokens, f connectFlow) {
 	}
 }
 
-// phonesSection is Home's phones: a header with the count, "Others in my networks" and All /
-// Online, the Rename editor while it is open, then a grid of cards at least devCardMinW wide.
+// phonesSection renders Home's phone cards grid, optional Rename editor, empty state, and
+// automatic "Found nearby or in your networks" section for unpaired Wi-Fi and mesh phones.
 func (a *App) phonesSection(c *ui.Context, k tokens) {
 	a.mu.Lock()
 	devs := append([]DiscoveredDevice(nil), a.devices...)
-	others, onlineOnly := a.prefs.OthersInNetworks, a.prefs.HomeOnlineOnly
+	hideDiscovered, onlineOnly := a.prefs.HideOthersInNetworks, a.prefs.HomeOnlineOnly
 	renaming := a.renaming
 	notice := a.deviceNotice
 	a.mu.Unlock()
 	offline := a.offlineRemembered(devs)
 	count := len(devs) + len(offline)
 
-	ui.Row(c.Key("phones-head")).FillWidth().Gap(10).AlignItems(ui.Center).Padding(16, 0, 0, 0).Wrap().Children(func() {
-		ui.Text(c, L.HomePhones()).Bold().FontSize(sizeBody).TextColor(k.text2)
-		ui.Text(c, strconv.Itoa(count)).FontSize(sizeBody).TextColor(k.text3).FontFeatures("tnum")
-		ui.Box(c).Grow(1)
-		ui.Text(c, L.HomeOthersInNetworks()).FontSize(sizeSmall).TextColor(k.text2)
-		if ui.Switch(c.Key("phones-others"), &others).Label(L.HomeOthersInNetworks()).Changed() {
-			a.mu.Lock()
-			a.prefs.OthersInNetworks = others
-			a.savePrefs()
-			a.mu.Unlock()
-		}
-		idx := 0
-		if onlineOnly {
-			idx = 1
-		}
-		if ui.Segmented(c.Key("phones-filter"), &idx, L.HomeAll(), L.HomeOnline()).Changed() {
-			a.mu.Lock()
-			a.prefs.HomeOnlineOnly = idx == 1
-			a.savePrefs()
-			a.mu.Unlock()
-		}
-		a.mu.Lock()
-		scanning := a.scanningDevices
-		a.mu.Unlock()
-		rb := iconBtn(c, "phones-refresh", iconRefresh, L.DevicesRefresh(), false)
-		if scanning {
-			rb.Disabled(true)
-		}
-		if rb.Clicked() {
-			a.RefreshDevices()
-		}
-	})
+	a.usbAuthBanner(c, k, devs)
+
 	if notice != "" {
 		ui.Text(c.Key("phones-notice"), notice).FontSize(sizeSmall).TextColor(k.warnText)
 	}
@@ -320,13 +345,17 @@ func (a *App) phonesSection(c *ui.Context, k tokens) {
 		a.renameEditor(c, k, renaming)
 	}
 	if count == 0 {
-		ui.Column(c.Key("phones-empty")).FillWidth().Padding(32, 16).Gap(10).AlignItems(ui.Center).Children(func() {
+		t := c.Theme()
+		ui.Column(c.Key("phones-empty")).FillWidth().Padding(28, 20).Gap(10).Radius(cardRadius).Background(t.Surface).Border(1, t.Border).AlignItems(ui.Center).Children(func() {
 			ui.Icon(c, iconDevices).Size(32, 32).TextColor(k.text3)
-			ui.Text(c, L.DevicesEmptyLine()).FontSize(sizeBody).TextColor(k.text2)
+			ui.Text(c, L.HomeEmptyTitle()).Bold().FontSize(sizeHeading)
+			ui.Text(c, L.HomeEmptySub()).FontSize(sizeSmall).TextColor(k.text2)
+			if ui.PrimaryButton(c.Key("empty-add-btn"), "+ "+L.NavAddPhone()).Clicked() {
+				a.OpenAddWizard(0)
+			}
 		})
 	}
-	// Two columns under the two top cards, edge to edge with them; four (each top card's width split
-	// in two, so the edges still line up) when there is room; one on a narrow window.
+	// Two columns across Home, four when wide enough, one when narrow.
 	w, _ := c.Size()
 	inner := min(w-sidebarW, homeMaxW) - 56
 	cols := 2
@@ -336,30 +365,54 @@ func (a *App) phonesSection(c *ui.Context, k tokens) {
 	case w >= 1000 && inner >= 4*devCardMinW+3*homeGap:
 		cols = 4
 	}
-	cards := make([]func(), 0, count+4)
+	renderGrid := func(prefix string, cards []func()) {
+		for row := 0; row*cols < len(cards); row++ {
+			ui.Row(c.Key(prefix + strconv.Itoa(row))).FillWidth().Gap(homeGap).AlignItems(ui.Stretch).Children(func() {
+				for i := row * cols; i < row*cols+cols; i++ {
+					if i < len(cards) {
+						cards[i]()
+					} else {
+						ui.Box(c).Grow(1).Basis(0)
+					}
+				}
+			})
+		}
+	}
+
+	cards := make([]func(), 0, count)
 	for _, d := range devs {
+		d := d
 		cards = append(cards, func() { a.phoneCard(c, k, d) })
 	}
 	if !onlineOnly {
 		for _, r := range offline {
+			r := r
 			cards = append(cards, func() { a.offlineCard(c, k, r) })
 		}
 	}
-	if others {
-		for _, p := range a.othersInNetworks() {
-			cards = append(cards, func() { a.networkPhoneCard(c, k, p) })
-		}
+	if len(cards) > 0 {
+		renderGrid("phones-row-", cards)
 	}
-	for row := 0; row*cols < len(cards); row++ {
-		ui.Row(c.Key("phones-row-" + strconv.Itoa(row))).FillWidth().Gap(homeGap).AlignItems(ui.Stretch).Children(func() {
-			for i := row * cols; i < row*cols+cols; i++ {
-				if i < len(cards) {
-					cards[i]()
-				} else {
-					ui.Box(c).Grow(1).Basis(0)
-				}
+
+	if !hideDiscovered {
+		wifiPairs := a.unpairedPairMDNSServices()
+		meshPeers := a.othersInNetworks()
+		if len(wifiPairs)+len(meshPeers) > 0 {
+			ui.Row(c.Key("found-head")).FillWidth().Padding(10, 0, 0, 0).Gap(8).AlignItems(ui.Center).Children(func() {
+				ui.Text(c, L.HomeFoundNew()).Bold().FontSize(sizeBody).TextColor(k.text2)
+				pill(c, "found-count", strconv.Itoa(len(wifiPairs)+len(meshPeers)), k.sunk, k.text2)
+			})
+			discovered := make([]func(), 0, len(wifiPairs)+len(meshPeers))
+			for idx, svc := range wifiPairs {
+				idx, svc := idx, svc
+				discovered = append(discovered, func() { a.mdnsWifiCard(c, k, idx, svc) })
 			}
-		})
+			for _, p := range meshPeers {
+				p := p
+				discovered = append(discovered, func() { a.networkPhoneCard(c, k, p) })
+			}
+			renderGrid("found-row-", discovered)
+		}
 	}
 }
 
@@ -721,16 +774,24 @@ func (a *App) offlineCard(c *ui.Context, k tokens, r RememberedDevice) {
 						dexLabel = L.KindDeX()
 					}
 					if m.Item(dexLabel).Chosen() {
-						a.LaunchDaemonDesktop(r.HardwareHash, OpenDefault)
+						if daemonAppsOK {
+							a.LaunchDaemonDesktop(r.HardwareHash, OpenDefault)
+						} else {
+							a.EnsureEnhancedAndRun(r.HardwareHash, openAsDeX)
+						}
 					}
-					if m.Item(L.KindScreen()).Chosen() {
+					if m.Item(L.ActionViewScreen()).Chosen() {
 						a.LaunchShare(r.HardwareHash, OpenDefault)
 					}
-					if hasApps && m.Item(L.KindAppMenu()).Chosen() {
-						if len(cachedApps) == 0 {
-							go a.fetchCompanionApps(r.HardwareHash)
+					if m.Item(L.KindAppMenu()).Chosen() {
+						if daemonAppsOK {
+							if len(cachedApps) == 0 {
+								go a.fetchCompanionApps(r.HardwareHash)
+							}
+							a.openPicker(openAsApp, r.HardwareHash)
+						} else {
+							a.EnsureEnhancedAndRun(r.HardwareHash, openAsApp)
 						}
-						a.openPicker(openAsApp, r.HardwareHash)
 					}
 					m.Separator()
 				}
@@ -759,56 +820,86 @@ func (a *App) offlineCard(c *ui.Context, k tokens, r RememberedDevice) {
 		})
 		if inNet {
 			a.phoneFigures(c, k, key, r.HardwareHash)
+			if r.Companion != nil {
+				switch {
+				case daemonAppsOK:
+					ui.Text(c, L.CardEnhancedReady()).FontSize(sizeSmall).TextColor(k.goodText)
+				case hasSt && st.NetworkType == "wifi" && (st.WirelessDebugOn || st.WirelessADBPort > 0):
+					ui.Text(c, L.CardEnhancedWifiHint()).FontSize(sizeSmall).TextColor(k.text2)
+				default:
+					ui.Text(c, L.CardEnhancedNeedsSetup()).FontSize(sizeSmall).TextColor(k.text3)
+				}
+			}
 		} else if r.AutoReconnect {
 			ui.Text(c, L.OfflineAutoHint()).FontSize(sizeSmall).TextColor(k.text3)
 		}
 		busy := a.cardWorkLine(c, k, key, r.HardwareHash)
 		ui.Box(c).Grow(1)
 		ui.Row(c.Key(key + "-acts")).Gap(6).AlignItems(ui.Center).Wrap().Children(func() {
-			// In a network without adb (mobile data), launch DeX/virtual desktop or screen share via Companion.
+			// In a network without adb, expose actions tailored to Enhanced mode readiness:
+			// active daemon gives DeX/Desktop + Apps + View screen; before activation, View screen
+			// is primary and DeX / Apps trigger guided one-time ADB bootstrap (`EnsureEnhancedAndRun`).
 			if inNet && r.Companion != nil {
+				dexLabel := L.KindDeXFallback()
 				if isSamsung {
-					sb := ui.PrimarySplitButton(c.Key(key+"-ddex-main"), L.KindDeX())
-					sb.Arrow.PopoverMenuButton(func(m *ui.Menu) {
-						if m.Item(L.OpenInPane()).Chosen() {
-							a.LaunchDaemonDesktop(r.HardwareHash, OpenPane)
+					dexLabel = L.KindDeX()
+				}
+				if daemonAppsOK {
+					if isSamsung {
+						sb := ui.PrimarySplitButton(c.Key(key+"-ddex-main"), L.KindDeX())
+						sb.Arrow.PopoverMenuButton(func(m *ui.Menu) {
+							if m.Item(L.OpenInPane()).Chosen() {
+								a.LaunchDaemonDesktop(r.HardwareHash, OpenPane)
+							}
+							if m.Item(L.OpenBeside()).Chosen() {
+								a.LaunchDaemonDesktop(r.HardwareHash, OpenSplit)
+							}
+							if m.Item(L.OpenInWindow()).Chosen() {
+								a.LaunchDaemonDesktop(r.HardwareHash, OpenWindow)
+							}
+						}, ui.PopoverMenuButtonOptions{At: ui.AnchorBottomStart, Self: ui.AnchorTopStart})
+						if sb.Button.Disabled(busy).Clicked() {
+							a.LaunchDaemonDesktop(r.HardwareHash, OpenDefault)
 						}
-						if m.Item(L.OpenBeside()).Chosen() {
-							a.LaunchDaemonDesktop(r.HardwareHash, OpenSplit)
+						if iconBtn(c, key+"-share-icon", iconMirror, L.ActionViewScreen(), false).Disabled(busy).Clicked() {
+							a.LaunchShare(r.HardwareHash, OpenDefault)
 						}
-						if m.Item(L.OpenInWindow()).Chosen() {
-							a.LaunchDaemonDesktop(r.HardwareHash, OpenWindow)
+					} else {
+						if ui.PrimaryButton(c.Key(key+"-share-main"), L.ActionViewScreen()).Disabled(busy).Clicked() {
+							a.LaunchShare(r.HardwareHash, OpenDefault)
 						}
-					}, ui.PopoverMenuButtonOptions{At: ui.AnchorBottomStart, Self: ui.AnchorTopStart})
-					if sb.Button.Disabled(busy).Clicked() {
-						a.LaunchDaemonDesktop(r.HardwareHash, OpenDefault)
+						if iconBtn(c, key+"-ddex", iconDex, L.KindDeXFallback(), false).Disabled(busy).Clicked() {
+							a.LaunchDaemonDesktop(r.HardwareHash, OpenDefault)
+						}
 					}
-					if iconBtn(c, key+"-share-icon", iconMirror, L.KindScreen(), false).Disabled(busy).Clicked() {
-						a.LaunchShare(r.HardwareHash, OpenDefault)
+					if hasApps && iconBtn(c, key+"-apps", iconApps, L.KindApp(), false).Disabled(busy).Clicked() {
+						if len(cachedApps) == 0 {
+							go a.fetchCompanionApps(r.HardwareHash)
+						}
+						a.openPicker(openAsApp, r.HardwareHash)
 					}
 				} else {
-					if ui.PrimaryButton(c.Key(key+"-share-main"), L.ShareScreen()).Disabled(busy).Clicked() {
+					if ui.PrimaryButton(c.Key(key+"-share-main"), L.ActionViewScreen()).Disabled(busy).Clicked() {
 						a.LaunchShare(r.HardwareHash, OpenDefault)
 					}
-					if iconBtn(c, key+"-ddex", iconDex, L.KindDeXFallback(), false).Disabled(busy).Clicked() {
-						a.LaunchDaemonDesktop(r.HardwareHash, OpenDefault)
+					if ui.Button(c.Key(key+"-ddex"), dexLabel).Disabled(busy).Clicked() {
+						a.EnsureEnhancedAndRun(r.HardwareHash, openAsDeX)
+					}
+					if iconBtn(c, key+"-apps", iconApps, L.KindApp(), false).Disabled(busy).Clicked() {
+						a.EnsureEnhancedAndRun(r.HardwareHash, openAsApp)
 					}
 				}
-				if hasApps && iconBtn(c, key+"-apps", iconApps, L.KindApp(), false).Disabled(busy).Clicked() {
-					if len(cachedApps) == 0 {
-						go a.fetchCompanionApps(r.HardwareHash)
-					}
-					a.openPicker(openAsApp, r.HardwareHash)
+			}
+			if !inNet {
+				if ui.Button(c.Key(key+"-connect"), L.ConnectGo()).Disabled(busy).Clicked() {
+					a.mu.Lock()
+					openAs := a.connect.OpenAs
+					a.mu.Unlock()
+					a.connectRemembered(r, openAs)
 				}
-			}
-			if ui.Button(c.Key(key+"-connect"), L.ConnectGo()).Disabled(busy).Clicked() {
-				a.mu.Lock()
-				openAs := a.connect.OpenAs
-				a.mu.Unlock()
-				a.connectRemembered(r, openAs)
-			}
-			if !inNet && r.Companion != nil && ui.Button(c.Key(key+"-share"), L.ShareScreen()).Disabled(busy).Clicked() {
-				a.LaunchShare(r.HardwareHash, OpenDefault)
+				if r.Companion != nil && ui.Button(c.Key(key+"-share"), L.ActionViewScreen()).Disabled(busy).Clicked() {
+					a.LaunchShare(r.HardwareHash, OpenDefault)
+				}
 			}
 		})
 	})
@@ -824,12 +915,13 @@ func lastSeenWords(t time.Time) string {
 
 // networkPhone is a phone in a joined network that this computer never connected to.
 type networkPhone struct {
-	Network string // the network's shown name
-	Peer    string // EasyTier hostname, the name it joined under (mesh.Hostname)
-	Name    string // the name the phone gives itself in that hostname
-	IPv4    string
-	Direct  bool
-	Latency float64
+	NetworkID string // local network ID (`MeshNetwork.ID`)
+	Network   string // the network's shown name
+	Peer      string // EasyTier hostname, the name it joined under (mesh.Hostname)
+	Name      string // the name the phone gives itself in that hostname
+	IPv4      string
+	Direct    bool
+	Latency   float64
 }
 
 // othersInNetworks lists the AndroFuse phones in the running networks that are no remembered
@@ -860,7 +952,7 @@ func (a *App) othersInNetworks() []networkPhone {
 			if name == "" {
 				name = devID
 			}
-			out = append(out, networkPhone{Network: nets[id], Peer: p.Hostname, Name: name, IPv4: p.IPv4, Direct: p.Direct, Latency: p.Latency})
+			out = append(out, networkPhone{NetworkID: id, Network: nets[id], Peer: p.Hostname, Name: name, IPv4: p.IPv4, Direct: p.Direct, Latency: p.Latency})
 		}
 	}
 	return out
@@ -887,8 +979,30 @@ func wayWords(direct bool, ms float64) string {
 	return w
 }
 
-// networkPhoneCard is a dashed card for a network peer this computer never connected to.
+// mdnsWifiCard shows an unpaired phone broadcasting Wireless debugging pairing on the same Wi-Fi.
+func (a *App) mdnsWifiCard(c *ui.Context, k tokens, idx int, svc adb.MDNSService) {
+	key := fmt.Sprintf("mdns-wifi-%d", idx)
+	phoneShell(c, key, true).Children(func() {
+		phoneHeader(c, k, key+"-h", func() {
+			ui.Box(c).Size(avatarSize, avatarSize).Radius(radiusMD).Background(k.brandSoft).Center().Children(func() {
+				ui.Icon(c, iconWifi).Size(18, 18).TextColor(k.brandSoftText)
+			})
+		}, L.HomeDiscoveredSameWifi(), L.HomeDiscoveredWifiHint(), func() {
+			pill(c, key+"-st", L.ActionPairNow(), k.brandSoft, k.brandSoftText)
+		}, nil)
+		ui.Box(c).Grow(1)
+		ui.Row(c.Key(key + "-acts")).Children(func() {
+			if ui.PrimaryButton(c.Key(key+"-pair"), L.ActionPairNow()).Clicked() {
+				a.OpenAddWizard(1)
+			}
+		})
+	})
+}
+
+// networkPhoneCard is a dashed card for an unpaired phone discovered in a joined network.
+// Clicking Pair & connect opens cross-network Companion pairing without exposing raw mesh IPs (`INV-08`).
 func (a *App) networkPhoneCard(c *ui.Context, k tokens, p networkPhone) {
+	_, devID, _, _ := mesh.ParseHostname(p.Peer)
 	key := "netp-" + p.Peer
 	phoneShell(c, key, true).Children(func() {
 		phoneHeader(c, k, key+"-h", func() {
@@ -900,13 +1014,17 @@ func (a *App) networkPhoneCard(c *ui.Context, k tokens, p networkPhone) {
 				col = k.good
 			}
 			statusDot(c, col)
-			ui.Text(c, routeWords(p.IPv4, p.Direct, p.Latency)).FontSize(sizeSmall).TextColor(k.text2).SingleLine()
+			ui.Text(c, wayWords(p.Direct, p.Latency)).FontSize(sizeSmall).TextColor(k.text2).SingleLine()
 		})
+		ui.Text(c, L.NetworkPairCardHint()).FontSize(sizeSmall).TextColor(k.text3)
+		busy := false
+		if devID != "" {
+			busy = a.cardWorkLine(c, k, key, "net:"+devID)
+		}
 		ui.Box(c).Grow(1)
 		ui.Row(c.Key(key + "-acts")).Children(func() {
-			if ui.Button(c.Key(key+"-connect"), L.ConnectGo()).Clicked() {
-				a.update(func() { a.connect.Input = p.IPv4 })
-				a.ConnectByAddress()
+			if ui.PrimaryButton(c.Key(key+"-pair"), L.NetworkPairConnect()).Disabled(busy).Clicked() {
+				a.PairMeshPhone(p)
 			}
 		})
 	})

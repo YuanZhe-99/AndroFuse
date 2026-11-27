@@ -81,20 +81,63 @@ type Client struct {
 	Path string
 }
 
-// FindClient locates adb (PATH first, then %LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe).
-func FindClient() (*Client, error) {
-	if p, err := exec.LookPath("adb"); err == nil {
-		return &Client{Path: p}, nil
+// ErrNotFound is returned by FindClient when no usable adb binary exists locally.
+var ErrNotFound = errors.New("adb executable not found")
+
+// CandidatePaths returns local candidate paths checked by FindClient when adb is not in PATH,
+// ordered by priority (adjacent platform-tools, adjacent binary, managed cache, VM tools, Android SDK).
+func CandidatePaths() []string {
+	exeName := adbExeName()
+	var out []string
+	if exe, err := os.Executable(); err == nil {
+		dir := filepath.Dir(exe)
+		out = append(out,
+			filepath.Join(dir, "platform-tools", exeName),
+			filepath.Join(dir, exeName),
+		)
+	}
+	if managed := DefaultPlatformToolsDir(); managed != "" {
+		out = append(out, filepath.Join(managed, exeName))
 	}
 	if runtime.GOOS == "windows" {
-		if local := os.Getenv("LOCALAPPDATA"); local != "" {
-			p := filepath.Join(local, "Android", "Sdk", "platform-tools", "adb.exe")
+		if local := strings.TrimSpace(os.Getenv("LOCALAPPDATA")); local != "" {
+			out = append(out,
+				filepath.Join(local, "AndroFuse", "vm", "sdk", "platform-tools", exeName),
+				filepath.Join(local, "Android", "Sdk", "platform-tools", exeName),
+			)
+		}
+	}
+	return out
+}
+
+// FindClient locates adb across adjacent packaged platform-tools, PATH, managed user cache,
+// VM SDK tools, and Android SDK platform-tools.
+// Returns: a ready Client or ErrNotFound.
+func FindClient() (*Client, error) {
+	exeName := adbExeName()
+	if exe, err := os.Executable(); err == nil {
+		dir := filepath.Dir(exe)
+		for _, p := range []string{
+			filepath.Join(dir, "platform-tools", exeName),
+			filepath.Join(dir, exeName),
+		} {
 			if _, err := os.Stat(p); err == nil {
 				return &Client{Path: p}, nil
 			}
 		}
 	}
-	return nil, errors.New("adb executable not found")
+	if p, err := exec.LookPath("adb"); err == nil {
+		return &Client{Path: p}, nil
+	}
+	for _, p := range CandidatePaths() {
+		if p == "" {
+			continue
+		}
+		if _, err := os.Stat(p); err == nil {
+			return &Client{Path: p}, nil
+		}
+	}
+	return nil, ErrNotFound
 }
 
 // MaskSerial scrubs a hardware serial or LAN endpoint for logs and diagnostics (INV-08).

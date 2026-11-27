@@ -636,21 +636,21 @@ func (msgs Messages) PermDisplayGuard() string {
 	return Catalog.Format(msgs.locale, "PermDisplayGuard", nil)
 }
 
-// PermADBBeacon says "Wireless debugging through the Companion"
+// PermADBBeacon says "Auto-activate & wireless connection"
 // in the language the app shows.
 func PermADBBeacon() string { return In(i18n.Locale()).PermADBBeacon() }
 
-// PermADBBeacon says "Wireless debugging through the Companion"
+// PermADBBeacon says "Auto-activate & wireless connection"
 // in the language of msgs.
 func (msgs Messages) PermADBBeacon() string {
 	return Catalog.Format(msgs.locale, "PermADBBeacon", nil)
 }
 
-// CompanionAuditTitle says "Recent Security & Control Audit"
+// CompanionAuditTitle says "Recent activity log"
 // in the language the app shows.
 func CompanionAuditTitle() string { return In(i18n.Locale()).CompanionAuditTitle() }
 
-// CompanionAuditTitle says "Recent Security & Control Audit"
+// CompanionAuditTitle says "Recent activity log"
 // in the language of msgs.
 func (msgs Messages) CompanionAuditTitle() string {
 	return Catalog.Format(msgs.locale, "CompanionAuditTitle", nil)
@@ -666,11 +666,11 @@ func (msgs Messages) PermMediaBridge() string {
 	return Catalog.Format(msgs.locale, "PermMediaBridge", nil)
 }
 
-// CompanionInstalling says "Installing the Companion on the phone…"
+// CompanionInstalling says "Installing Companion on the phone…"
 // in the language the app shows.
 func CompanionInstalling() string { return In(i18n.Locale()).CompanionInstalling() }
 
-// CompanionInstalling says "Installing the Companion on the phone…"
+// CompanionInstalling says "Installing Companion on the phone…"
 // in the language of msgs.
 func (msgs Messages) CompanionInstalling() string {
 	return Catalog.Format(msgs.locale, "CompanionInstalling", nil)
@@ -696,23 +696,23 @@ func (msgs Messages) CompanionPaired(model string) string {
 	return Catalog.Format(msgs.locale, "CompanionPaired", map[string]any{"model": model})
 }
 
-// CompanionMeshJoined says "{model} joined the mesh {name}"
+// CompanionMeshJoined says "{model} joined {name}"
 // in the language the app shows.
 func CompanionMeshJoined(model string, name string) string {
 	return In(i18n.Locale()).CompanionMeshJoined(model, name)
 }
 
-// CompanionMeshJoined says "{model} joined the mesh {name}"
+// CompanionMeshJoined says "{model} joined {name}"
 // in the language of msgs.
 func (msgs Messages) CompanionMeshJoined(model string, name string) string {
 	return Catalog.Format(msgs.locale, "CompanionMeshJoined", map[string]any{"model": model, "name": name})
 }
 
-// CompanionApkMissing says "Companion installer not found next to AndroFuse"
+// CompanionApkMissing says "AndroFuse Companion installer was not found."
 // in the language the app shows.
 func CompanionApkMissing() string { return In(i18n.Locale()).CompanionApkMissing() }
 
-// CompanionApkMissing says "Companion installer not found next to AndroFuse"
+// CompanionApkMissing says "AndroFuse Companion installer was not found."
 // in the language of msgs.
 func (msgs Messages) CompanionApkMissing() string {
 	return Catalog.Format(msgs.locale, "CompanionApkMissing", nil)
@@ -728,16 +728,38 @@ func (msgs Messages) PairPromptTitle() string {
 	return Catalog.Format(msgs.locale, "PairPromptTitle", nil)
 }
 
-// PairPromptBody says "{name} is connected over USB. Check that the computer shows the code {code}."
+// PairPromptBody says "{name} wants to pair with this phone. Check that the computer shows the code {code}."
 // in the language the app shows.
 func PairPromptBody(name string, code string) string {
 	return In(i18n.Locale()).PairPromptBody(name, code)
 }
 
-// PairPromptBody says "{name} is connected over USB. Check that the computer shows the code {code}."
+// PairPromptBody says "{name} wants to pair with this phone. Check that the computer shows the code {code}."
 // in the language of msgs.
 func (msgs Messages) PairPromptBody(name string, code string) string {
 	return Catalog.Format(msgs.locale, "PairPromptBody", map[string]any{"name": name, "code": code})
+}
+
+// PairNotifTitle says "Pair with this computer?"
+// in the language the app shows.
+func PairNotifTitle() string { return In(i18n.Locale()).PairNotifTitle() }
+
+// PairNotifTitle says "Pair with this computer?"
+// in the language of msgs.
+func (msgs Messages) PairNotifTitle() string {
+	return Catalog.Format(msgs.locale, "PairNotifTitle", nil)
+}
+
+// PairNotifBody says "{name} wants to pair (code {code}). Tap to review."
+// in the language the app shows.
+func PairNotifBody(name string, code string) string {
+	return In(i18n.Locale()).PairNotifBody(name, code)
+}
+
+// PairNotifBody says "{name} wants to pair (code {code}). Tap to review."
+// in the language of msgs.
+func (msgs Messages) PairNotifBody(name string, code string) string {
+	return Catalog.Format(msgs.locale, "PairNotifBody", map[string]any{"name": name, "code": code})
 }
 
 // PairAllow says "Allow"
@@ -1140,11 +1162,11 @@ func (msgs Messages) PermDisplayGuardSub() string {
 	return Catalog.Format(msgs.locale, "PermDisplayGuardSub", nil)
 }
 
-// PermADBBeaconSub says "Off by default · lets the paired computer reach Wireless debugging from another network"
+// PermADBBeaconSub says "On by default · lets paired computers activate Enhanced mode and connect directly"
 // in the language the app shows.
 func PermADBBeaconSub() string { return In(i18n.Locale()).PermADBBeaconSub() }
 
-// PermADBBeaconSub says "Off by default · lets the paired computer reach Wireless debugging from another network"
+// PermADBBeaconSub says "On by default · lets paired computers activate Enhanced mode and connect directly"
 // in the language of msgs.
 func (msgs Messages) PermADBBeaconSub() string {
 	return Catalog.Format(msgs.locale, "PermADBBeaconSub", nil)
@@ -1780,21 +1802,21 @@ func (msgs Messages) CheckTools() string {
 	return Catalog.Format(msgs.locale, "CheckTools", nil)
 }
 
-// CheckToolsMissing says "Not found next to AndroFuse"
+// CheckToolsMissing says "Will download automatically when needed"
 // in the language the app shows.
 func CheckToolsMissing() string { return In(i18n.Locale()).CheckToolsMissing() }
 
-// CheckToolsMissing says "Not found next to AndroFuse"
+// CheckToolsMissing says "Will download automatically when needed"
 // in the language of msgs.
 func (msgs Messages) CheckToolsMissing() string {
 	return Catalog.Format(msgs.locale, "CheckToolsMissing", nil)
 }
 
-// CheckToolsOK says "Installed with AndroFuse"
+// CheckToolsOK says "Ready"
 // in the language the app shows.
 func CheckToolsOK() string { return In(i18n.Locale()).CheckToolsOK() }
 
-// CheckToolsOK says "Installed with AndroFuse"
+// CheckToolsOK says "Ready"
 // in the language of msgs.
 func (msgs Messages) CheckToolsOK() string {
 	return Catalog.Format(msgs.locale, "CheckToolsOK", nil)
@@ -2120,11 +2142,11 @@ func (msgs Messages) HomeThisComputer() string {
 	return Catalog.Format(msgs.locale, "HomeThisComputer", nil)
 }
 
-// InNetworkNever says "In {network} · never connected"
+// InNetworkNever says "In {network} · not paired"
 // in the language the app shows.
 func InNetworkNever(network string) string { return In(i18n.Locale()).InNetworkNever(network) }
 
-// InNetworkNever says "In {network} · never connected"
+// InNetworkNever says "In {network} · not paired"
 // in the language of msgs.
 func (msgs Messages) InNetworkNever(network string) string {
 	return Catalog.Format(msgs.locale, "InNetworkNever", map[string]any{"network": network})
@@ -2722,11 +2744,11 @@ func (msgs Messages) PairNotYet() string {
 	return Catalog.Format(msgs.locale, "PairNotYet", nil)
 }
 
-// PairOnPhoneSub says "The phone shows the same code. Allow pairing there if it matches."
+// PairOnPhoneSub says "Check the notification or open AndroFuse Companion on the phone, verify the code matches, and tap Allow."
 // in the language the app shows.
 func PairOnPhoneSub() string { return In(i18n.Locale()).PairOnPhoneSub() }
 
-// PairOnPhoneSub says "The phone shows the same code. Allow pairing there if it matches."
+// PairOnPhoneSub says "Check the notification or open AndroFuse Companion on the phone, verify the code matches, and tap Allow."
 // in the language of msgs.
 func (msgs Messages) PairOnPhoneSub() string {
 	return Catalog.Format(msgs.locale, "PairOnPhoneSub", nil)
@@ -4524,21 +4546,21 @@ func (msgs Messages) ShareNeedsAccessibility() string {
 	return Catalog.Format(msgs.locale, "ShareNeedsAccessibility", nil)
 }
 
-// PermScreenShare says "Share the screen on mobile data"
+// PermScreenShare says "Screen viewing on mobile data"
 // in the language the app shows.
 func PermScreenShare() string { return In(i18n.Locale()).PermScreenShare() }
 
-// PermScreenShare says "Share the screen on mobile data"
+// PermScreenShare says "Screen viewing on mobile data"
 // in the language of msgs.
 func (msgs Messages) PermScreenShare() string {
 	return Catalog.Format(msgs.locale, "PermScreenShare", nil)
 }
 
-// PermScreenShareSub says "Off by default · when Wireless debugging cannot run; Android asks each time"
+// PermScreenShareSub says "On by default · lets paired computers view this screen before Enhanced mode is active (Android asks each time)"
 // in the language the app shows.
 func PermScreenShareSub() string { return In(i18n.Locale()).PermScreenShareSub() }
 
-// PermScreenShareSub says "Off by default · when Wireless debugging cannot run; Android asks each time"
+// PermScreenShareSub says "On by default · lets paired computers view this screen before Enhanced mode is active (Android asks each time)"
 // in the language of msgs.
 func (msgs Messages) PermScreenShareSub() string {
 	return Catalog.Format(msgs.locale, "PermScreenShareSub", nil)
@@ -5104,21 +5126,21 @@ func (msgs Messages) FailAssistant() string {
 	return Catalog.Format(msgs.locale, "FailAssistant", nil)
 }
 
-// PhoneDaemonReady says "Enhanced mode ready"
+// PhoneDaemonReady says "Enhanced mode active"
 // in the language the app shows.
 func PhoneDaemonReady() string { return In(i18n.Locale()).PhoneDaemonReady() }
 
-// PhoneDaemonReady says "Enhanced mode ready"
+// PhoneDaemonReady says "Enhanced mode active"
 // in the language of msgs.
 func (msgs Messages) PhoneDaemonReady() string {
 	return Catalog.Format(msgs.locale, "PhoneDaemonReady", nil)
 }
 
-// PhoneDaemonReadySub says "Full mirroring, DeX, and app windows work over Wi-Fi and 5G until the phone restarts"
+// PhoneDaemonReadySub says "Samsung DeX, App windows, and phone screen work over both Wi-Fi and 5G until the phone restarts"
 // in the language the app shows.
 func PhoneDaemonReadySub() string { return In(i18n.Locale()).PhoneDaemonReadySub() }
 
-// PhoneDaemonReadySub says "Full mirroring, DeX, and app windows work over Wi-Fi and 5G until the phone restarts"
+// PhoneDaemonReadySub says "Samsung DeX, App windows, and phone screen work over both Wi-Fi and 5G until the phone restarts"
 // in the language of msgs.
 func (msgs Messages) PhoneDaemonReadySub() string {
 	return Catalog.Format(msgs.locale, "PhoneDaemonReadySub", nil)
@@ -5134,11 +5156,11 @@ func (msgs Messages) PhoneDaemonOff() string {
 	return Catalog.Format(msgs.locale, "PhoneDaemonOff", nil)
 }
 
-// PhoneDaemonOffSub says "Connect to your PC once over USB or Wi-Fi to activate; full control then works on 5G"
+// PhoneDaemonOffSub says "Connect once over USB or same Wi-Fi to activate; DeX and App windows then also work on 5G"
 // in the language the app shows.
 func PhoneDaemonOffSub() string { return In(i18n.Locale()).PhoneDaemonOffSub() }
 
-// PhoneDaemonOffSub says "Connect to your PC once over USB or Wi-Fi to activate; full control then works on 5G"
+// PhoneDaemonOffSub says "Connect once over USB or same Wi-Fi to activate; DeX and App windows then also work on 5G"
 // in the language of msgs.
 func (msgs Messages) PhoneDaemonOffSub() string {
 	return Catalog.Format(msgs.locale, "PhoneDaemonOffSub", nil)
@@ -5310,4 +5332,766 @@ func PickerLoadingApps() string { return In(i18n.Locale()).PickerLoadingApps() }
 // in the language of msgs.
 func (msgs Messages) PickerLoadingApps() string {
 	return Catalog.Format(msgs.locale, "PickerLoadingApps", nil)
+}
+
+// NetworkPairConnect says "Pair & connect"
+// in the language the app shows.
+func NetworkPairConnect() string { return In(i18n.Locale()).NetworkPairConnect() }
+
+// NetworkPairConnect says "Pair & connect"
+// in the language of msgs.
+func (msgs Messages) NetworkPairConnect() string {
+	return Catalog.Format(msgs.locale, "NetworkPairConnect", nil)
+}
+
+// NetworkPairCardHint says "Sends a pairing prompt to the phone — no USB cable needed."
+// in the language the app shows.
+func NetworkPairCardHint() string { return In(i18n.Locale()).NetworkPairCardHint() }
+
+// NetworkPairCardHint says "Sends a pairing prompt to the phone — no USB cable needed."
+// in the language of msgs.
+func (msgs Messages) NetworkPairCardHint() string {
+	return Catalog.Format(msgs.locale, "NetworkPairCardHint", nil)
+}
+
+// MeshPairStarting says "Reaching {name} over the network…"
+// in the language the app shows.
+func MeshPairStarting(name string) string { return In(i18n.Locale()).MeshPairStarting(name) }
+
+// MeshPairStarting says "Reaching {name} over the network…"
+// in the language of msgs.
+func (msgs Messages) MeshPairStarting(name string) string {
+	return Catalog.Format(msgs.locale, "MeshPairStarting", map[string]any{"name": name})
+}
+
+// MeshPairWaiting says "Check {name} and allow pairing (code {code})."
+// in the language the app shows.
+func MeshPairWaiting(name string, code string) string {
+	return In(i18n.Locale()).MeshPairWaiting(name, code)
+}
+
+// MeshPairWaiting says "Check {name} and allow pairing (code {code})."
+// in the language of msgs.
+func (msgs Messages) MeshPairWaiting(name string, code string) string {
+	return Catalog.Format(msgs.locale, "MeshPairWaiting", map[string]any{"name": name, "code": code})
+}
+
+// MeshPairDeclined says "Pairing was declined on {name}."
+// in the language the app shows.
+func MeshPairDeclined(name string) string { return In(i18n.Locale()).MeshPairDeclined(name) }
+
+// MeshPairDeclined says "Pairing was declined on {name}."
+// in the language of msgs.
+func (msgs Messages) MeshPairDeclined(name string) string {
+	return Catalog.Format(msgs.locale, "MeshPairDeclined", map[string]any{"name": name})
+}
+
+// MeshPairFailedHint says "No pairing confirmation from {name}. Open AndroFuse on your phone and try again."
+// in the language the app shows.
+func MeshPairFailedHint(name string) string { return In(i18n.Locale()).MeshPairFailedHint(name) }
+
+// MeshPairFailedHint says "No pairing confirmation from {name}. Open AndroFuse on your phone and try again."
+// in the language of msgs.
+func (msgs Messages) MeshPairFailedHint(name string) string {
+	return Catalog.Format(msgs.locale, "MeshPairFailedHint", map[string]any{"name": name})
+}
+
+// HomeMyPhones says "My phones"
+// in the language the app shows.
+func HomeMyPhones() string { return In(i18n.Locale()).HomeMyPhones() }
+
+// HomeMyPhones says "My phones"
+// in the language of msgs.
+func (msgs Messages) HomeMyPhones() string {
+	return Catalog.Format(msgs.locale, "HomeMyPhones", nil)
+}
+
+// HomeMyPhonesSub says "Plug in a USB cable, or add a phone on your Wi-Fi or networks."
+// in the language the app shows.
+func HomeMyPhonesSub() string { return In(i18n.Locale()).HomeMyPhonesSub() }
+
+// HomeMyPhonesSub says "Plug in a USB cable, or add a phone on your Wi-Fi or networks."
+// in the language of msgs.
+func (msgs Messages) HomeMyPhonesSub() string {
+	return Catalog.Format(msgs.locale, "HomeMyPhonesSub", nil)
+}
+
+// HomeFoundNew says "Found nearby or in your networks"
+// in the language the app shows.
+func HomeFoundNew() string { return In(i18n.Locale()).HomeFoundNew() }
+
+// HomeFoundNew says "Found nearby or in your networks"
+// in the language of msgs.
+func (msgs Messages) HomeFoundNew() string {
+	return Catalog.Format(msgs.locale, "HomeFoundNew", nil)
+}
+
+// HomeDiscoveredSameWifi says "Same Wi-Fi · not paired yet"
+// in the language the app shows.
+func HomeDiscoveredSameWifi() string { return In(i18n.Locale()).HomeDiscoveredSameWifi() }
+
+// HomeDiscoveredSameWifi says "Same Wi-Fi · not paired yet"
+// in the language of msgs.
+func (msgs Messages) HomeDiscoveredSameWifi() string {
+	return Catalog.Format(msgs.locale, "HomeDiscoveredSameWifi", nil)
+}
+
+// HomeDiscoveredWifiHint says "Pair wirelessly without typing an address"
+// in the language the app shows.
+func HomeDiscoveredWifiHint() string { return In(i18n.Locale()).HomeDiscoveredWifiHint() }
+
+// HomeDiscoveredWifiHint says "Pair wirelessly without typing an address"
+// in the language of msgs.
+func (msgs Messages) HomeDiscoveredWifiHint() string {
+	return Catalog.Format(msgs.locale, "HomeDiscoveredWifiHint", nil)
+}
+
+// HomeEmptyTitle says "No phones added yet"
+// in the language the app shows.
+func HomeEmptyTitle() string { return In(i18n.Locale()).HomeEmptyTitle() }
+
+// HomeEmptyTitle says "No phones added yet"
+// in the language of msgs.
+func (msgs Messages) HomeEmptyTitle() string {
+	return Catalog.Format(msgs.locale, "HomeEmptyTitle", nil)
+}
+
+// HomeEmptySub says "Plug in a USB cable, or click Add a phone to connect over Wi-Fi or across networks."
+// in the language the app shows.
+func HomeEmptySub() string { return In(i18n.Locale()).HomeEmptySub() }
+
+// HomeEmptySub says "Plug in a USB cable, or click Add a phone to connect over Wi-Fi or across networks."
+// in the language of msgs.
+func (msgs Messages) HomeEmptySub() string {
+	return Catalog.Format(msgs.locale, "HomeEmptySub", nil)
+}
+
+// NavAddPhone says "Add a phone"
+// in the language the app shows.
+func NavAddPhone() string { return In(i18n.Locale()).NavAddPhone() }
+
+// NavAddPhone says "Add a phone"
+// in the language of msgs.
+func (msgs Messages) NavAddPhone() string {
+	return Catalog.Format(msgs.locale, "NavAddPhone", nil)
+}
+
+// ADBDownloadingTitle says "Preparing phone connection tools… {pct}%"
+// in the language the app shows.
+func ADBDownloadingTitle(pct int) string { return In(i18n.Locale()).ADBDownloadingTitle(pct) }
+
+// ADBDownloadingTitle says "Preparing phone connection tools… {pct}%"
+// in the language of msgs.
+func (msgs Messages) ADBDownloadingTitle(pct int) string {
+	return Catalog.Format(msgs.locale, "ADBDownloadingTitle", map[string]any{"pct": pct})
+}
+
+// ADBDownloadingSub says "Downloading required components for USB and Wi-Fi connections. Phones in your networks can already be paired below."
+// in the language the app shows.
+func ADBDownloadingSub() string { return In(i18n.Locale()).ADBDownloadingSub() }
+
+// ADBDownloadingSub says "Downloading required components for USB and Wi-Fi connections. Phones in your networks can already be paired below."
+// in the language of msgs.
+func (msgs Messages) ADBDownloadingSub() string {
+	return Catalog.Format(msgs.locale, "ADBDownloadingSub", nil)
+}
+
+// ADBDownloadFailedTitle says "Couldn't download phone connection tools"
+// in the language the app shows.
+func ADBDownloadFailedTitle() string { return In(i18n.Locale()).ADBDownloadFailedTitle() }
+
+// ADBDownloadFailedTitle says "Couldn't download phone connection tools"
+// in the language of msgs.
+func (msgs Messages) ADBDownloadFailedTitle() string {
+	return Catalog.Format(msgs.locale, "ADBDownloadFailedTitle", nil)
+}
+
+// ADBDownloadFailedSub says "Check your internet connection and try again. Phones in your networks can still be paired below."
+// in the language the app shows.
+func ADBDownloadFailedSub() string { return In(i18n.Locale()).ADBDownloadFailedSub() }
+
+// ADBDownloadFailedSub says "Check your internet connection and try again. Phones in your networks can still be paired below."
+// in the language of msgs.
+func (msgs Messages) ADBDownloadFailedSub() string {
+	return Catalog.Format(msgs.locale, "ADBDownloadFailedSub", nil)
+}
+
+// ADBActionDownload says "Download"
+// in the language the app shows.
+func ADBActionDownload() string { return In(i18n.Locale()).ADBActionDownload() }
+
+// ADBActionDownload says "Download"
+// in the language of msgs.
+func (msgs Messages) ADBActionDownload() string {
+	return Catalog.Format(msgs.locale, "ADBActionDownload", nil)
+}
+
+// ADBActionRetry says "Retry"
+// in the language the app shows.
+func ADBActionRetry() string { return In(i18n.Locale()).ADBActionRetry() }
+
+// ADBActionRetry says "Retry"
+// in the language of msgs.
+func (msgs Messages) ADBActionRetry() string {
+	return Catalog.Format(msgs.locale, "ADBActionRetry", nil)
+}
+
+// USBAuthBannerTitle says "Allow connection on your phone"
+// in the language the app shows.
+func USBAuthBannerTitle() string { return In(i18n.Locale()).USBAuthBannerTitle() }
+
+// USBAuthBannerTitle says "Allow connection on your phone"
+// in the language of msgs.
+func (msgs Messages) USBAuthBannerTitle() string {
+	return Catalog.Format(msgs.locale, "USBAuthBannerTitle", nil)
+}
+
+// USBAuthBannerSub says "{name} is plugged in over USB. Check \"Always allow from this computer\" and tap Allow on your phone."
+// in the language the app shows.
+func USBAuthBannerSub(name string) string { return In(i18n.Locale()).USBAuthBannerSub(name) }
+
+// USBAuthBannerSub says "{name} is plugged in over USB. Check \"Always allow from this computer\" and tap Allow on your phone."
+// in the language of msgs.
+func (msgs Messages) USBAuthBannerSub(name string) string {
+	return Catalog.Format(msgs.locale, "USBAuthBannerSub", map[string]any{"name": name})
+}
+
+// CardEnhancedReady says "Enhanced mode active"
+// in the language the app shows.
+func CardEnhancedReady() string { return In(i18n.Locale()).CardEnhancedReady() }
+
+// CardEnhancedReady says "Enhanced mode active"
+// in the language of msgs.
+func (msgs Messages) CardEnhancedReady() string {
+	return Catalog.Format(msgs.locale, "CardEnhancedReady", nil)
+}
+
+// CardEnhancedWifiHint says "On Wi-Fi · click DeX or App window for one-time activation"
+// in the language the app shows.
+func CardEnhancedWifiHint() string { return In(i18n.Locale()).CardEnhancedWifiHint() }
+
+// CardEnhancedWifiHint says "On Wi-Fi · click DeX or App window for one-time activation"
+// in the language of msgs.
+func (msgs Messages) CardEnhancedWifiHint() string {
+	return Catalog.Format(msgs.locale, "CardEnhancedWifiHint", nil)
+}
+
+// CardEnhancedNeedsSetup says "View screen works now · DeX needs one-time activation"
+// in the language the app shows.
+func CardEnhancedNeedsSetup() string { return In(i18n.Locale()).CardEnhancedNeedsSetup() }
+
+// CardEnhancedNeedsSetup says "View screen works now · DeX needs one-time activation"
+// in the language of msgs.
+func (msgs Messages) CardEnhancedNeedsSetup() string {
+	return Catalog.Format(msgs.locale, "CardEnhancedNeedsSetup", nil)
+}
+
+// ActionViewScreen says "View screen"
+// in the language the app shows.
+func ActionViewScreen() string { return In(i18n.Locale()).ActionViewScreen() }
+
+// ActionViewScreen says "View screen"
+// in the language of msgs.
+func (msgs Messages) ActionViewScreen() string {
+	return Catalog.Format(msgs.locale, "ActionViewScreen", nil)
+}
+
+// ActionActivateEnhanced says "Activate Enhanced mode"
+// in the language the app shows.
+func ActionActivateEnhanced() string { return In(i18n.Locale()).ActionActivateEnhanced() }
+
+// ActionActivateEnhanced says "Activate Enhanced mode"
+// in the language of msgs.
+func (msgs Messages) ActionActivateEnhanced() string {
+	return Catalog.Format(msgs.locale, "ActionActivateEnhanced", nil)
+}
+
+// ActionPairNow says "Pair"
+// in the language the app shows.
+func ActionPairNow() string { return In(i18n.Locale()).ActionPairNow() }
+
+// ActionPairNow says "Pair"
+// in the language of msgs.
+func (msgs Messages) ActionPairNow() string {
+	return Catalog.Format(msgs.locale, "ActionPairNow", nil)
+}
+
+// ActionLater says "Later"
+// in the language the app shows.
+func ActionLater() string { return In(i18n.Locale()).ActionLater() }
+
+// ActionLater says "Later"
+// in the language of msgs.
+func (msgs Messages) ActionLater() string {
+	return Catalog.Format(msgs.locale, "ActionLater", nil)
+}
+
+// WizardTitle says "Add a phone"
+// in the language the app shows.
+func WizardTitle() string { return In(i18n.Locale()).WizardTitle() }
+
+// WizardTitle says "Add a phone"
+// in the language of msgs.
+func (msgs Messages) WizardTitle() string {
+	return Catalog.Format(msgs.locale, "WizardTitle", nil)
+}
+
+// WizardSubtitle says "Choose the easiest way right now"
+// in the language the app shows.
+func WizardSubtitle() string { return In(i18n.Locale()).WizardSubtitle() }
+
+// WizardSubtitle says "Choose the easiest way right now"
+// in the language of msgs.
+func (msgs Messages) WizardSubtitle() string {
+	return Catalog.Format(msgs.locale, "WizardSubtitle", nil)
+}
+
+// WizardTabUSB says "USB cable"
+// in the language the app shows.
+func WizardTabUSB() string { return In(i18n.Locale()).WizardTabUSB() }
+
+// WizardTabUSB says "USB cable"
+// in the language of msgs.
+func (msgs Messages) WizardTabUSB() string {
+	return Catalog.Format(msgs.locale, "WizardTabUSB", nil)
+}
+
+// WizardTabUSBSub says "Best for first time"
+// in the language the app shows.
+func WizardTabUSBSub() string { return In(i18n.Locale()).WizardTabUSBSub() }
+
+// WizardTabUSBSub says "Best for first time"
+// in the language of msgs.
+func (msgs Messages) WizardTabUSBSub() string {
+	return Catalog.Format(msgs.locale, "WizardTabUSBSub", nil)
+}
+
+// WizardTabWifi says "Same Wi-Fi"
+// in the language the app shows.
+func WizardTabWifi() string { return In(i18n.Locale()).WizardTabWifi() }
+
+// WizardTabWifi says "Same Wi-Fi"
+// in the language of msgs.
+func (msgs Messages) WizardTabWifi() string {
+	return Catalog.Format(msgs.locale, "WizardTabWifi", nil)
+}
+
+// WizardTabWifiSub says "No cable, auto-discovered"
+// in the language the app shows.
+func WizardTabWifiSub() string { return In(i18n.Locale()).WizardTabWifiSub() }
+
+// WizardTabWifiSub says "No cable, auto-discovered"
+// in the language of msgs.
+func (msgs Messages) WizardTabWifiSub() string {
+	return Catalog.Format(msgs.locale, "WizardTabWifiSub", nil)
+}
+
+// WizardTabMesh says "Cross-network"
+// in the language the app shows.
+func WizardTabMesh() string { return In(i18n.Locale()).WizardTabMesh() }
+
+// WizardTabMesh says "Cross-network"
+// in the language of msgs.
+func (msgs Messages) WizardTabMesh() string {
+	return Catalog.Format(msgs.locale, "WizardTabMesh", nil)
+}
+
+// WizardTabMeshSub says "Away or on 5G"
+// in the language the app shows.
+func WizardTabMeshSub() string { return In(i18n.Locale()).WizardTabMeshSub() }
+
+// WizardTabMeshSub says "Away or on 5G"
+// in the language of msgs.
+func (msgs Messages) WizardTabMeshSub() string {
+	return Catalog.Format(msgs.locale, "WizardTabMeshSub", nil)
+}
+
+// WizardUSBStep1Title says "Connect your phone with a USB cable"
+// in the language the app shows.
+func WizardUSBStep1Title() string { return In(i18n.Locale()).WizardUSBStep1Title() }
+
+// WizardUSBStep1Title says "Connect your phone with a USB cable"
+// in the language of msgs.
+func (msgs Messages) WizardUSBStep1Title() string {
+	return Catalog.Format(msgs.locale, "WizardUSBStep1Title", nil)
+}
+
+// WizardUSBStep1Sub says "If needed, open Settings › About phone, tap Build number 7 times, then turn on USB debugging in Developer options."
+// in the language the app shows.
+func WizardUSBStep1Sub() string { return In(i18n.Locale()).WizardUSBStep1Sub() }
+
+// WizardUSBStep1Sub says "If needed, open Settings › About phone, tap Build number 7 times, then turn on USB debugging in Developer options."
+// in the language of msgs.
+func (msgs Messages) WizardUSBStep1Sub() string {
+	return Catalog.Format(msgs.locale, "WizardUSBStep1Sub", nil)
+}
+
+// WizardUSBStep2Title says "Tap Allow on your phone"
+// in the language the app shows.
+func WizardUSBStep2Title() string { return In(i18n.Locale()).WizardUSBStep2Title() }
+
+// WizardUSBStep2Title says "Tap Allow on your phone"
+// in the language of msgs.
+func (msgs Messages) WizardUSBStep2Title() string {
+	return Catalog.Format(msgs.locale, "WizardUSBStep2Title", nil)
+}
+
+// WizardUSBStep2Sub says "Check \"Always allow from this computer\" so future USB connections work immediately."
+// in the language the app shows.
+func WizardUSBStep2Sub() string { return In(i18n.Locale()).WizardUSBStep2Sub() }
+
+// WizardUSBStep2Sub says "Check \"Always allow from this computer\" so future USB connections work immediately."
+// in the language of msgs.
+func (msgs Messages) WizardUSBStep2Sub() string {
+	return Catalog.Format(msgs.locale, "WizardUSBStep2Sub", nil)
+}
+
+// WizardUSBStep3Title says "Optional: Install AndroFuse on your phone"
+// in the language the app shows.
+func WizardUSBStep3Title() string { return In(i18n.Locale()).WizardUSBStep3Title() }
+
+// WizardUSBStep3Title says "Optional: Install AndroFuse on your phone"
+// in the language of msgs.
+func (msgs Messages) WizardUSBStep3Title() string {
+	return Catalog.Format(msgs.locale, "WizardUSBStep3Title", nil)
+}
+
+// WizardUSBStep3Sub says "Unlocks clipboard, notifications, file transfer, wireless handoff, and cross-network connection."
+// in the language the app shows.
+func WizardUSBStep3Sub() string { return In(i18n.Locale()).WizardUSBStep3Sub() }
+
+// WizardUSBStep3Sub says "Unlocks clipboard, notifications, file transfer, wireless handoff, and cross-network connection."
+// in the language of msgs.
+func (msgs Messages) WizardUSBStep3Sub() string {
+	return Catalog.Format(msgs.locale, "WizardUSBStep3Sub", nil)
+}
+
+// WizardUSBWaiting says "Waiting for a USB phone…"
+// in the language the app shows.
+func WizardUSBWaiting() string { return In(i18n.Locale()).WizardUSBWaiting() }
+
+// WizardUSBWaiting says "Waiting for a USB phone…"
+// in the language of msgs.
+func (msgs Messages) WizardUSBWaiting() string {
+	return Catalog.Format(msgs.locale, "WizardUSBWaiting", nil)
+}
+
+// WizardWifiStep1Title says "Keep your phone and PC on the same Wi-Fi"
+// in the language the app shows.
+func WizardWifiStep1Title() string { return In(i18n.Locale()).WizardWifiStep1Title() }
+
+// WizardWifiStep1Title says "Keep your phone and PC on the same Wi-Fi"
+// in the language of msgs.
+func (msgs Messages) WizardWifiStep1Title() string {
+	return Catalog.Format(msgs.locale, "WizardWifiStep1Title", nil)
+}
+
+// WizardWifiStep1Sub says "Open Settings › Developer options › Wireless debugging on your phone and tap Pair device with pairing code."
+// in the language the app shows.
+func WizardWifiStep1Sub() string { return In(i18n.Locale()).WizardWifiStep1Sub() }
+
+// WizardWifiStep1Sub says "Open Settings › Developer options › Wireless debugging on your phone and tap Pair device with pairing code."
+// in the language of msgs.
+func (msgs Messages) WizardWifiStep1Sub() string {
+	return Catalog.Format(msgs.locale, "WizardWifiStep1Sub", nil)
+}
+
+// WizardWifiPairFound says "Ready to pair — enter the 6-digit code from your phone"
+// in the language the app shows.
+func WizardWifiPairFound() string { return In(i18n.Locale()).WizardWifiPairFound() }
+
+// WizardWifiPairFound says "Ready to pair — enter the 6-digit code from your phone"
+// in the language of msgs.
+func (msgs Messages) WizardWifiPairFound() string {
+	return Catalog.Format(msgs.locale, "WizardWifiPairFound", nil)
+}
+
+// WizardWifiNone says "No pairing window detected on Wi-Fi yet. Tap \"Pair device with pairing code\" on your phone."
+// in the language the app shows.
+func WizardWifiNone() string { return In(i18n.Locale()).WizardWifiNone() }
+
+// WizardWifiNone says "No pairing window detected on Wi-Fi yet. Tap \"Pair device with pairing code\" on your phone."
+// in the language of msgs.
+func (msgs Messages) WizardWifiNone() string {
+	return Catalog.Format(msgs.locale, "WizardWifiNone", nil)
+}
+
+// WizardMeshStep1Title says "Open AndroFuse on your phone and join the same network"
+// in the language the app shows.
+func WizardMeshStep1Title() string { return In(i18n.Locale()).WizardMeshStep1Title() }
+
+// WizardMeshStep1Title says "Open AndroFuse on your phone and join the same network"
+// in the language of msgs.
+func (msgs Messages) WizardMeshStep1Title() string {
+	return Catalog.Format(msgs.locale, "WizardMeshStep1Title", nil)
+}
+
+// WizardMeshStep1Sub says "No same Wi-Fi or USB debugging required; works even on mobile data."
+// in the language the app shows.
+func WizardMeshStep1Sub() string { return In(i18n.Locale()).WizardMeshStep1Sub() }
+
+// WizardMeshStep1Sub says "No same Wi-Fi or USB debugging required; works even on mobile data."
+// in the language of msgs.
+func (msgs Messages) WizardMeshStep1Sub() string {
+	return Catalog.Format(msgs.locale, "WizardMeshStep1Sub", nil)
+}
+
+// WizardMeshNone says "No new phones seen in your joined networks right now."
+// in the language the app shows.
+func WizardMeshNone() string { return In(i18n.Locale()).WizardMeshNone() }
+
+// WizardMeshNone says "No new phones seen in your joined networks right now."
+// in the language of msgs.
+func (msgs Messages) WizardMeshNone() string {
+	return Catalog.Format(msgs.locale, "WizardMeshNone", nil)
+}
+
+// WizardMeshNeedNet says "Join or add a network in Settings › Network first."
+// in the language the app shows.
+func WizardMeshNeedNet() string { return In(i18n.Locale()).WizardMeshNeedNet() }
+
+// WizardMeshNeedNet says "Join or add a network in Settings › Network first."
+// in the language of msgs.
+func (msgs Messages) WizardMeshNeedNet() string {
+	return Catalog.Format(msgs.locale, "WizardMeshNeedNet", nil)
+}
+
+// WizardOpenNetSettings says "Open Network settings"
+// in the language the app shows.
+func WizardOpenNetSettings() string { return In(i18n.Locale()).WizardOpenNetSettings() }
+
+// WizardOpenNetSettings says "Open Network settings"
+// in the language of msgs.
+func (msgs Messages) WizardOpenNetSettings() string {
+	return Catalog.Format(msgs.locale, "WizardOpenNetSettings", nil)
+}
+
+// WizardAdvancedTitle says "Advanced: Connect by address and port"
+// in the language the app shows.
+func WizardAdvancedTitle() string { return In(i18n.Locale()).WizardAdvancedTitle() }
+
+// WizardAdvancedTitle says "Advanced: Connect by address and port"
+// in the language of msgs.
+func (msgs Messages) WizardAdvancedTitle() string {
+	return Catalog.Format(msgs.locale, "WizardAdvancedTitle", nil)
+}
+
+// ActivateTitle says "Activate Enhanced mode on {name}"
+// in the language the app shows.
+func ActivateTitle(name string) string { return In(i18n.Locale()).ActivateTitle(name) }
+
+// ActivateTitle says "Activate Enhanced mode on {name}"
+// in the language of msgs.
+func (msgs Messages) ActivateTitle(name string) string {
+	return Catalog.Format(msgs.locale, "ActivateTitle", map[string]any{"name": name})
+}
+
+// ActivateSub says "Unlocks Samsung DeX, App windows, and full control over both Wi-Fi and 5G until the phone restarts."
+// in the language the app shows.
+func ActivateSub() string { return In(i18n.Locale()).ActivateSub() }
+
+// ActivateSub says "Unlocks Samsung DeX, App windows, and full control over both Wi-Fi and 5G until the phone restarts."
+// in the language of msgs.
+func (msgs Messages) ActivateSub() string {
+	return Catalog.Format(msgs.locale, "ActivateSub", nil)
+}
+
+// ActivateDoneTitle says "Enhanced mode is ready"
+// in the language the app shows.
+func ActivateDoneTitle() string { return In(i18n.Locale()).ActivateDoneTitle() }
+
+// ActivateDoneTitle says "Enhanced mode is ready"
+// in the language of msgs.
+func (msgs Messages) ActivateDoneTitle() string {
+	return Catalog.Format(msgs.locale, "ActivateDoneTitle", nil)
+}
+
+// ActivateDoneSub says "Samsung DeX and App windows are now unlocked."
+// in the language the app shows.
+func ActivateDoneSub() string { return In(i18n.Locale()).ActivateDoneSub() }
+
+// ActivateDoneSub says "Samsung DeX and App windows are now unlocked."
+// in the language of msgs.
+func (msgs Messages) ActivateDoneSub() string {
+	return Catalog.Format(msgs.locale, "ActivateDoneSub", nil)
+}
+
+// ActivateOpenNow says "Continue"
+// in the language the app shows.
+func ActivateOpenNow() string { return In(i18n.Locale()).ActivateOpenNow() }
+
+// ActivateOpenNow says "Continue"
+// in the language of msgs.
+func (msgs Messages) ActivateOpenNow() string {
+	return Catalog.Format(msgs.locale, "ActivateOpenNow", nil)
+}
+
+// ChipWifiOn says "Phone on Wi-Fi"
+// in the language the app shows.
+func ChipWifiOn() string { return In(i18n.Locale()).ChipWifiOn() }
+
+// ChipWifiOn says "Phone on Wi-Fi"
+// in the language of msgs.
+func (msgs Messages) ChipWifiOn() string {
+	return Catalog.Format(msgs.locale, "ChipWifiOn", nil)
+}
+
+// ChipCellularOn says "Phone on mobile data"
+// in the language the app shows.
+func ChipCellularOn() string { return In(i18n.Locale()).ChipCellularOn() }
+
+// ChipCellularOn says "Phone on mobile data"
+// in the language of msgs.
+func (msgs Messages) ChipCellularOn() string {
+	return Catalog.Format(msgs.locale, "ChipCellularOn", nil)
+}
+
+// ChipWirelessADBOn says "Wireless debugging on"
+// in the language the app shows.
+func ChipWirelessADBOn() string { return In(i18n.Locale()).ChipWirelessADBOn() }
+
+// ChipWirelessADBOn says "Wireless debugging on"
+// in the language of msgs.
+func (msgs Messages) ChipWirelessADBOn() string {
+	return Catalog.Format(msgs.locale, "ChipWirelessADBOn", nil)
+}
+
+// ChipWirelessADBOff says "Wireless debugging off"
+// in the language the app shows.
+func ChipWirelessADBOff() string { return In(i18n.Locale()).ChipWirelessADBOff() }
+
+// ChipWirelessADBOff says "Wireless debugging off"
+// in the language of msgs.
+func (msgs Messages) ChipWirelessADBOff() string {
+	return Catalog.Format(msgs.locale, "ChipWirelessADBOff", nil)
+}
+
+// ChipPairWindowFound says "Pairing window ready"
+// in the language the app shows.
+func ChipPairWindowFound() string { return In(i18n.Locale()).ChipPairWindowFound() }
+
+// ChipPairWindowFound says "Pairing window ready"
+// in the language of msgs.
+func (msgs Messages) ChipPairWindowFound() string {
+	return Catalog.Format(msgs.locale, "ChipPairWindowFound", nil)
+}
+
+// ChipWaitingPairWindow says "Waiting for pairing window…"
+// in the language the app shows.
+func ChipWaitingPairWindow() string { return In(i18n.Locale()).ChipWaitingPairWindow() }
+
+// ChipWaitingPairWindow says "Waiting for pairing window…"
+// in the language of msgs.
+func (msgs Messages) ChipWaitingPairWindow() string {
+	return Catalog.Format(msgs.locale, "ChipWaitingPairWindow", nil)
+}
+
+// ChipAutoActivating says "Connecting automatically to activate Enhanced mode…"
+// in the language the app shows.
+func ChipAutoActivating() string { return In(i18n.Locale()).ChipAutoActivating() }
+
+// ChipAutoActivating says "Connecting automatically to activate Enhanced mode…"
+// in the language of msgs.
+func (msgs Messages) ChipAutoActivating() string {
+	return Catalog.Format(msgs.locale, "ChipAutoActivating", nil)
+}
+
+// ActivateWifiPairStep1 says "Open Wireless debugging › Pair device with pairing code on your phone"
+// in the language the app shows.
+func ActivateWifiPairStep1() string { return In(i18n.Locale()).ActivateWifiPairStep1() }
+
+// ActivateWifiPairStep1 says "Open Wireless debugging › Pair device with pairing code on your phone"
+// in the language of msgs.
+func (msgs Messages) ActivateWifiPairStep1() string {
+	return Catalog.Format(msgs.locale, "ActivateWifiPairStep1", nil)
+}
+
+// ActivateWifiPairStep1Sub says "AndroFuse detects the pairing window automatically — just enter the 6-digit code below."
+// in the language the app shows.
+func ActivateWifiPairStep1Sub() string { return In(i18n.Locale()).ActivateWifiPairStep1Sub() }
+
+// ActivateWifiPairStep1Sub says "AndroFuse detects the pairing window automatically — just enter the 6-digit code below."
+// in the language of msgs.
+func (msgs Messages) ActivateWifiPairStep1Sub() string {
+	return Catalog.Format(msgs.locale, "ActivateWifiPairStep1Sub", nil)
+}
+
+// ActivateWifiPairStep2 says "Enter the 6-digit pairing code"
+// in the language the app shows.
+func ActivateWifiPairStep2() string { return In(i18n.Locale()).ActivateWifiPairStep2() }
+
+// ActivateWifiPairStep2 says "Enter the 6-digit pairing code"
+// in the language of msgs.
+func (msgs Messages) ActivateWifiPairStep2() string {
+	return Catalog.Format(msgs.locale, "ActivateWifiPairStep2", nil)
+}
+
+// ActivateWifiPairBtn says "Pair & activate"
+// in the language the app shows.
+func ActivateWifiPairBtn() string { return In(i18n.Locale()).ActivateWifiPairBtn() }
+
+// ActivateWifiPairBtn says "Pair & activate"
+// in the language of msgs.
+func (msgs Messages) ActivateWifiPairBtn() string {
+	return Catalog.Format(msgs.locale, "ActivateWifiPairBtn", nil)
+}
+
+// ActivateWifiOffOptionA says "Option 1: Turn on Wireless debugging once"
+// in the language the app shows.
+func ActivateWifiOffOptionA() string { return In(i18n.Locale()).ActivateWifiOffOptionA() }
+
+// ActivateWifiOffOptionA says "Option 1: Turn on Wireless debugging once"
+// in the language of msgs.
+func (msgs Messages) ActivateWifiOffOptionA() string {
+	return Catalog.Format(msgs.locale, "ActivateWifiOffOptionA", nil)
+}
+
+// ActivateWifiOffOptionASub says "Open Settings › Developer options › Wireless debugging on your phone. This screen will continue automatically."
+// in the language the app shows.
+func ActivateWifiOffOptionASub() string { return In(i18n.Locale()).ActivateWifiOffOptionASub() }
+
+// ActivateWifiOffOptionASub says "Open Settings › Developer options › Wireless debugging on your phone. This screen will continue automatically."
+// in the language of msgs.
+func (msgs Messages) ActivateWifiOffOptionASub() string {
+	return Catalog.Format(msgs.locale, "ActivateWifiOffOptionASub", nil)
+}
+
+// ActivateUSBSub says "Plug in a USB cable and tap Allow once — activation completes automatically, then you can unplug."
+// in the language the app shows.
+func ActivateUSBSub() string { return In(i18n.Locale()).ActivateUSBSub() }
+
+// ActivateUSBSub says "Plug in a USB cable and tap Allow once — activation completes automatically, then you can unplug."
+// in the language of msgs.
+func (msgs Messages) ActivateUSBSub() string {
+	return Catalog.Format(msgs.locale, "ActivateUSBSub", nil)
+}
+
+// ActivateOptionUSBBrief says "Option 2: Connect briefly via USB cable"
+// in the language the app shows.
+func ActivateOptionUSBBrief() string { return In(i18n.Locale()).ActivateOptionUSBBrief() }
+
+// ActivateOptionUSBBrief says "Option 2: Connect briefly via USB cable"
+// in the language of msgs.
+func (msgs Messages) ActivateOptionUSBBrief() string {
+	return Catalog.Format(msgs.locale, "ActivateOptionUSBBrief", nil)
+}
+
+// ActivateCellularTitle says "Why a one-time setup is needed on mobile data"
+// in the language the app shows.
+func ActivateCellularTitle() string { return In(i18n.Locale()).ActivateCellularTitle() }
+
+// ActivateCellularTitle says "Why a one-time setup is needed on mobile data"
+// in the language of msgs.
+func (msgs Messages) ActivateCellularTitle() string {
+	return Catalog.Format(msgs.locale, "ActivateCellularTitle", nil)
+}
+
+// ActivateCellularBody says "Due to Android system rules, the first activation after a phone reboot needs a brief USB cable or Wi-Fi connection. A…"
+// in the language the app shows.
+func ActivateCellularBody() string { return In(i18n.Locale()).ActivateCellularBody() }
+
+// ActivateCellularBody says "Due to Android system rules, the first activation after a phone reboot needs a brief USB cable or Wi-Fi connection. A…"
+// in the language of msgs.
+func (msgs Messages) ActivateCellularBody() string {
+	return Catalog.Format(msgs.locale, "ActivateCellularBody", nil)
 }

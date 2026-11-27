@@ -1,6 +1,10 @@
 package adb
 
 import (
+	"archive/zip"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -185,5 +189,70 @@ func TestParseMDNSServicesHardwareHash(t *testing.T) {
 	}
 	if strings.Contains(svcs[0].Instance, "R3CW1234567") {
 		t.Fatalf("instance must stay masked (INV-08): %q", svcs[0].Instance)
+	}
+}
+
+func TestPlatformToolsURL(t *testing.T) {
+	for _, tc := range []struct {
+		goos string
+		want string
+	}{
+		{"windows", "platform-tools-latest-windows.zip"},
+		{"linux", "platform-tools-latest-linux.zip"},
+		{"darwin", "platform-tools-latest-darwin.zip"},
+	} {
+		got, err := PlatformToolsURL(tc.goos)
+		if err != nil || !strings.HasPrefix(got, "https://dl.google.com/") || !strings.Contains(got, tc.want) {
+			t.Fatalf("PlatformToolsURL(%q) = (%q, %v)", tc.goos, got, err)
+		}
+	}
+	if _, err := PlatformToolsURL("plan9"); err == nil {
+		t.Fatal("expected unsupported OS error for plan9")
+	}
+}
+
+func TestExtractPlatformToolsZip(t *testing.T) {
+	dir := t.TempDir()
+	zipPath := filepath.Join(dir, "pt.zip")
+	f, err := os.Create(zipPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	zw := zip.NewWriter(f)
+	exeName := "adb"
+	if runtime.GOOS == "windows" {
+		exeName = "adb.exe"
+	}
+	w, _ := zw.Create("platform-tools/" + exeName)
+	_, _ = w.Write([]byte("MZ-stub-adb"))
+	w2, _ := zw.Create("platform-tools/AdbWinApi.dll")
+	_, _ = w2.Write([]byte("dll-stub"))
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	_ = f.Close()
+
+	dest := filepath.Join(dir, "out", "platform-tools")
+	adbPath, err := ExtractPlatformToolsZip(zipPath, dest)
+	if err != nil {
+		t.Fatalf("ExtractPlatformToolsZip: %v", err)
+	}
+	if _, err := os.Stat(adbPath); err != nil {
+		t.Fatalf("missing extracted adb at %q: %v", adbPath, err)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "AdbWinApi.dll")); err != nil {
+		t.Fatalf("missing extracted AdbWinApi.dll: %v", err)
+	}
+
+	// Zip-Slip path traversal must be rejected.
+	badZip := filepath.Join(dir, "bad.zip")
+	bf, _ := os.Create(badZip)
+	bzw := zip.NewWriter(bf)
+	bw, _ := bzw.Create("../evil.exe")
+	_, _ = bw.Write([]byte("evil"))
+	_ = bzw.Close()
+	_ = bf.Close()
+	if _, err := ExtractPlatformToolsZip(badZip, filepath.Join(dir, "out2")); err == nil {
+		t.Fatal("expected Zip-Slip entry to be rejected")
 	}
 }

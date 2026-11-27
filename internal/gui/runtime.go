@@ -342,6 +342,50 @@ func (a *App) ensureADBAndLeases() (*adb.Client, *lease.Store, error) {
 	return a.rt.adbClient, a.rt.leaseStore, nil
 }
 
+// InstallADB downloads official Google platform-tools into adb.DefaultPlatformToolsDir() when adb
+// is missing on the machine, reporting progress to Home and Settings › About and updates.
+// Side effects: HTTPS GET to dl.google.com, refreshes diagnostics and devices on completion.
+func (a *App) InstallADB() {
+	a.mu.Lock()
+	if a.adbInstalling {
+		a.mu.Unlock()
+		return
+	}
+	a.adbInstalling = true
+	a.adbInstallPct = 0
+	a.adbInstallErr = ""
+	a.mu.Unlock()
+	a.update(func() {})
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+		defer cancel()
+		cl, err := adb.InstallPlatformTools(ctx, adb.DefaultPlatformToolsDir(), func(pct int) {
+			a.update(func() { a.adbInstallPct = pct })
+		})
+		if err != nil {
+			a.update(func() {
+				a.adbInstalling = false
+				a.adbMissing = true
+				a.adbInstallErr = a.failed(L.ADBDownloadFailedTitle(), err)
+			})
+			return
+		}
+		a.rt.coreMu.Lock()
+		a.rt.adbClient = cl
+		a.rt.coreMu.Unlock()
+		a.update(func() {
+			a.adbInstalling = false
+			a.adbInstallPct = 100
+			a.adbMissing = false
+			a.adbInstallErr = ""
+			a.deviceNotice = ""
+		})
+		a.RefreshDiagnostics()
+		a.RefreshDevices()
+	}()
+}
+
 func (a *App) recoverStaleLeases(ctx context.Context, client *adb.Client, store *lease.Store, devs []adb.Device) {
 	if client == nil || store == nil {
 		return
@@ -527,12 +571,31 @@ func (a *App) RefreshDevices() {
 	go func() {
 		client, store, err := a.ensureADBAndLeases()
 		if err != nil {
+			if errors.Is(err, adb.ErrNotFound) {
+				shouldInstall := false
+				a.update(func() {
+					a.scanningDevices = false
+					a.adbMissing = true
+					a.deviceNotice = ""
+					if !a.adbInstalling && a.adbInstallErr == "" {
+						shouldInstall = true
+					}
+				})
+				if shouldInstall {
+					a.InstallADB()
+				}
+				return
+			}
 			a.update(func() {
 				a.scanningDevices = false
 				a.deviceNotice = a.failed(L.FailDevices(), err)
 			})
 			return
 		}
+		a.update(func() {
+			a.adbMissing = false
+			a.adbInstallErr = ""
+		})
 		ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 		defer cancel()
 

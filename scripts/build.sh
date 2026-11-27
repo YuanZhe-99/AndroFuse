@@ -36,6 +36,31 @@ if [ -f "$apk" ]; then
 	cp "$apk" resources/windows/companion/
 fi
 
+# Bundle minimal official Google platform-tools (adb.exe + USB DLLs + NOTICE.txt) alongside
+# androfuse.exe in resources/windows/platform-tools/ so fresh consumer PCs work out of the box
+# without mixing external binaries into bin/ where tools/checkpe enforces native PE headers.
+pt_dir="resources/windows/platform-tools"
+if [ ! -f "$pt_dir/adb.exe" ]; then
+	pt_zip=".dev/cache/platform-tools-latest-windows.zip"
+	if [ ! -f "$pt_zip" ] && command -v curl >/dev/null 2>&1; then
+		mkdir -p .dev/cache
+		curl -fsSL "https://dl.google.com/android/repository/platform-tools-latest-windows.zip" -o "$pt_zip.tmp" && mv "$pt_zip.tmp" "$pt_zip" || rm -f "$pt_zip.tmp"
+	fi
+	if [ -f "$pt_zip" ] && command -v unzip >/dev/null 2>&1; then
+		rm -rf "$pt_dir.tmp"
+		mkdir -p "$pt_dir.tmp" "$pt_dir"
+		unzip -oqj "$pt_zip" \
+			"platform-tools/adb.exe" \
+			"platform-tools/AdbWinApi.dll" \
+			"platform-tools/AdbWinUsbApi.dll" \
+			"platform-tools/NOTICE.txt" \
+			-d "$pt_dir.tmp"
+		unzip -oqj "$pt_zip" "platform-tools/libwinpthread-1.dll" -d "$pt_dir.tmp" >/dev/null 2>&1 || true
+		rm -rf "$pt_dir"
+		mv "$pt_dir.tmp" "$pt_dir"
+	fi
+fi
+
 # Build shared UID 2000 DeX / icon helper JAR if javac/d8 are present (or keep existing build artifact).
 if command -v javac >/dev/null 2>&1 && [ -n "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}" ]; then
 	go run ./tools/builddex

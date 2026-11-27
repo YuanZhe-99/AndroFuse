@@ -1,8 +1,11 @@
 package androidhost
 
 import (
+	"context"
 	"fmt"
 	"image/png"
+	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"slices"
@@ -267,8 +270,12 @@ func TestOnNetworkChangedDebounce(t *testing.T) {
 	}
 }
 
-func TestStatusReportsWirelessPortWithoutADBBeacon(t *testing.T) {
+func TestStatusReportsWirelessPortEvenWhenTunnelDisabled(t *testing.T) {
 	h := New(t.TempDir(), nil)
+	if !h.Config().Permissions.ADBBeacon || !h.Config().Permissions.ScreenShare {
+		t.Fatalf("expected ADBBeacon and ScreenShare enabled by default: %+v", h.Config().Permissions)
+	}
+	h.SetPermission("adb_beacon", false)
 	h.SetWirelessADBPort(39543)
 	h.mu.Lock()
 	h.cfg.ListenPort = 43856
@@ -276,11 +283,56 @@ func TestStatusReportsWirelessPortWithoutADBBeacon(t *testing.T) {
 	h.a11yOn = true
 	h.apkHash = "deadbeef"
 	h.mu.Unlock()
-	if h.Config().Permissions.ADBBeacon {
-		t.Fatal("ADBBeacon should be disabled by default")
-	}
 	st := h.Status()
-	if st.WirelessADBPort != 39543 || st.AppVersion == "" || st.CompanionPort != 43856 || !st.StandbyRunning || !st.AccessibilityOn || st.AppBuildHash != "deadbeef" {
+	if st.WirelessADBPort != 39543 || st.ADBTunnelAllowed || !st.ScreenShareAllowed || st.AppVersion == "" || st.CompanionPort != 43856 || !st.StandbyRunning || !st.AccessibilityOn || st.AppBuildHash != "deadbeef" {
 		t.Fatalf("Status() missing full phone state: %+v", st)
+	}
+}
+
+func TestPairingPortTunnelAndStatusFields(t *testing.T) {
+	echo, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer echo.Close()
+	go func() {
+		for {
+			c, err := echo.Accept()
+			if err != nil {
+				return
+			}
+			go func() { _, _ = io.Copy(c, c); _ = c.Close() }()
+		}
+	}()
+	pairPort := echo.Addr().(*net.TCPAddr).Port
+
+	h := New(t.TempDir(), nil)
+	if err := h.StartServer(); err != nil {
+		t.Fatalf("StartServer: %v", err)
+	}
+	defer func() { _ = h.StopServer() }()
+
+	h.SetWirelessADBPairPort(pairPort)
+	st := h.Status()
+	if st.WirelessADBPairPort != pairPort || !st.ADBTunnelAllowed || !st.ScreenShareAllowed {
+		t.Fatalf("unexpected pairing/permission telemetry: %+v", st)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	c, err := companion.DialTunnel(ctx, h.ListenAddr(), h.Config().Token, h.srv.Fingerprint(), pairPort)
+	if err != nil {
+		t.Fatalf("DialTunnel on active pairing port failed: %v", err)
+	}
+	defer c.Close()
+	if _, err := c.Write([]byte("PAIR")); err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, 4)
+	if _, err := io.ReadFull(c, buf); err != nil || string(buf) != "PAIR" {
+		t.Fatalf("tunnel echo = %q, err=%v", buf, err)
+	}
+	if _, err := companion.DialTunnel(ctx, h.ListenAddr(), h.Config().Token, h.srv.Fingerprint(), pairPort+1); err == nil {
+		t.Fatal("expected arbitrary port to be rejected by OnTunnel")
 	}
 }

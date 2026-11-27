@@ -13,6 +13,8 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/YuanZhe-99/AndroFuse/internal/adb"
+	"github.com/YuanZhe-99/AndroFuse/internal/companion"
+	"github.com/YuanZhe-99/AndroFuse/internal/mesh"
 	L "github.com/YuanZhe-99/AndroFuse/locales"
 )
 
@@ -221,7 +223,8 @@ func (a *App) RestoreDevice(r RememberedDevice) {
 	})
 }
 
-// bindCompanion saves how to reach hash's Companion again after a pairing.
+// bindCompanion saves how to reach hash's Companion again after a pairing, merging any earlier
+// `mesh:<id>` entry whose fingerprint or EasyTier identity matches this physical device.
 // Side effects: seals token with DPAPI and saves devices.json.
 func (a *App) bindCompanion(hash string, port int, fingerprint, token, meshHost string) {
 	sealed, err := sealSecret([]byte(token))
@@ -229,11 +232,167 @@ func (a *App) bindCompanion(hash string, port int, fingerprint, token, meshHost 
 		return
 	}
 	a.update(func() {
+		a.mergeMeshRememberedLocked(hash, fingerprint, meshHost)
 		if i := a.rememberedIndexLocked(hash); i >= 0 {
 			a.remembered[i].Companion = &CompanionBinding{Port: port, Fingerprint: fingerprint, SealedToken: sealed, MeshHost: meshHost}
 			a.saveDevicesLocked()
 		}
 	})
+}
+
+// rememberMeshPhone stores or updates a cross-network paired phone before it has ever been
+// connected over ADB, keyed provisionally by `"mesh:" + devID`. When ADB later connects to the
+// same phone, mergeMeshRememberedLocked upgrades this entry to its hardware hash without loss.
+// Returns: the remembered HardwareHash under which the phone is stored.
+// Side effects: seals the pairing token with DPAPI, clears pairingWait, and saves devices.json.
+func (a *App) rememberMeshPhone(devID, fallbackName string, res companion.PairResponse) string {
+	sealed, err := sealSecret([]byte(res.Token))
+	if err != nil {
+		return ""
+	}
+	provHash := "mesh:" + devID
+	name := strings.TrimSpace(res.DeviceName)
+	if name == "" {
+		name = strings.TrimSpace(res.Model)
+	}
+	if name == "" {
+		name = strings.TrimSpace(fallbackName)
+	}
+	if name == "" {
+		name = "Android"
+	}
+	meshHost := strings.TrimSpace(res.MeshHost)
+	if meshHost == "" && devID != "" {
+		meshHost = mesh.Hostname(mesh.KindPhone, devID, name)
+	}
+	var finalHash string
+	a.update(func() {
+		idx := -1
+		for i, r := range a.remembered {
+			if r.HardwareHash == provHash {
+				idx = i
+				break
+			}
+			if r.Companion != nil && ((res.CertFingerprint != "" && strings.EqualFold(r.Companion.Fingerprint, res.CertFingerprint)) ||
+				(meshHost != "" && mesh.SameDevice(r.Companion.MeshHost, meshHost))) {
+				idx = i
+				break
+			}
+		}
+		if idx < 0 {
+			a.remembered = append(a.remembered, RememberedDevice{
+				HardwareHash:  provHash,
+				AutoReconnect: true,
+			})
+			idx = len(a.remembered) - 1
+		}
+		r := &a.remembered[idx]
+		r.Name = name
+		if res.Manufacturer != "" {
+			r.Maker = res.Manufacturer
+		}
+		if res.Brand != "" {
+			r.Brand = res.Brand
+		}
+		if res.Model != "" {
+			r.Model = res.Model
+		}
+		if res.AndroidRelease != "" {
+			r.Android = res.AndroidRelease
+		}
+		r.AutoReconnect = true
+		r.LastSeen = time.Now()
+		r.Companion = &CompanionBinding{
+			Port:        res.Port,
+			Fingerprint: res.CertFingerprint,
+			SealedToken: sealed,
+			MeshHost:    meshHost,
+		}
+		finalHash = r.HardwareHash
+		if res.Status != nil {
+			if a.peerStatus == nil {
+				a.peerStatus = make(map[string]companion.DeviceStatus)
+			}
+			a.peerStatus[finalHash] = *res.Status
+		}
+		a.saveDevicesLocked()
+	})
+	return finalHash
+}
+
+// mergeMeshRememberedLocked upgrades or folds any provisional `mesh:<devID>` remembered entry whose
+// Companion certificate fingerprint or MeshHost matches the real hardware-hashed device realHash,
+// preserving its Alias, CompanionBinding, cached status, and suppressing redundant firstConnect UI.
+// Caller must hold a.mu.
+func (a *App) mergeMeshRememberedLocked(realHash, fingerprint, meshHost string) bool {
+	if realHash == "" || strings.HasPrefix(realHash, "mesh:") {
+		return false
+	}
+	meshIdx := -1
+	for i, r := range a.remembered {
+		if !strings.HasPrefix(r.HardwareHash, "mesh:") || r.Companion == nil {
+			continue
+		}
+		if fingerprint != "" && strings.EqualFold(r.Companion.Fingerprint, fingerprint) {
+			meshIdx = i
+			break
+		}
+		if meshHost != "" && r.Companion.MeshHost != "" && mesh.SameDevice(r.Companion.MeshHost, meshHost) {
+			meshIdx = i
+			break
+		}
+	}
+	if meshIdx < 0 {
+		return false
+	}
+	prov := a.remembered[meshIdx]
+	oldHash := prov.HardwareHash
+	realIdx := a.rememberedIndexLocked(realHash)
+	if realIdx >= 0 {
+		dst := &a.remembered[realIdx]
+		if dst.Alias == "" && prov.Alias != "" {
+			dst.Alias = prov.Alias
+		}
+		if prov.AutoReconnect {
+			dst.AutoReconnect = true
+		}
+		if dst.Companion == nil {
+			dst.Companion = prov.Companion
+		} else if prov.Companion != nil {
+			if dst.Companion.Port == 0 {
+				dst.Companion.Port = prov.Companion.Port
+			}
+			if dst.Companion.MeshHost == "" {
+				dst.Companion.MeshHost = prov.Companion.MeshHost
+			}
+		}
+		a.remembered = slices.Delete(a.remembered, meshIdx, meshIdx+1)
+	} else {
+		a.remembered[meshIdx].HardwareHash = realHash
+	}
+	if a.peerStatus != nil {
+		if st, ok := a.peerStatus[oldHash]; ok {
+			if _, exists := a.peerStatus[realHash]; !exists {
+				a.peerStatus[realHash] = st
+			}
+			delete(a.peerStatus, oldHash)
+		}
+	}
+	if a.cardWork != nil {
+		if cw, ok := a.cardWork[oldHash]; ok {
+			if _, exists := a.cardWork[realHash]; !exists {
+				a.cardWork[realHash] = cw
+			}
+			delete(a.cardWork, oldHash)
+		}
+	}
+	if a.firstConnect != nil && a.firstConnect.Hash == realHash {
+		a.firstConnect = nil
+	}
+	if a.compHash == oldHash {
+		a.compHash = realHash
+	}
+	return true
 }
 
 // noteMeshHost keeps the EasyTier hostname hash's Companion reported on connecting, so the desktop

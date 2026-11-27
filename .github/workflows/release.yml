@@ -86,6 +86,18 @@ jobs:
           # "Install Companion and pair" works offline.
           name: android
           path: resources/windows/companion
+      - name: Fetch minimal official platform-tools for Windows packages
+        run: |
+          pt_zip="$RUNNER_TEMP/platform-tools-latest-windows.zip"
+          curl -fsSL "https://dl.google.com/android/repository/platform-tools-latest-windows.zip" -o "$pt_zip"
+          mkdir -p resources/windows/platform-tools
+          unzip -oqj "$pt_zip" \
+            "platform-tools/adb.exe" \
+            "platform-tools/AdbWinApi.dll" \
+            "platform-tools/AdbWinUsbApi.dll" \
+            "platform-tools/NOTICE.txt" \
+            -d resources/windows/platform-tools
+          unzip -oqj "$pt_zip" "platform-tools/libwinpthread-1.dll" -d resources/windows/platform-tools || true
       - name: Build & sign packages
         env:
           CORE_PREBUILT: "1"

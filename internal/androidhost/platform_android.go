@@ -18,22 +18,32 @@ import (
 // identity caches what Android reports about this phone once it answered.
 var identity struct {
 	sync.Mutex
-	name, model, release string
-	sdk                  int
+	name, manufacturer, brand, model, release string
+	sdk                                       int
 }
 
 // deviceIdentity is the phone's name (Settings › About phone), model number and Android version.
 // Notes: asks the Kotlin side until it answers; "Android" until then.
 func deviceIdentity() (name, model, release string, sdk int) {
+	name, _, _, model, release, sdk = deviceDetails()
+	return name, model, release, sdk
+}
+
+// deviceDetails returns full identity metadata including manufacturer and brand for paired PCs.
+func deviceDetails() (name, manufacturer, brand, model, release string, sdk int) {
 	identity.Lock()
 	defer identity.Unlock()
 	if identity.model == "" {
-		identity.name, identity.model, identity.release, identity.sdk = androidbridge.Identity()
+		identity.name, identity.manufacturer, identity.brand, identity.model, identity.release, identity.sdk = androidbridge.DeviceDetails()
 	}
 	if identity.model == "" {
-		return "Android", "Android", "", 0
+		return "Android", "", "", "Android", "", 0
 	}
-	return identity.name, identity.model, identity.release, identity.sdk
+	return identity.name, identity.manufacturer, identity.brand, identity.model, identity.release, identity.sdk
+}
+
+func readADBSettings() (usbDebug, wirelessDebug bool) {
+	return androidbridge.ADBSettings()
 }
 
 // readDeviceTelemetry reads the battery from Android's BatteryManager, and from sysfs only on phones

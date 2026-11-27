@@ -437,7 +437,8 @@ func (a *App) searchResults(c *ui.Context, query string) []searchResult {
 		}
 	}
 	actions := []searchResult{
-		{key: "x-connect", title: L.ConnectPhone(), icon: func(c *ui.Context) { ui.Icon(c, iconPlus).Size(18, 18) }, run: func() { a.openPicker(openAsScreen, "") }},
+		{key: "x-add", title: L.NavAddPhone(), icon: func(c *ui.Context) { ui.Icon(c, iconPlus).Size(18, 18) }, run: func() { a.OpenAddWizard(0) }},
+		{key: "x-connect", title: L.ConnectPhone(), icon: func(c *ui.Context) { ui.Icon(c, iconLink).Size(18, 18) }, run: func() { a.openPicker(openAsScreen, "") }},
 		{key: "x-settings", title: L.NavSettings(), icon: func(c *ui.Context) { ui.Icon(c, iconSettings).Size(18, 18) }, run: func() { a.openSettings("") }},
 		{key: "x-sidebar", title: L.SidebarToggle(), icon: func(c *ui.Context) { ui.Icon(c, iconSidebar).Size(18, 18) }, run: func() {
 			a.mu.Lock()

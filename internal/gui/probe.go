@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/YuanZhe-99/AndroFuse/internal/adb"
 	"github.com/YuanZhe-99/AndroFuse/internal/core"
 	"github.com/YuanZhe-99/AndroFuse/internal/version"
 
@@ -118,34 +119,20 @@ func probeADB() (string, string) {
 	if runtime.GOOS == "android" {
 		return "", ""
 	}
-	var candidates []string
-	if p, err := exec.LookPath("adb"); err == nil {
-		candidates = append(candidates, p)
+	cl, err := adb.FindClient()
+	if err != nil || cl == nil || cl.Path == "" {
+		return "", ""
 	}
-	if runtime.GOOS == "windows" {
-		if local := os.Getenv("LOCALAPPDATA"); local != "" {
-			candidates = append(candidates, filepath.Join(local, "Android", "Sdk", "platform-tools", "adb.exe"))
-		}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	cmd := exec.CommandContext(ctx, cl.Path, "version")
+	sysproc.HideConsole(cmd)
+	raw, vErr := cmd.Output()
+	cancel()
+	if vErr != nil {
+		return cl.Path, "detected"
 	}
-	for _, c := range candidates {
-		if c == "" {
-			continue
-		}
-		if _, err := os.Stat(c); err != nil {
-			continue
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		cmd := exec.CommandContext(ctx, c, "version")
-		sysproc.HideConsole(cmd)
-		raw, err := cmd.Output()
-		cancel()
-		if err != nil {
-			return c, "detected"
-		}
-		line := strings.TrimSpace(strings.Split(string(raw), "\n")[0])
-		return c, line
-	}
-	return "", ""
+	line := strings.TrimSpace(strings.Split(string(raw), "\n")[0])
+	return cl.Path, line
 }
 
 // hostDiagnostics checks this computer with the app's own core, which stays running for the

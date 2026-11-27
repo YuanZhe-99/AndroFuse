@@ -675,11 +675,34 @@ func (a *App) aboutSettings(c *ui.Context, k tokens) {
 			dec = L.HomeDecodeHardwareH264()
 		}
 		check("ab-dec", false, iconDex, L.HomePicture(), dec, d.SelfCheck.H264HWDecoder)
+		a.mu.Lock()
+		adbMissing, adbInstalling, adbPct, adbErr := a.adbMissing, a.adbInstalling, a.adbInstallPct, a.adbInstallErr
+		a.mu.Unlock()
 		tools := L.CheckToolsMissing()
-		if d.ADBFound && d.CoreLoaded {
+		switch {
+		case adbInstalling:
+			tools = L.ADBDownloadingTitle(adbPct)
+		case d.ADBFound && d.CoreLoaded:
 			tools = L.CheckToolsOK()
+		case adbErr != "":
+			tools = adbErr
 		}
-		check("ab-tools", false, iconUsb, L.CheckTools(), tools, d.ADBFound && d.CoreLoaded)
+		srow(c, k, "ab-tools", false, iconUsb, L.CheckTools(), tools, func() {
+			switch {
+			case adbInstalling:
+				ui.Spinner(c).Size(16, 16)
+			case d.ADBFound && d.CoreLoaded && !adbMissing:
+				pill(c, "ab-tools-p", L.CheckOK(), k.good.Alpha(0.14), k.goodText)
+			case adbErr != "":
+				if ui.Button(c.Key("ab-tools-retry"), L.ADBActionRetry()).Clicked() {
+					a.InstallADB()
+				}
+			default:
+				if ui.Button(c.Key("ab-tools-dl"), L.ADBActionDownload()).Clicked() {
+					a.InstallADB()
+				}
+			}
+		})
 		srow(c, k, "ab-miracast", false, iconWifi, L.CheckMiracast(), L.CheckMiracastSub(), func() {
 			pill(c, "ab-miracast-p", L.CheckOff(), k.sunk, k.text2)
 		})

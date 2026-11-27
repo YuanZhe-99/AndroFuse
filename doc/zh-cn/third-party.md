@@ -11,7 +11,7 @@ AndroFuse 基于 **GNU General Public License v3.0 only**（`GPL-3.0-only`，见
 | `golang.org/x/sys` | BSD-3-Clause | 已启用（M0） | 与 `GPL-3.0-only` 兼容 |
 | Rust `serde`、`serde_json`、`windows-sys`、`windows` | MIT OR Apache-2.0 | 已启用（M1a） | 通过 `cargo deny check licenses bans sources` 校验 |
 | `Genymobile/scrcpy`（`scrcpy-server` v5.0.1） | Apache-2.0 | 已启用（M1a） | 由 `tools/fetchdeps` 校验 SHA-256 下载；已集成其线协议 |
-| Android Platform Tools（`adb`） | Apache-2.0 | 已启用（M1a） | 由 `internal/adb` 调用；打包分发时附带上游许可声明 |
+| Android Platform Tools（`adb`） | Apache-2.0 | 已启用（M1a） | 由 `internal/adb` 调用；发行包随附（`resources/windows/platform-tools/` 含 `NOTICE.txt`），缺失时通过 `InstallPlatformTools` 从 Google HTTPS 按需自动下载 |
 | `EasyTier/EasyTier` v2.7.1（`easytier-ffi`、`easytier`、`easytier-core`、`easytier-proto` 及 EasyTier 组织分支） | LGPL-3.0 | 已启用 | 静态链接进 `androfuse_core`（与 `GPL-3.0-only` 兼容）；固定修订 `0d9c52b`；`packet.dll` 延迟加载且不随包分发；其依赖树中的 RustSec 安全公告（hickory 0.25、仅构建期使用的 `zip`、无人维护的 crate）不在本仓库修补，而是随 EasyTier 更新跟进，逐条附原因列于 `core/deny.toml`，每次更换固定修订时重新核查 |
 | EasyTier 传递依赖 Rust crate（`smoltcp`、`webpki-roots`、`libbz2-rs-sys`、`encoding-index-*`、`tun` 等） | 0BSD、CDLA-Permissive-2.0、bzip2-1.0.6、CC0-1.0、WTFPL | 已启用 | 均与 GPL-3.0 兼容；已在 `core/deny.toml` 中显式允许 |
 | `protocolbuffers/protobuf`（`protoc` 36.2） | BSD-3-Clause | 仅构建期 | 由 `tools/fetchdeps` 校验 SHA-256 下载；不随包分发 |

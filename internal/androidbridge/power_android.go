@@ -64,6 +64,20 @@ func WatchWirelessDebugging(fn func(port int)) (stop func()) {
 	return off
 }
 
+// WatchWirelessPairing calls fn with this phone's temporary `_adb-tls-pairing._tcp` port while
+// Android's Wireless debugging pairing dialog is open, and with 0 when it closes.
+// Returns: a function that stops delivering events.
+func WatchWirelessPairing(fn func(port int)) (stop func()) {
+	off := power.On("adbPairPort", func(data []byte) {
+		var port int
+		if json.Unmarshal(data, &port) == nil {
+			fn(port)
+		}
+	})
+	_ = callPower("watchWirelessDebugging", nil)
+	return off
+}
+
 // StartShare asks Android for screen-capture consent and, when the user allows it, starts the
 // Companion's screen sharing (android/Share.kt): an H.264 stream at most maxSize pixels on its
 // longest side, served in scrcpy framing on the abstract socket "androfuse-share".
@@ -104,16 +118,37 @@ func OpenAccessibilitySettings() { _ = callPower("openAccessibility", nil) }
 // About phone (Build.MODEL when unset), model the model number, and release and sdk Android's
 // version.
 func Identity() (name, model, release string, sdk int) {
+	name, _, _, model, release, sdk = DeviceDetails()
+	return name, model, release, sdk
+}
+
+// DeviceDetails returns full hardware/OS naming for the Android device: user-configured name,
+// manufacturer, brand, model, Android release string, and SDK level.
+func DeviceDetails() (name, manufacturer, brand, model, release string, sdk int) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	var r struct {
-		Name    string `json:"name"`
-		Model   string `json:"model"`
-		Release string `json:"release"`
-		SDK     int    `json:"sdk"`
+		Name         string `json:"name"`
+		Manufacturer string `json:"manufacturer"`
+		Brand        string `json:"brand"`
+		Model        string `json:"model"`
+		Release      string `json:"release"`
+		SDK          int    `json:"sdk"`
 	}
 	_ = power.Call(ctx, "identity", nil, &r)
-	return r.Name, r.Model, r.Release, r.SDK
+	return r.Name, r.Manufacturer, r.Brand, r.Model, r.Release, r.SDK
+}
+
+// ADBSettings reads Android's global ADB developer option toggles (`adb_enabled` and `adb_wifi_enabled`).
+func ADBSettings() (usbDebug, wirelessDebug bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	var r struct {
+		USBDebug      bool `json:"usbDebug"`
+		WirelessDebug bool `json:"wirelessDebug"`
+	}
+	_ = power.Call(ctx, "adbSettings", nil, &r)
+	return r.USBDebug, r.WirelessDebug
 }
 
 // Battery is the phone's charge in percent (-1 when unknown), whether it charges, and its battery
@@ -231,4 +266,17 @@ func ListDaemonApps() (string, error) {
 		return "", err
 	}
 	return raw, nil
+}
+
+// ShowPairNotification posts a high-importance Android notification alerting the user to confirm
+// an incoming pairing request in the Companion UI.
+// Side effects: posts notification ID 0x4147 under channel `androfuse_pair` (best-effort).
+func ShowPairNotification(title, body string) {
+	_ = callPower("showPairNotification", map[string]string{"title": title, "body": body})
+}
+
+// CancelPairNotification dismisses any active pairing confirmation notification.
+// Side effects: cancels notification ID 0x4147 on Android.
+func CancelPairNotification() {
+	_ = callPower("cancelPairNotification", nil)
 }

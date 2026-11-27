@@ -19,7 +19,7 @@ AndroFuse is licensed under **GNU General Public License v3.0 only** (`GPL-3.0-o
 
 Every reused or adapted component retains its upstream license text and attribution:
 - **Genymobile/scrcpy** (`scrcpy-server` v5.0.1 / wire protocol) — Apache-2.0. Downloaded dynamically into `.dev/cache/` by `tools/fetchdeps` with pinned SHA-256 verification.
-- **Android Platform Tools (`adb`)** — Apache-2.0.
+- **Android Platform Tools (`adb`)** — Apache-2.0. Minimal official runtime binaries (`adb.exe`, `AdbWinApi.dll`, `AdbWinUsbApi.dll`, `libwinpthread-1.dll`, `NOTICE.txt`) are bundled under `platform-tools/` in Windows release packages and downloaded on demand from `dl.google.com` when absent.
 - **EasyTier** (optional user-supplied external binary driven in `--no-tun` userspace mode via `internal/mesh`) — LGPL-3.0. Never statically linked or bundled directly inside the AndroFuse Go/Rust binaries.
 - **adirh3/DeXDesk** (Miracast / Wi-Fi Direct Sink, RTSP/RTP/MPEG-TS, UIBC, Media Foundation DXVA reference) — MIT License.
 - **Aureliano021/ScrcpyDex** (`SemWifiDisplayConfig` loopback DeX activator reference) — Apache-2.0 License.

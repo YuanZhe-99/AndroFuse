@@ -38,7 +38,10 @@ type Prefs struct {
 	AppsInWindow    bool `json:"apps_in_window,omitempty"`
 	// SidebarRail folds the sidebar to a rail of icons.
 	SidebarRail bool `json:"sidebar_rail,omitempty"`
-	// OthersInNetworks lists, on Home, the phones of the joined networks never connected to.
+	// HideOthersInNetworks hides discovered unpaired network/Wi-Fi phones on Home when true;
+	// false (the default) surfaces newly discovered phones right away.
+	HideOthersInNetworks bool `json:"hide_others_in_networks,omitempty"`
+	// OthersInNetworks is kept for backward JSON compatibility.
 	OthersInNetworks bool `json:"others_in_networks,omitempty"`
 	HomeOnlineOnly   bool `json:"home_online_only,omitempty"`
 	// TrayOnLogin starts in the tray when Windows opens AndroFuse at sign-in; CloseQuits quits
@@ -120,6 +123,7 @@ type App struct {
 	compNotice      string
 	pairingCode     string // the code to check on the phone while a pairing waits
 	pairingModel    string
+	pairingCancel   context.CancelFunc
 	firstConnect    *firstConnect
 	mcpStatus       mcp.Status
 	mcpAllowLaunch  bool
@@ -132,10 +136,18 @@ type App struct {
 	customAPK       string // a Companion installer the user chose (ChooseCompanionAPK)
 	errs            errLog // recent failures in full, for Save logs
 
+	adbMissing    bool            // no local adb executable was found
+	adbInstalling bool            // downloading/extracting official platform-tools
+	adbInstallPct int             // download percentage 0..100
+	adbInstallErr string          // user-facing error if download failed
+	adbAuthNeeded map[string]bool // paired phones needing Wireless debugging pairing before silent bootstrap
+
 	sessions    map[string]*SessionWindow
 	remembered  []RememberedDevice // devices.json
 	split       *paneSplit         // two docked sessions shown together (pageSplit)
-	connect     connectFlow        // Home's "Connect a phone"
+	connect     connectFlow        // manual / advanced wireless address flow
+	addWizard   addWizardState     // "+ Add a phone" guided modal state
+	activate    activateState      // "Activate Enhanced mode" guided modal state
 	pendingOpen *pendingOpen
 	netViews    map[string]netView // joined networks' state, by network ID
 	netForm     *netForm           // Settings › Network's Add / Edit form while open
@@ -182,17 +194,18 @@ func ApplyTheme(theme string) {
 // New constructs an App state container and loads saved preferences.
 func New(profile, stateDir string) *App {
 	a := &App{
-		profile:    profile,
-		stateDir:   stateDir,
-		prefs:      Prefs{Theme: "system"},
-		page:       pageHome,
-		appIcons:   make(map[string]*ui.Bitmap),
-		cachedApps: make(map[string][]adb.AppEntry),
-		peerStatus: make(map[string]companion.DeviceStatus),
-		dexRoutes:  make(map[string]dex.RoutePreference),
-		vcamCap:    avbridge.ProbeVirtualCamera(),
-		sessions:   make(map[string]*SessionWindow),
-		netViews:   make(map[string]netView),
+		profile:       profile,
+		stateDir:      stateDir,
+		prefs:         Prefs{Theme: "system"},
+		page:          pageHome,
+		appIcons:      make(map[string]*ui.Bitmap),
+		cachedApps:    make(map[string][]adb.AppEntry),
+		peerStatus:    make(map[string]companion.DeviceStatus),
+		dexRoutes:     make(map[string]dex.RoutePreference),
+		adbAuthNeeded: make(map[string]bool),
+		vcamCap:       avbridge.ProbeVirtualCamera(),
+		sessions:      make(map[string]*SessionWindow),
+		netViews:      make(map[string]netView),
 	}
 	a.loadPrefs()
 	a.loadDevices()

@@ -34,7 +34,10 @@ type Handler struct {
 	Identity       *tls.Certificate
 	GetPermissions func() Permissions
 	// MeshHost returns the EasyTier hostname the phone joins networks under; nil for none.
-	MeshHost            func() string
+	MeshHost func() string
+	// GetIdentity optionally supplies the phone's user-facing name, manufacturer, and brand for
+	// AuthResponse and PairResponse so mesh-first pairings render proper device metadata at once.
+	GetIdentity         func() (deviceName, manufacturer, brand string)
 	GetStatus           func() DeviceStatus
 	OnClipboard         func(ClipboardMessage) error
 	OnNotificationReply func(NotificationReply) error
@@ -354,9 +357,13 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 		return
 	}
 	_ = conn.SetDeadline(time.Time{})
+	devName, maker, brand := s.identityExtras()
 	_ = writeEnvelope(enc, authEnv.ID, "auth.res", AuthResponse{
 		OK:              true,
 		DeviceModel:     s.model,
+		DeviceName:      devName,
+		Manufacturer:    maker,
+		Brand:           brand,
 		AndroidRelease:  s.androidRel,
 		SDKInt:          s.sdkInt,
 		CertFingerprint: s.fingerprint,
@@ -765,7 +772,32 @@ func (s *Server) handlePair(conn net.Conn, enc *json.Encoder, env Envelope) {
 		_ = enc.Encode(Envelope{ID: env.ID, Type: "pair.res", Error: err.Error()})
 		return
 	}
-	_ = writeEnvelope(enc, env.ID, "pair.res", PairResponse{Token: tok, CertFingerprint: s.fingerprint, Port: s.tcpPort(), Model: s.model, MeshHost: s.meshHost()}, "")
+	devName, maker, brand := s.identityExtras()
+	var initStatus *DeviceStatus
+	if s.permissions().Telemetry && s.handler.GetStatus != nil {
+		st := s.handler.GetStatus()
+		initStatus = &st
+	}
+	_ = writeEnvelope(enc, env.ID, "pair.res", PairResponse{
+		Token:           tok,
+		CertFingerprint: s.fingerprint,
+		Port:            s.tcpPort(),
+		Model:           s.model,
+		DeviceName:      devName,
+		Manufacturer:    maker,
+		Brand:           brand,
+		AndroidRelease:  s.androidRel,
+		SDKInt:          s.sdkInt,
+		MeshHost:        s.meshHost(),
+		Status:          initStatus,
+	}, "")
+}
+
+func (s *Server) identityExtras() (deviceName, manufacturer, brand string) {
+	if s.handler.GetIdentity != nil {
+		return s.handler.GetIdentity()
+	}
+	return "", "", ""
 }
 
 // RequestPairing asks the phone at addr (an `adb forward` of the Companion LocalSocket) to pair, showing

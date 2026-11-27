@@ -55,6 +55,8 @@ func (a *App) view(c *ui.Context) {
 	})
 	a.settingsSheet(c, k)
 	a.searchPalette(c, k)
+	a.addWizardModal(c, k)
+	a.activateModal(c, k)
 }
 
 // sidebar is Kyokai's sidebar: hide, + (the picker), Home, the open panes grouped as they show,
@@ -88,6 +90,10 @@ func (a *App) sidebar(c *ui.Context, k tokens, rail bool) {
 			a.plusButton(c, "side-plus")
 		}
 		a.navRow(c, k, "nav-home", rail, page == pageHome, func() { appMark(c, 20) }, L.NavHome(), "", func() { a.choosePage(pageHome) })
+		a.mu.Lock()
+		wizOpen := a.addWizard.Open
+		a.mu.Unlock()
+		a.navRow(c, k, "nav-add", rail, wizOpen, func() { ui.Icon(c, iconPlus).Size(navIconSize, navIconSize).TextColor(k.brandSoftText) }, L.NavAddPhone(), "", func() { a.OpenAddWizard(0) })
 
 		ui.Scroll(c.Key("side-scroll")).Grow(1).FillWidth().Children(func() {
 			ui.Column(c.Key("side-open")).FillWidth().Gap(2).AlignItems(align).Children(func() {
@@ -388,7 +394,10 @@ func (a *App) noticeCards(c *ui.Context, k tokens) {
 	a.firstConnectCard(c, k)
 	if pairCode != "" {
 		noticeCard(c, k, "notice-pair", iconShield, false, L.PairOnPhoneTitle(pairModel), L.PairOnPhoneSub(), func() {
-			ui.Text(c, pairCode).Bold().FontSize(sizeTitle).FontFeatures("tnum")
+			ui.Text(c, formatPairCode(pairCode)).Bold().FontSize(sizeTitle).FontFeatures("tnum")
+			if ui.Button(c.Key("notice-pair-cancel"), L.ActionCancel()).Clicked() {
+				a.CancelPairing()
+			}
 		})
 	}
 	for _, ap := range approvals {

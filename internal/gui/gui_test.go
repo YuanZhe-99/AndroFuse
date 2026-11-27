@@ -217,7 +217,10 @@ func TestEncoderHeadroom(t *testing.T) {
 // and a split — in both languages, both appearances, at the default size, the minimum size (the
 // rail) and a narrow window. With SCREENSHOT_DIR set it writes each frame there as a PNG.
 func TestViewsRender(t *testing.T) {
-	views := []string{"home", "search", "picker", "pane", "split"}
+	views := []string{
+		"home", "home-adb-dl", "search", "picker", "pane", "split",
+		"wizard-usb", "wizard-wifi", "wizard-mesh", "activate-wifi", "activate-cell",
+	}
 	for _, p := range []string{setGeneral, setPhones, setCamera, setNetwork, setVM, setSecurity, setAbout} {
 		views = append(views, "settings-"+p)
 	}
@@ -239,6 +242,28 @@ func TestViewsRender(t *testing.T) {
 					dockTestSessions(a)
 					a.split = nil
 					switch {
+					case v == "home-adb-dl":
+						a.adbInstalling = true
+						a.adbInstallPct = 42
+					case v == "wizard-usb":
+						a.addWizard = addWizardState{Open: true, Tab: 0}
+					case v == "wizard-wifi":
+						a.addWizard = addWizardState{Open: true, Tab: 1, WifiPairCode: "123456"}
+						a.mdnsServices = append(a.mdnsServices, adb.MDNSService{
+							Instance:    "adb-TEST-pair",
+							ServiceType: "_adb-tls-pairing._tcp",
+							Addr:        "192.168.1.40:37111",
+							MaskedAddr:  "192.*.*.*:37111",
+							CanPair:     true,
+						})
+					case v == "wizard-mesh":
+						a.addWizard = addWizardState{Open: true, Tab: 2}
+					case v == "activate-wifi":
+						a.peerStatus["0123456789abcdef"] = companion.DeviceStatus{NetworkType: "wifi", WirelessDebugOn: true, WirelessADBPairPort: 41234}
+						a.activate = activateState{Open: true, Hash: "0123456789abcdef", PairCode: "123456"} //gitleaks:allow
+					case v == "activate-cell":
+						a.peerStatus["0123456789abcdef"] = companion.DeviceStatus{NetworkType: "cellular", WirelessDebugOn: false}
+						a.activate = activateState{Open: true, Hash: "0123456789abcdef"} //gitleaks:allow
 					case v == "search":
 						a.searchOpen, a.searchQuery = true, "set"
 					case v == "picker":

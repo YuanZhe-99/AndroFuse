@@ -71,13 +71,22 @@ func (a *App) PairCompanionOverADB(serial, model string, joinMesh bool) {
 			return
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		defer cancel()
-		defer a.update(func() { a.pairingCode = "" })
+		a.update(func() { a.pairingCancel = cancel })
+		defer func() {
+			cancel()
+			a.update(func() {
+				a.pairingCode = ""
+				a.pairingModel = ""
+				a.pairingCancel = nil
+			})
+		}()
 		c, addr, res, err := pairOverADB(ctx, client, serial, apk, note, func(code string) {
 			a.update(func() { a.pairingCode, a.pairingModel = code, model })
 		})
 		if err != nil {
-			note(err.Error())
+			if ctx.Err() == nil {
+				note(err.Error())
+			}
 			return
 		}
 		st, _ := c.GetStatus(ctx)
@@ -106,6 +115,12 @@ func (a *App) PairCompanionOverADB(serial, model string, joinMesh bool) {
 			a.compAddr = addr
 			a.compToken = res.Token
 			a.compNotice = L.CompanionPaired(model)
+			if hash != "" {
+				if a.peerStatus == nil {
+					a.peerStatus = make(map[string]companion.DeviceStatus)
+				}
+				a.peerStatus[hash] = st
+			}
 		})
 		a.notify(L.CompanionPaired(model))
 		if hash != "" && res.Port > 0 {
@@ -117,6 +132,13 @@ func (a *App) PairCompanionOverADB(serial, model string, joinMesh bool) {
 		}
 		if dErr := dex.StartDaemon(ctx, client, serial, companionPackage); dErr != nil {
 			_ = a.failed(L.FailCompanion(), dErr)
+		} else if refreshed, gErr := c.GetStatus(ctx); gErr == nil {
+			a.update(func() {
+				a.compStatus = refreshed
+				if hash != "" {
+					a.peerStatus[hash] = refreshed
+				}
+			})
 		}
 		if !joinMesh || !inNet {
 			a.RefreshDevices()
@@ -135,6 +157,155 @@ func (a *App) PairCompanionOverADB(serial, model string, joinMesh bool) {
 		default:
 			note(L.CompanionMeshJoined(model, a.pairNetworkName()))
 		}
+	}()
+}
+
+// formatPairCode formats a 6-digit pairing confirmation code as "123 456" for legibility.
+func formatPairCode(code string) string {
+	code = strings.TrimSpace(code)
+	if len(code) == 6 {
+		return code[:3] + " " + code[3:]
+	}
+	return code
+}
+
+// CancelPairing aborts any active desktop-initiated pairing prompt and clears the waiting card.
+func (a *App) CancelPairing() {
+	a.mu.Lock()
+	cancel := a.pairingCancel
+	a.pairingCancel = nil
+	a.pairingCode = ""
+	a.pairingModel = ""
+	a.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	a.update(func() {})
+}
+
+// PairMeshPhone initiates first-time Companion pairing directly over the EasyTier mesh for an
+// unpaired network phone without requiring ADB on the desktop (`INV-07`, `INV-09`).
+// Side effects: ensures loopback forwards to p's deterministic ports, displays the 6-digit confirmation
+// code while the phone alerts its user, remembers the device under `mesh:<id>`, and checks readiness.
+func (a *App) PairMeshPhone(p networkPhone) {
+	_, devID, name, ok := mesh.ParseHostname(p.Peer)
+	if !ok || devID == "" {
+		a.update(func() { a.deviceNotice = L.ConnectBadAddress() })
+		return
+	}
+	if p.Name != "" {
+		name = p.Name
+	}
+	if name == "" {
+		name = devID
+	}
+	key := "net:" + devID
+	a.CancelPairing()
+	a.setCardWork(key, cardWork{Busy: L.MeshPairStarting(name)})
+
+	go func() {
+		netID := p.NetworkID
+		ip := p.IPv4
+		if netID == "" || ip == "" {
+			id, resolvedIP, found := a.meshPeerIPv4(p.Peer)
+			if !found {
+				a.setCardWork(key, cardWork{Note: L.MeshPairFailedHint(name)})
+				return
+			}
+			netID, ip = id, resolvedIP
+		}
+		ports := companion.DevicePorts(devID)
+		locals, err := a.meshForwards(netID, ip, ports)
+		if err != nil || len(locals) == 0 {
+			if err == nil {
+				err = errors.New(L.CompanionNoRoute())
+			}
+			a.setCardWork(key, cardWork{Note: a.failed(L.MeshPairFailedHint(name), err)})
+			return
+		}
+		code, err := pairingCode()
+		if err != nil {
+			a.setCardWork(key, cardWork{Note: err.Error()})
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), companion.PairWait+25*time.Second)
+		a.update(func() {
+			a.pairingCode = code
+			a.pairingModel = name
+			a.pairingCancel = cancel
+			a.deviceNotice = ""
+		})
+		defer func() {
+			cancel()
+			a.update(func() {
+				a.pairingCode = ""
+				a.pairingModel = ""
+				a.pairingCancel = nil
+			})
+		}()
+
+		a.setCardWork(key, cardWork{Busy: L.MeshPairWaiting(name, formatPairCode(code))})
+		host, _ := os.Hostname()
+		addrs := make([]string, len(locals))
+		for i, lp := range locals {
+			addrs[i] = fmt.Sprintf("127.0.0.1:%d", lp)
+		}
+
+		// Wait up to 15 s for the newly added EasyTier forward + TLS listener to accept TCP, then
+		// send exactly one RequestPairing call (do not retry a user decline or cancellation).
+		var activeAddr string
+		for settle := time.Now().Add(15 * time.Second); activeAddr == "" && time.Now().Before(settle) && ctx.Err() == nil; {
+			for _, addr := range addrs {
+				dctx, dcancel := context.WithTimeout(ctx, 2*time.Second)
+				tc, dErr := (&net.Dialer{}).DialContext(dctx, "tcp", addr)
+				dcancel()
+				if dErr == nil {
+					_ = tc.Close()
+					activeAddr = addr
+					break
+				}
+			}
+			if activeAddr == "" {
+				select {
+				case <-ctx.Done():
+				case <-time.After(400 * time.Millisecond):
+				}
+			}
+		}
+		if ctx.Err() != nil {
+			a.setCardWork(key, cardWork{})
+			return
+		}
+		if activeAddr == "" {
+			activeAddr = addrs[0]
+		}
+
+		res, pairErr := companion.RequestPairing(ctx, activeAddr, "AndroFuse · "+host, code)
+		if pairErr != nil {
+			switch {
+			case ctx.Err() == context.Canceled:
+				a.setCardWork(key, cardWork{})
+			case strings.Contains(strings.ToLower(pairErr.Error()), "declined"):
+				a.setCardWork(key, cardWork{Note: L.MeshPairDeclined(name)})
+			default:
+				_ = a.failed(L.FailCompanion(), pairErr)
+				a.setCardWork(key, cardWork{Note: L.MeshPairFailedHint(name)})
+			}
+			return
+		}
+
+		a.setCardWork(key, cardWork{})
+		hash := a.rememberMeshPhone(devID, name, res)
+		if hash == "" {
+			return
+		}
+		a.CloseAddWizard()
+		if r, ok := a.RememberedFor(hash); ok {
+			go a.checkCompanionHealthOnce(context.Background(), r)
+		}
+		a.notify(L.CompanionPaired(name))
+		a.RefreshDevices()
 	}()
 }
 
@@ -545,6 +716,11 @@ func (a *App) syncCompanion(d DiscoveredDevice) {
 	}
 	r, _ := a.RememberedFor(d.HardwareHash)
 	if r.Companion == nil {
+		if a.adoptMeshCompanion(ctx, client, d) {
+			r, _ = a.RememberedFor(d.HardwareHash)
+		}
+	}
+	if r.Companion == nil {
 		a.PairCompanionOverADB(serial, name, a.pairNetworkName() != "") // also installs the bundled one
 		return
 	}
@@ -567,10 +743,30 @@ func (a *App) syncCompanion(d DiscoveredDevice) {
 		return
 	}
 	defer c.Close()
+	if peer := c.PeerInfo(); peer.CertFingerprint != "" || peer.MeshHost != "" {
+		a.update(func() {
+			if a.mergeMeshRememberedLocked(d.HardwareHash, peer.CertFingerprint, peer.MeshHost) {
+				a.saveDevicesLocked()
+			}
+		})
+	}
 	st, err := c.GetStatus(ctx)
+	if err == nil {
+		a.update(func() {
+			if a.peerStatus == nil {
+				a.peerStatus = make(map[string]companion.DeviceStatus)
+			}
+			a.peerStatus[d.HardwareHash] = st
+		})
+	}
 	if err == nil && !st.DaemonReady {
 		if dErr := dex.StartDaemon(ctx, client, serial, companionPackage); dErr != nil {
 			_ = a.failed(L.FailCompanion(), dErr)
+		} else if refreshed, gErr := c.GetStatus(ctx); gErr == nil {
+			st = refreshed
+			a.update(func() {
+				a.peerStatus[d.HardwareHash] = refreshed
+			})
 		}
 	}
 	if err != nil || !inNet || (st.MeshRunning && st.MeshNetwork == cfg.NetworkName) {
@@ -873,6 +1069,13 @@ func (a *App) ensurePhoneReady(ctx context.Context, r RememberedDevice, st compa
 	if st.DaemonReady && len(a.appsForDevice(r.HardwareHash)) == 0 {
 		go a.fetchCompanionApps(r.HardwareHash)
 	}
+	if a.activate.Open && a.activate.Hash == r.HardwareHash && st.DaemonReady {
+		a.update(func() {
+			a.activate.Done = true
+			a.activate.Busy = false
+			a.activate.Notice = ""
+		})
+	}
 	apkPath, localHash := a.localCompanionAPK()
 	onlineADB := a.hasOnlineADB(r.HardwareHash)
 	needsAPK, needsDaemon, wantsADB := phoneNeedsAction(st, localHash, onlineADB, a.allowsWirelessADB())
@@ -882,7 +1085,7 @@ func (a *App) ensurePhoneReady(ctx context.Context, r RememberedDevice, st compa
 	if !needsAPK && !needsDaemon && !wantsADB {
 		return
 	}
-	if !onlineADB && st.NetworkType != "wifi" {
+	if !onlineADB && (st.NetworkType != "wifi" || st.WirelessADBPort <= 0 || a.isADBAuthNeeded(r.HardwareHash)) {
 		return
 	}
 	if !a.maintDue(r.HardwareHash, 45*time.Second) {
@@ -897,26 +1100,169 @@ func (a *App) ensurePhoneReady(ctx context.Context, r RememberedDevice, st compa
 		}
 		cand, ok := a.discoverAndConnectADB(mctx, r.HardwareHash, true)
 		if !ok {
-			return
-		}
-		if needsAPK {
-			a.updateCompanion(mctx, client, r.HardwareHash, cand.Serial, r.displayName(), apkPath)
-		}
-		if needsDaemon || needsAPK {
-			a.setCardWork(r.HardwareHash, cardWork{Busy: L.CardActivatingEnhanced(r.displayName())})
-			dErr := dex.StartDaemon(mctx, client, cand.Serial, companionPackage)
-			if dErr != nil {
-				a.setCardWork(r.HardwareHash, cardWork{Note: a.failed(L.FailCompanion(), dErr)})
-			} else {
-				a.setCardWork(r.HardwareHash, cardWork{})
+			if st.NetworkType == "wifi" && st.WirelessADBPort > 0 && st.WifiIPv4 != "" {
+				if ans, _ := adb.ProbeADB(mctx, fmt.Sprintf("%s:%d", st.WifiIPv4, st.WirelessADBPort)); ans == adb.AnswerTLS {
+					a.setADBAuthNeeded(r.HardwareHash, true)
+				}
 			}
-		}
-		if !a.allowsWirelessADB() && strings.Contains(cand.Serial, ":") && (needsAPK || needsDaemon) {
-			dctx, dcancel := context.WithTimeout(context.Background(), 3*time.Second)
-			_ = client.Disconnect(dctx, cand.Serial)
-			dcancel()
 			return
 		}
+		a.setADBAuthNeeded(r.HardwareHash, false)
+		a.bootstrapDaemonOverSerial(mctx, client, r, cand.Serial, apkPath, needsAPK, needsDaemon)
 		a.RefreshDevices()
 	}()
+}
+
+// bootstrapDaemonOverSerial pushes any updated Companion APK, starts the UID 2000 Enhanced mode
+// daemon via dex.StartDaemon, immediately refreshes Companion status/apps, and disconnects
+// temporary wireless ADB when ConnectionMode is companion_only (`INV-07`).
+func (a *App) bootstrapDaemonOverSerial(ctx context.Context, client *adb.Client, r RememberedDevice, serial, apkPath string, needsAPK, needsDaemon bool) bool {
+	if needsAPK && apkPath != "" {
+		a.updateCompanion(ctx, client, r.HardwareHash, serial, r.displayName(), apkPath)
+	}
+	daemonOK := !needsDaemon
+	if needsDaemon || needsAPK {
+		a.setCardWork(r.HardwareHash, cardWork{Busy: L.CardActivatingEnhanced(r.displayName())})
+		dErr := dex.StartDaemon(ctx, client, serial, companionPackage)
+		if dErr != nil {
+			a.setCardWork(r.HardwareHash, cardWork{Note: a.failed(L.FailCompanion(), dErr)})
+		} else {
+			a.setCardWork(r.HardwareHash, cardWork{})
+			daemonOK = true
+			if r.Companion != nil {
+				if tok, err := openSecret(r.Companion.SealedToken); err == nil {
+					if c, _, cerr := a.findCompanion(ctx, r.HardwareHash, *r.Companion, string(tok)); cerr == nil && c != nil {
+						if st, stErr := c.GetStatus(ctx); stErr == nil {
+							a.update(func() {
+								if a.peerStatus == nil {
+									a.peerStatus = make(map[string]companion.DeviceStatus)
+								}
+								a.peerStatus[r.HardwareHash] = st
+							})
+							if st.DaemonReady {
+								go a.fetchCompanionApps(r.HardwareHash)
+							}
+						}
+						_ = c.Close()
+					}
+				}
+			}
+		}
+	}
+	if !a.allowsWirelessADB() && strings.Contains(serial, ":") && (needsAPK || needsDaemon) {
+		dctx, dcancel := context.WithTimeout(context.Background(), 3*time.Second)
+		_ = client.Disconnect(dctx, serial)
+		dcancel()
+	}
+	return daemonOK
+}
+
+// adoptMeshCompanion checks whether the ADB device d's installed Companion already trusts one of
+// our provisional `mesh:*` bindings by dialing its local socket and verifying identity, merging
+// the entries without requiring a second pairing prompt.
+func (a *App) adoptMeshCompanion(ctx context.Context, client *adb.Client, d DiscoveredDevice) bool {
+	var meshEntries []RememberedDevice
+	for _, r := range a.rememberedList() {
+		if strings.HasPrefix(r.HardwareHash, "mesh:") && r.Companion != nil {
+			meshEntries = append(meshEntries, r)
+		}
+	}
+	if len(meshEntries) == 0 {
+		return false
+	}
+	port, err := client.ForwardPort(ctx, d.Target.Serial, 0, "localabstract:"+companion.LocalSocket)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = client.RemoveForward(ctx, d.Target.Serial, port) }()
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	for _, m := range meshEntries {
+		tok, err := openSecret(m.Companion.SealedToken)
+		if err != nil {
+			continue
+		}
+		dctx, dcancel := context.WithTimeout(ctx, 3*time.Second)
+		c, derr := companion.Dial(dctx, addr, string(tok), m.Companion.Fingerprint)
+		dcancel()
+		if derr == nil && c != nil {
+			peer := c.PeerInfo()
+			_ = c.Close()
+			a.update(func() {
+				if a.mergeMeshRememberedLocked(d.HardwareHash, peer.CertFingerprint, peer.MeshHost) {
+					a.saveDevicesLocked()
+				}
+			})
+			return true
+		}
+	}
+	return false
+}
+
+func (a *App) isADBAuthNeeded(hash string) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.adbAuthNeeded != nil && a.adbAuthNeeded[hash]
+}
+
+func (a *App) setADBAuthNeeded(hash string, need bool) {
+	if hash == "" {
+		return
+	}
+	a.mu.Lock()
+	if a.adbAuthNeeded == nil {
+		a.adbAuthNeeded = make(map[string]bool)
+	}
+	if need {
+		a.adbAuthNeeded[hash] = true
+	} else {
+		delete(a.adbAuthNeeded, hash)
+	}
+	a.mu.Unlock()
+}
+
+// EnsureEnhancedAndRun activates Enhanced mode (`dex.StartDaemon`) once when needed, then launches
+// the requested mode (`openAsDeX`, `openAsApp`, or `openAsScreen`). If ADB can already connect,
+// activation runs silently; otherwise it opens the live-polling Activation modal.
+func (a *App) EnsureEnhancedAndRun(hash string, thenOpen int) {
+	r, ok := a.RememberedFor(hash)
+	if !ok {
+		return
+	}
+	if st, has := a.peerStatusFor(hash); has && st.DaemonReady && st.DaemonTrustedDisplay {
+		a.runAfterEnhanced(hash, thenOpen)
+		return
+	}
+	name := r.displayName()
+	a.setCardWork(hash, cardWork{Busy: L.CardActivatingEnhanced(name)})
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		apkPath, localHash := a.localCompanionAPK()
+		st, _ := a.peerStatusFor(hash)
+		needsAPK := apkPath != "" && localHash != "" && st.AppBuildHash != "" && !strings.EqualFold(st.AppBuildHash, localHash)
+		cand, found := a.discoverAndConnectADB(ctx, hash, false)
+		if found {
+			client, _, err := a.ensureADBAndLeases()
+			if err == nil && a.bootstrapDaemonOverSerial(ctx, client, r, cand.Serial, apkPath, needsAPK, true) {
+				a.setADBAuthNeeded(hash, false)
+				a.setCardWork(hash, cardWork{})
+				a.RefreshDevices()
+				a.runAfterEnhanced(hash, thenOpen)
+				return
+			}
+		}
+		a.setCardWork(hash, cardWork{})
+		a.OpenActivateModal(hash, thenOpen)
+	}()
+}
+
+func (a *App) runAfterEnhanced(hash string, thenOpen int) {
+	switch thenOpen {
+	case openAsDeX:
+		a.LaunchDaemonDesktop(hash, OpenDefault)
+	case openAsApp:
+		a.openPicker(openAsApp, hash)
+	case openAsScreen:
+		a.LaunchShare(hash, OpenDefault)
+	}
 }

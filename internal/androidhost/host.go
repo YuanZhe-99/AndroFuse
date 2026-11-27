@@ -46,6 +46,9 @@ type Config struct {
 	Computers []PairedComputer `json:"computers,omitempty"`
 	// MeshID is the random id in the phone's EasyTier hostname (mesh.Hostname), drawn on first use.
 	MeshID string `json:"mesh_id,omitempty"`
+	// PermDefaultsV2 records whether the phone has initialized v0.2+ consumer-friendly default
+	// permissions (ADBBeacon & ScreenShare enabled prior to any pairing).
+	PermDefaultsV2 bool `json:"perm_defaults_v2,omitempty"`
 }
 
 // Host owns the Android-side TLS 1.3 Companion server, persisted permissions, and audit log.
@@ -65,6 +68,7 @@ type Host struct {
 	receiveBytes         int64
 	network              string // default network kind from the Android NetworkCallback
 	stopNetWatch         func()
+	wirelessADBPairPort  int // temporary _adb-tls-pairing._tcp port discovered by NsdManager
 	pair                 *pairPrompt
 	tab                  string // Companion tab shown on phones (tabHome when "")
 	beaconCheck          string // outcome of the last wireless debugging port check
@@ -104,11 +108,19 @@ func New(stateDir string, onChange func()) *Host {
 		onChange:  onChange,
 		langIndex: -1,
 		cfg: Config{
-			Token:       tok,
-			Permissions: companion.DefaultPermissions(),
+			Token:          tok,
+			Permissions:    companion.DefaultPermissions(),
+			PermDefaultsV2: true,
 		},
 	}
 	h.loadConfig()
+	if !h.cfg.PermDefaultsV2 {
+		if len(h.cfg.Computers) == 0 {
+			h.cfg.Permissions.ADBBeacon = true
+			h.cfg.Permissions.ScreenShare = true
+		}
+		h.cfg.PermDefaultsV2 = true
+	}
 	if h.cfg.ListenPort == legacyListenPort {
 		// Builds before random ports saved the old fixed port; draw a random one instead.
 		h.cfg.ListenPort = 0
@@ -185,6 +197,10 @@ func (h *Host) StartServer() error {
 	srv, err := companion.NewServer(tok, model, rel, sdk, companion.Handler{
 		Identity: h.identity(),
 		MeshHost: h.meshHost,
+		GetIdentity: func() (string, string, string) {
+			name, maker, brand, _, _, _ := deviceDetails()
+			return name, maker, brand
+		},
 		GetPermissions: func() companion.Permissions {
 			h.mu.Lock()
 			defer h.mu.Unlock()
@@ -286,7 +302,20 @@ func (h *Host) StartServer() error {
 		OnTunnel: func(port int) (net.Conn, error) {
 			h.mu.Lock()
 			allowed := h.cfg.WirelessADBPort
+			pairAllowed := h.wirelessADBPairPort
 			h.mu.Unlock()
+			if port > 0 && pairAllowed > 0 && port == pairAllowed {
+				// `_adb-tls-pairing._tcp` uses direct TLS+SPAKE2+ without ADB CNXN, so only check
+				// that this port matches the live NsdManager advertisement on loopback (`INV-07`).
+				c, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)), 3*time.Second)
+				if err == nil {
+					h.mu.Lock()
+					h.appendAuditLocked("computer opened Wireless debugging pairing through the Companion")
+					h.mu.Unlock()
+					h.notify()
+				}
+				return c, err
+			}
 			if allowed <= 0 || port != allowed {
 				return nil, fmt.Errorf("port %d is not this phone's Wireless debugging port", port)
 			}
@@ -429,6 +458,9 @@ func (h *Host) StartServer() error {
 		h.SetWirelessADBPort(0)
 		h.notify()
 	})
+	stopADBPair := androidbridge.WatchWirelessPairing(func(port int) {
+		h.SetWirelessADBPairPort(port)
+	})
 	stopDaemon := androidbridge.WatchDaemon(func(st androidbridge.DaemonStatus) {
 		h.updateDaemonStatus(st)
 	})
@@ -439,7 +471,7 @@ func (h *Host) StartServer() error {
 			h.mu.Unlock()
 		}
 	}()
-	stopAll := func() { stopNet(); stopADB(); stopDaemon() }
+	stopAll := func() { stopNet(); stopADB(); stopADBPair(); stopDaemon() }
 	h.mu.Lock()
 	h.stopNetWatch = stopAll
 	h.mu.Unlock()
@@ -477,6 +509,7 @@ func (h *Host) StopServer() error {
 	}
 	stopNet := h.stopNetWatch
 	h.stopNetWatch = nil
+	h.wirelessADBPairPort = 0
 	if h.meshRebindTimer != nil {
 		h.meshRebindTimer.Stop()
 		h.meshRebindTimer = nil
@@ -568,14 +601,22 @@ func (h *Host) LastError() string {
 	return h.lastErr
 }
 
-// Status reads current device battery/thermal telemetry and attaches any beaconed wireless ADB port.
+// Status reads current device battery/thermal telemetry and attaches any live ADB and Enhanced mode state.
 func (h *Host) Status() companion.DeviceStatus {
 	st := readDeviceTelemetry()
 	st.Timestamp = time.Now().Unix()
+	usbDbg, wifiDbg := readADBSettings()
+	st.USBDebugOn = usbDbg
+	st.WirelessDebugOn = wifiDbg
 	h.mu.Lock()
 	if h.cfg.WirelessADBPort > 0 {
 		st.WirelessADBPort = h.cfg.WirelessADBPort
 	}
+	if h.wirelessADBPairPort > 0 {
+		st.WirelessADBPairPort = h.wirelessADBPairPort
+	}
+	st.ADBTunnelAllowed = h.cfg.Permissions.ADBBeacon
+	st.ScreenShareAllowed = h.cfg.Permissions.ScreenShare
 	if h.network != "" {
 		st.NetworkType = h.network
 	}
@@ -769,6 +810,22 @@ func (h *Host) SetWirelessADBPort(port int) {
 	h.saveConfigLocked()
 	h.mu.Unlock()
 	androidbridge.SyncCompanionWidget(running, port, readDeviceTelemetry().BatteryPct)
+	h.notify()
+}
+
+// SetWirelessADBPairPort records the active `_adb-tls-pairing._tcp` port while the phone's pairing
+// dialog is open (0 when closed) so paired desktops can tunnel 6-digit pairing without typing IP/port.
+func (h *Host) SetWirelessADBPairPort(port int) {
+	if port < 0 || port > 65535 {
+		return
+	}
+	h.mu.Lock()
+	if h.wirelessADBPairPort == port {
+		h.mu.Unlock()
+		return
+	}
+	h.wirelessADBPairPort = port
+	h.mu.Unlock()
 	h.notify()
 }
 

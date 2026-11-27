@@ -95,12 +95,23 @@ func validPort(s string) (int, bool) {
 	return n, err == nil && n >= 1024 && n <= 65535
 }
 
-// ConnectByAddress runs Home's "Connect a phone": a phone's name opens it; an address with a port
-// connects to it; an address alone is looked up — a remembered phone's last port, then its
-// Companion (which knows the Wireless debugging port), then a search of the usual port range —
-// and only when all of that fails does the card ask for the port shown on the phone.
-// Side effects: adb connect; progress and outcome land in a.connect; the phone opens as the card's
-// "Open as" once it is online.
+// unpairedMeshPhoneByQuery matches an unpaired phone seen in a running EasyTier network by IPv4 or name.
+func (a *App) unpairedMeshPhoneByQuery(q string) (networkPhone, bool) {
+	q = strings.TrimSpace(q)
+	if q == "" {
+		return networkPhone{}, false
+	}
+	for _, p := range a.othersInNetworks() {
+		if (p.IPv4 != "" && p.IPv4 == q) || strings.EqualFold(p.Name, q) {
+			return p, true
+		}
+	}
+	return networkPhone{}, false
+}
+
+// ConnectByAddress runs Home's / Advanced wizard's address connect: a phone's name opens it,
+// an unpaired EasyTier mesh phone triggers PairMeshPhone directly (without requiring local ADB),
+// a paired mesh phone opens via its Companion, and other addresses resolve wireless ADB ports.
 func (a *App) ConnectByAddress() {
 	a.mu.Lock()
 	in, openAs := a.connect.Input, a.connect.OpenAs
@@ -117,6 +128,12 @@ func (a *App) ConnectByAddress() {
 		a.resetConnect()
 		return
 	}
+	if p, ok := a.unpairedMeshPhoneByQuery(in); ok {
+		a.CloseAddWizard()
+		a.PairMeshPhone(p)
+		a.resetConnect()
+		return
+	}
 	if !looksLikeAddress(in) {
 		if r, ok := a.rememberedByName(in); ok {
 			a.connectRemembered(r, openAs)
@@ -129,6 +146,20 @@ func (a *App) ConnectByAddress() {
 	if !ok {
 		a.update(func() { a.connect.Notice = L.ConnectBadAddress() })
 		return
+	}
+	if port == 0 && a.isMeshAddress(host) {
+		if r, ok := a.rememberedAtAddress(host); ok && r.Companion != nil {
+			a.CloseAddWizard()
+			a.connectRemembered(r, openAs)
+			a.resetConnect()
+			return
+		}
+		if p, ok := a.unpairedMeshPhoneByQuery(host); ok {
+			a.CloseAddWizard()
+			a.PairMeshPhone(p)
+			a.resetConnect()
+			return
+		}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	a.update(func() {
