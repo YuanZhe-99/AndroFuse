@@ -4,3 +4,4 @@
 # Dummy hex fixture DeviceKey "0123456789abcdef" in internal/gui/gui_test.go
 7b6622a7f824ac0b36fcc30174d13ba123e9c099:internal/gui/gui_test.go:generic-api-key:520
 3a2084ae7478fe8b5bf9fbf01afdfd593cff4938:internal/gui/gui_test.go:generic-api-key:430
+9398d7caa8ba70b104c7a3bad79ffbc023384243:internal/gui/gui_test.go:generic-api-key:581
