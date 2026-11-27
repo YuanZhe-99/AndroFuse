@@ -558,6 +558,9 @@ func (a *App) connectWirelessFor(ctx context.Context, client *adb.Client, hardwa
 // RefreshDevices scans wired USB, TLS Wi-Fi ADB, Emulator, and mDNS Wireless Debugging services,
 // deduplicating multi-transport entries for the same physical device (`INV-02`).
 func (a *App) RefreshDevices() {
+	if a.isInstallingUpdate() {
+		return
+	}
 	a.RefreshVMStatus()
 	a.mu.Lock()
 	if a.scanningDevices {
@@ -1784,6 +1787,9 @@ func (a *App) watchDevices(ctx context.Context) {
 		case <-tick.C:
 		}
 		n++
+		if a.isInstallingUpdate() {
+			continue
+		}
 		client, _, err := a.ensureADBAndLeases()
 		if err != nil {
 			continue

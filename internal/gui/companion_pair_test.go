@@ -106,6 +106,7 @@ func TestRememberMeshPhoneAndLosslessMergeWithADB(t *testing.T) {
 }
 
 func TestMeshPairEndToEndLoopback(t *testing.T) {
+	var asked companion.PairRequest
 	srv, err := companion.NewServer("", "SM-F971U1", "17", 37, companion.Handler{
 		MeshHost:    func() string { return "AF-p-aabbccdd Fold8" },
 		GetIdentity: func() (string, string, string) { return "Galaxy Z Fold8", "samsung", "samsung" },
@@ -120,7 +121,8 @@ func TestMeshPairEndToEndLoopback(t *testing.T) {
 			}
 		},
 		OnPairRequest: func(req companion.PairRequest) bool {
-			return req.Code == "654321"
+			asked = req
+			return req.UseSAS && companion.ValidPairCode(req.Code)
 		},
 		IssueToken: func(req companion.PairRequest) (string, error) {
 			return "issued-" + req.Code, nil
@@ -137,11 +139,17 @@ func TestMeshPairEndToEndLoopback(t *testing.T) {
 	go func() { _ = srv.Serve(ctx) }()
 	defer func() { _ = srv.Close() }()
 
-	res, err := companion.RequestPairing(ctx, srv.Addr(), "AndroFuse · TESTPC", "654321")
+	var desktopCode string
+	res, err := companion.RequestPairingSAS(ctx, srv.Addr(), "AndroFuse · TESTPC", func(code string) {
+		desktopCode = code
+	})
 	if err != nil {
-		t.Fatalf("RequestPairing: %v", err)
+		t.Fatalf("RequestPairingSAS: %v", err)
 	}
-	if res.Token != "issued-654321" || res.Manufacturer != "samsung" || res.Status == nil || res.Status.WirelessADBPairPort != 42345 {
+	if !companion.ValidPairCode(desktopCode) || !asked.UseSAS || asked.Code != desktopCode {
+		t.Fatalf("SAS code mismatch desktop=%q phone=%+v", desktopCode, asked)
+	}
+	if res.Token != "issued-"+desktopCode || res.Manufacturer != "samsung" || res.Status == nil || res.Status.WirelessADBPairPort != 42345 {
 		t.Fatalf("unexpected PairResponse: %+v", res)
 	}
 

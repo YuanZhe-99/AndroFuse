@@ -2,12 +2,10 @@ package gui
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"math/big"
 	"net"
 	"net/url"
 	"os"
@@ -223,15 +221,9 @@ func (a *App) PairMeshPhone(p networkPhone) {
 			a.setCardWork(key, cardWork{Note: a.failed(L.MeshPairFailedHint(name), err)})
 			return
 		}
-		code, err := pairingCode()
-		if err != nil {
-			a.setCardWork(key, cardWork{Note: err.Error()})
-			return
-		}
-
 		ctx, cancel := context.WithTimeout(context.Background(), companion.PairWait+25*time.Second)
 		a.update(func() {
-			a.pairingCode = code
+			a.pairingCode = ""
 			a.pairingModel = name
 			a.pairingCancel = cancel
 			a.deviceNotice = ""
@@ -245,7 +237,6 @@ func (a *App) PairMeshPhone(p networkPhone) {
 			})
 		}()
 
-		a.setCardWork(key, cardWork{Busy: L.MeshPairWaiting(name, formatPairCode(code))})
 		host, _ := os.Hostname()
 		addrs := make([]string, len(locals))
 		for i, lp := range locals {
@@ -253,7 +244,7 @@ func (a *App) PairMeshPhone(p networkPhone) {
 		}
 
 		// Wait up to 15 s for the newly added EasyTier forward + TLS listener to accept TCP, then
-		// send exactly one RequestPairing call (do not retry a user decline or cancellation).
+		// send exactly one RequestPairingSAS call (do not retry a user decline or cancellation).
 		var activeAddr string
 		for settle := time.Now().Add(15 * time.Second); activeAddr == "" && time.Now().Before(settle) && ctx.Err() == nil; {
 			for _, addr := range addrs {
@@ -281,7 +272,13 @@ func (a *App) PairMeshPhone(p networkPhone) {
 			activeAddr = addrs[0]
 		}
 
-		res, pairErr := companion.RequestPairing(ctx, activeAddr, "AndroFuse · "+host, code)
+		res, pairErr := companion.RequestPairingSAS(ctx, activeAddr, "AndroFuse · "+host, func(code string) {
+			a.update(func() {
+				a.pairingCode = code
+				a.pairingModel = name
+			})
+			a.setCardWork(key, cardWork{Busy: L.MeshPairWaiting(name, formatPairCode(code))})
+		})
 		if pairErr != nil {
 			switch {
 			case ctx.Err() == context.Canceled:
@@ -326,18 +323,15 @@ func pairOverADB(ctx context.Context, client *adb.Client, serial, apk string, pr
 		return nil, "", res, err
 	}
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
-	code, err := pairingCode()
-	if err != nil {
-		return nil, "", res, err
-	}
-	progress(L.CompanionConfirmCode(code))
-	if onCode != nil {
-		onCode(code)
-	}
 	host, _ := os.Hostname()
 	for deadline := time.Now().Add(companion.PairWait + 30*time.Second); ; {
 		pctx, pcancel := context.WithTimeout(ctx, companion.PairWait+5*time.Second)
-		res, err = companion.RequestPairing(pctx, addr, "AndroFuse · "+host, code)
+		res, err = companion.RequestPairingSAS(pctx, addr, "AndroFuse · "+host, func(code string) {
+			progress(L.CompanionConfirmCode(formatPairCode(code)))
+			if onCode != nil {
+				onCode(code)
+			}
+		})
 		pcancel()
 		// Until the phone's service is up the forward refuses or drops the connection; retry.
 		if err == nil || strings.Contains(err.Error(), "declined") || time.Now().After(deadline) {
@@ -353,15 +347,6 @@ func pairOverADB(ctx context.Context, client *adb.Client, serial, apk string, pr
 		return nil, "", res, err
 	}
 	return c, addr, res, nil
-}
-
-// pairingCode returns a random 6-digit code for the user to compare on both screens.
-func pairingCode() (string, error) {
-	n, err := rand.Int(rand.Reader, big.NewInt(1_000_000))
-	if err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("%06d", n.Int64()), nil
 }
 
 // peersForPhone lists how the phone reaches this desktop's mesh: the desktop's relays, plus each

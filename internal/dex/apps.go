@@ -46,6 +46,7 @@ func ListAppsWithIcons(ctx context.Context, client *adb.Client, serial, iconCach
 	if err := client.PushFile(callCtx, serial, jar, RemoteHelperPath); err != nil {
 		return nil, fmt.Errorf("push dex helper for apps: %w", err)
 	}
+	_, _ = client.Shell(callCtx, serial, "chmod 600 "+RemoteHelperPath+" 2>/dev/null || true")
 	var all strings.Builder
 	resume := ""
 	for range 4 {

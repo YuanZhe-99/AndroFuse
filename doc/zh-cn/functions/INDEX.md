@@ -4,12 +4,12 @@
 |---|---|---|
 | `cmd/androfuse` | 统一 MyGo 原生 UI 入口 | `main` |
 | `cmd/androfuse-svc` | 无头引擎命令行（`version`、`check`、`probe`、`run`） | `main`、`runFullProbe`、`runDaemon` |
-| `internal/version` | 全局唯一版本号（`0.2.1`） | `Version` |
+| `internal/version` | 全局唯一版本号（`0.2.2`） | `Version` |
 | `internal/core` | Rust 核心 C-ABI v6 加载器、零分配 NV12 环形缓冲与 WASAPI 播放/采集 | `Open`、`Lib.Start`、`Lib.SelfCheck`、`Lib.OpenDecoder`、`Lib.OpenAudioPlayer`、`Lib.OpenMicCapture`、`Decoder.PullInto`、`NV12Ring`、`AudioPlayer`、`MicCapturer` |
 | `internal/localapi` | 同用户 AF_UNIX NDJSON 服务（Windows SID 校验） | `Listen`、`Server.Serve`、`RecoverLeases`、`Call` |
 | `internal/vm` | 按需下载的轻量无头 Android 虚拟机管理器（`INV-03`、`INV-10`） | `NewManager`、`NativeABIForArch`、`DefaultVMRoot`、`ParseCmdlineToolsManifest`、`Manager.Status`、`Manager.Provision`、`Manager.Start`、`Manager.Stop`、`Manager.DeleteManaged` |
-| `internal/companion` | TLS 1.3 加密 Companion NDJSON 协议栈（`INV-07`、`INV-09`） | `NewServer`、`PickPort`、`Dial`、`GenerateSelfSignedCert`、`GeneratePairingToken`、`SanitizeFileName`、`Client.GetStatus`、`Client.PushFile`、`Client.RequestContinuity`、`Client.RunDisplayGuard`、`RequestPairing`、`Client.JoinMesh` |
-| `internal/androidhost` | 可选 Android Companion APK 宿主状态、授权管理与 MyGo 移动界面（`INV-09`） | `New`、`Host.StartServer`、`Host.StopServer`、`Host.SetPermission`、`Host.SetStandby`、`Host.JoinMesh`、`Host.LeaveMesh`、`Host.SetMeshFullSpeed`、`Host.AnswerPair`、`Host.RotateToken`、`Host.SetWirelessADBPort`、`Host.SetWirelessADBPairPort`、`RenderCompanionView` |
+| `internal/companion` | TLS 1.3 加密 Companion NDJSON 协议栈（`INV-07`、`INV-09`） | `NewServer`、`PickPort`、`Dial`、`GenerateSelfSignedCert`、`GeneratePairingToken`、`DerivePairSAS`、`RequestPairingSAS`、`SanitizeClientName`、`SanitizeFileName`、`Client.GetStatus`、`Client.PushFile`、`Client.RequestContinuity`、`Client.RunDisplayGuard`、`RequestPairing`、`Client.JoinMesh` |
+| `internal/androidhost` | 可选 Android Companion APK 宿主状态、授权管理与 MyGo 移动界面（`INV-09`） | `New`、`Host.StartServer`、`Host.StopServer`、`Host.SetPermission`、`Host.SetStandby`、`Host.JoinMesh`、`Host.LeaveMesh`、`Host.SetMeshFullSpeed`、`Host.AnswerPair`、`Host.AnswerPairChoice`、`Host.PendingPairChoices`、`Host.RotateToken`、`Host.SetWirelessADBPort`、`Host.SetWirelessADBPairPort`、`RenderCompanionView` |
 | `internal/androidbridge` | 平台安全的 Android 系统服务与桌面小组件状态桥接（配合 `CompanionServices.kt`） | `Capabilities`、`WidgetState`、`Probe`、`UpdateGranted`、`SyncCompanionWidget`、`CurrentWidgetState`、`TouchActive`、`ReleaseActive`、`ActiveHeld`、`SetStandby`、`WatchNetwork` |
 | `internal/androidcore` | 在 APK 中携带并加载 Android 核心库，提供 Keystore 密封 | `NewLibrary`、`Library.Load`、`NewVault`、`Vault.Seal`、`Vault.Open` |
 | `internal/avbridge` | M5 手机摄像头本地 MJPEG 服务、`MFCreateVirtualCamera` 探测与 PC→Android 音频/视频传入 | `ProbeVirtualCamera`、`NewMJPEGServer`、`MJPEGServer.Start`、`MJPEGServer.PushNV12`、`NewUplinkBridge`、`UplinkBridge.PushMicPCM`、`UplinkBridge.PushCameraJPEG`、`UplinkBridge.StreamMic` |

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -334,5 +335,98 @@ func TestPairingPortTunnelAndStatusFields(t *testing.T) {
 	}
 	if _, err := companion.DialTunnel(ctx, h.ListenAddr(), h.Config().Token, h.srv.Fingerprint(), pairPort+1); err == nil {
 		t.Fatal("expected arbitrary port to be rejected by OnTunnel")
+	}
+}
+
+func TestPairPromptChoicesAndMeshOverwriteGuard(t *testing.T) {
+	h := New(t.TempDir(), nil)
+	if got := h.Config().Token; got == "ANDROFUS" || len(got) != 32 {
+		t.Fatalf("expected 32-char CSPRNG token on fresh host, got len=%d (%q)", len(got), got)
+	}
+
+	// Correct 3-choice confirmation succeeds and renders cleanly across locales and themes.
+	resCh := make(chan bool, 1)
+	go func() {
+		resCh <- h.askPair(companion.PairRequest{ClientName: "STUDIO-PC", Code: "428193"})
+	}()
+	var choices [3]string
+	var ok bool
+	for range 40 {
+		_, choices, ok = h.PendingPairChoices()
+		if ok {
+			break
+		}
+		time.Sleep(15 * time.Millisecond)
+	}
+	if !ok || !slices.Contains(choices[:], "428193") {
+		t.Fatalf("PendingPairChoices missing real code: ok=%v choices=%v", ok, choices)
+	}
+	for _, lang := range []string{"en", "zh-Hans"} {
+		i18n.SetLocaleFunc(func() string { return lang })
+		for _, dark := range []bool{false, true} {
+			tt := ui.NewTester(func(c *ui.Context) {
+				RenderCompanionView(c, h)
+			}, 360, 780)
+			tt.SetDark(dark)
+			tt.Frame()
+		}
+	}
+	h.AnswerPairChoice("428193")
+	if !<-resCh {
+		t.Fatal("expected matching AnswerPairChoice to succeed")
+	}
+
+	// Tapping a decoy number rejects pairing.
+	go func() {
+		resCh <- h.askPair(companion.PairRequest{ClientName: "STUDIO-PC", Code: "112233"})
+	}()
+	ok = false
+	for range 40 {
+		_, choices, ok = h.PendingPairChoices()
+		if ok {
+			break
+		}
+		time.Sleep(15 * time.Millisecond)
+	}
+	if !ok {
+		t.Fatal("expected second pairing prompt")
+	}
+	decoy := ""
+	for _, c := range choices {
+		if c != "112233" {
+			decoy = c
+			break
+		}
+	}
+	h.AnswerPairChoice(decoy)
+	if <-resCh {
+		t.Fatal("expected decoy choice to reject pairing")
+	}
+
+	// Remote JoinMesh must refuse silently overwriting a different already-joined network.
+	h.mu.Lock()
+	h.cfg.Mesh = &MeshSettings{NetworkName: "net-a"}
+	h.mu.Unlock()
+	jRes, err := h.JoinMesh(companion.MeshJoinRequest{NetworkName: "net-b", NetworkSecret: "other-secret"})
+	if err != nil {
+		t.Fatalf("JoinMesh error: %v", err)
+	}
+	if jRes.Running || !strings.Contains(jRes.Message, "net-a") {
+		t.Fatalf("expected overwrite guard naming net-a, got %+v", jRes)
+	}
+	if h.Config().Mesh == nil || h.Config().Mesh.NetworkName != "net-a" {
+		t.Fatalf("expected net-a preserved, got %+v", h.Config().Mesh)
+	}
+
+	// Pairing port TTL expires after 3 minutes cleanly.
+	h.SetWirelessADBPairPort(42345)
+	if st := h.Status(); st.WirelessADBPairPort != 42345 {
+		t.Fatalf("expected active pair port 42345, got %d", st.WirelessADBPairPort)
+	}
+	h.mu.Lock()
+	h.wirelessADBPairAt = time.Now().Add(-4 * time.Minute)
+	h.mu.Unlock()
+	if st := h.Status(); st.WirelessADBPairPort != 0 {
+		t.Fatalf("expected expired pair port to read as 0, got %d", st.WirelessADBPairPort)
 	}
 }

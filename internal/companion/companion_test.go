@@ -3,7 +3,9 @@ package companion
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -14,8 +16,17 @@ import (
 
 func TestSanitizeFileNameAndToken(t *testing.T) {
 	tok, err := GeneratePairingToken()
-	if err != nil || len(tok) != 8 {
-		t.Fatalf("GeneratePairingToken = %q err=%v", tok, err)
+	if err != nil || len(tok) != 32 {
+		t.Fatalf("GeneratePairingToken = %q (len=%d) err=%v", tok, len(tok), err)
+	}
+	if got := SanitizeClientName("AndroFuse\r\n · \x00Bad\tPC"); got != "AndroFuse · Bad PC" {
+		t.Fatalf("SanitizeClientName = %q", got)
+	}
+	if len([]rune(SanitizeClientName(strings.Repeat("X", 80)))) != 64 {
+		t.Fatalf("SanitizeClientName exceeded 64 runes")
+	}
+	if SanitizeComputerID("af-pc-01_test:ok") == "" || SanitizeComputerID("bad/id") != "" {
+		t.Fatalf("unexpected SanitizeComputerID behavior")
 	}
 	if _, err := SanitizeFileName("../secret.txt"); err == nil {
 		t.Fatal("expected traversal path to be rejected")
@@ -38,6 +49,7 @@ func TestTLSCompanionAuthAndP1Roundtrip(t *testing.T) {
 		AppContinuity: true,
 		DisplayGuard:  true,
 		ADBBeacon:     true,
+		ScreenShare:   true,
 	}
 	var gotClip ClipboardMessage
 	srv, err := NewServer("PAIR8888", "SM-F971U1", "17", 37, Handler{
@@ -301,5 +313,218 @@ func TestShareStreamsOnlyWithPermission(t *testing.T) {
 	}
 	if _, err := DialShare(ctx, srv.Addr(), "SHARE001", srv.Fingerprint()); err == nil {
 		t.Fatal("share.open without the permission must be refused")
+	}
+}
+
+func TestPairingSASAndMITMRejection(t *testing.T) {
+	allow := true
+	var asked PairRequest
+	calls := 0
+	srv, err := NewServer("", "SM-F971U1", "17", 37, Handler{
+		OnPairRequest: func(r PairRequest) bool {
+			calls++
+			asked = r
+			return allow
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.Listen("127.0.0.1:0"); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	go func() { _ = srv.Serve(ctx) }()
+	defer srv.Close()
+
+	var clientSAS string
+	res, err := RequestPairingSAS(ctx, srv.Addr(), "Desk\nEvil\x07Name", func(code string) {
+		clientSAS = code
+	})
+	if err != nil {
+		t.Fatalf("RequestPairingSAS: %v", err)
+	}
+	if !ValidPairCode(clientSAS) || !asked.UseSAS || asked.Code != clientSAS || asked.ClientName != "Desk EvilName" || len(res.Token) != 32 {
+		t.Fatalf("unexpected SAS pairing result: sas=%q asked=%+v tokenLen=%d", clientSAS, asked, len(res.Token))
+	}
+
+	// Simulate an active TLS MITM sending a mismatched SAS code with UseSAS=true.
+	var peerDER []byte
+	dialer := &tls.Dialer{Config: &tls.Config{
+		MinVersion:         tls.VersionTLS13,
+		InsecureSkipVerify: true, // test validates MITM SAS mismatch behavior
+		VerifyConnection: func(cs tls.ConnectionState) error {
+			peerDER = cs.PeerCertificates[0].Raw
+			return nil
+		},
+	}}
+	raw, err := dialer.DialContext(ctx, "tcp", srv.Addr())
+	if err != nil {
+		t.Fatalf("raw TLS dial: %v", err)
+	}
+	tconn := raw.(*tls.Conn)
+	realSAS, err := DerivePairSAS(tconn.ConnectionState(), peerDER)
+	if err != nil {
+		tconn.Close()
+		t.Fatal(err)
+	}
+	wrongSAS := "000000"
+	if realSAS == wrongSAS {
+		wrongSAS = "111111"
+	}
+	payload, _ := json.Marshal(PairRequest{ClientName: "MitM", Code: wrongSAS, UseSAS: true})
+	_ = json.NewEncoder(tconn).Encode(Envelope{ID: "m1", Type: "pair.request", Payload: payload})
+	var env Envelope
+	_ = json.NewDecoder(tconn).Decode(&env)
+	tconn.Close()
+	if !strings.Contains(env.Error, "mismatch") || calls != 1 {
+		t.Fatalf("expected TLS session mismatch before OnPairRequest, got env=%+v calls=%d", env, calls)
+	}
+
+	// Two declined requests must activate cooldown and reject the third immediately.
+	allow = false
+	if _, err := RequestPairingSAS(ctx, srv.Addr(), "Desk", nil); err == nil {
+		t.Fatal("expected declined pairing to fail")
+	}
+	if _, err := RequestPairingSAS(ctx, srv.Addr(), "Desk", nil); err == nil || !strings.Contains(err.Error(), "too many") {
+		t.Fatalf("expected cooldown after repeated pairing failures, got %v", err)
+	}
+}
+
+func TestPreAuthLineLimitAndAuthRateLimit(t *testing.T) {
+	srv, err := NewServer("RATELIMIT", "Pixel", "16", 36, Handler{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.Listen("127.0.0.1:0"); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	go func() { _ = srv.Serve(ctx) }()
+	defer srv.Close()
+
+	// Oversized pre-auth payload (> 8 KiB) must be dropped cleanly before buffering 24 MiB.
+	dialer := &tls.Dialer{Config: &tls.Config{MinVersion: tls.VersionTLS13, InsecureSkipVerify: true}}
+	oversizedConn, err := dialer.DialContext(ctx, "tcp", srv.Addr())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = oversizedConn.Write([]byte(`{"type":"auth","padding":"` + strings.Repeat("a", maxPreAuthLineBytes+512) + `"}` + "\n"))
+	var eofBuf [16]byte
+	_ = oversizedConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if _, rErr := oversizedConn.Read(eofBuf[:]); rErr == nil {
+		oversizedConn.Close()
+		t.Fatal("expected server to close connection on oversized pre-auth frame")
+	}
+	oversizedConn.Close()
+
+	// Five bad auth attempts trigger rate limiting on the sixth.
+	for range 5 {
+		if _, err := Dial(ctx, srv.Addr(), "BADTKN00", srv.Fingerprint()); err == nil {
+			t.Fatal("expected invalid token failure")
+		}
+	}
+	if _, err := Dial(ctx, srv.Addr(), "RATELIMIT", srv.Fingerprint()); err == nil || !strings.Contains(err.Error(), "too many authentication failures") {
+		t.Fatalf("expected IP rate limit error on 6th attempt, got %v", err)
+	}
+}
+
+func TestScreenShareGatesDaemonAndAppsAndCtrlOwnership(t *testing.T) {
+	perms := Permissions{
+		Telemetry:   true,
+		ADBBeacon:   false,
+		ScreenShare: false,
+	}
+	tokA := "tokA-owner-0001" //gitleaks:allow
+	tokB := "tokB-other-0002" //gitleaks:allow
+	srv, err := NewServer("", "SM-F971U1", "17", 37, Handler{
+		GetPermissions: func() Permissions { return perms },
+		GetStatus: func() DeviceStatus {
+			return DeviceStatus{
+				BatteryPct:          80,
+				NetworkType:         "wifi",
+				WifiIPv4:            "192.168.1.50",
+				WirelessADBPort:     41235,
+				WirelessADBPairPort: 42345,
+			}
+		},
+		CheckToken: func(req AuthRequest) bool {
+			return req.Token == tokA || req.Token == tokB
+		},
+		OnListApps: func() ([]DaemonAppEntry, error) {
+			return []DaemonAppEntry{{Package: "com.example.app", Label: "App"}}, nil
+		},
+		OnDaemonStream: func(_ DaemonStreamRequest) (string, net.Conn, net.Conn, func(), error) {
+			va, vb := net.Pipe()
+			ca, cb := net.Pipe()
+			go func() {
+				_, _ = va.Write([]byte("VID"))
+				_ = va.Close()
+			}()
+			return "sess1234", vb, cb, func() { _ = ca.Close() }, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.Listen("127.0.0.1:0"); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	go func() { _ = srv.Serve(ctx) }()
+	defer srv.Close()
+
+	cA, err := Dial(ctx, srv.Addr(), tokA, srv.Fingerprint())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cA.Close()
+
+	st, err := cA.GetStatus(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.WirelessADBPort != 0 || st.WirelessADBPairPort != 0 || st.WifiIPv4 != "" {
+		t.Fatalf("expected wireless ADB fields scrubbed when ADBBeacon=false, got %+v", st)
+	}
+	if _, err := cA.ListApps(ctx); err == nil || !strings.Contains(err.Error(), "disabled") {
+		t.Fatalf("expected apps.list gated by ScreenShare, got %v", err)
+	}
+	if _, _, err := DialDaemonStream(ctx, srv.Addr(), tokA, srv.Fingerprint(), DaemonStreamRequest{}); err == nil || !strings.Contains(err.Error(), "disabled") {
+		t.Fatalf("expected daemon.open gated by ScreenShare, got %v", err)
+	}
+
+	// Now enable ScreenShare and test pendingCtrl owner verification between tokA and tokB.
+	perms.ScreenShare = true
+	vc, err := Dial(ctx, srv.Addr(), tokA, srv.Fingerprint())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vc.Close()
+	var openRes DaemonStreamResponse
+	if err := vc.call(ctx, "daemon.open", DaemonStreamRequest{Control: true}, &openRes); err != nil {
+		t.Fatal(err)
+	}
+
+	cB, err := Dial(ctx, srv.Addr(), tokB, srv.Fingerprint())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cB.Close()
+	if err := cB.call(ctx, "daemon.ctrl", DaemonCtrlRequest{SessionID: openRes.SessionID}, nil); err == nil || !strings.Contains(err.Error(), "unauthorized") {
+		t.Fatalf("expected other paired token to be rejected from attaching daemon.ctrl, got %v", err)
+	}
+
+	// Original owner tokA must still succeed on the pending session.
+	ccA, err := Dial(ctx, srv.Addr(), tokA, srv.Fingerprint())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ccA.Close()
+	if err := ccA.call(ctx, "daemon.ctrl", DaemonCtrlRequest{SessionID: openRes.SessionID}, nil); err != nil {
+		t.Fatalf("expected rightful owner tokA to attach daemon.ctrl after hijack attempt, got %v", err)
 	}
 }

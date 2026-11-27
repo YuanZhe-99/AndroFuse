@@ -243,14 +243,16 @@ type MediaFrameResponse struct {
 	Message       string `json:"message,omitempty"`
 }
 
-// PairRequest asks the phone's user to pair with a desktop reached over adb (`adb forward`).
-// Notes: accepted only as the first frame of a loopback connection, so LAN peers cannot raise
-// prompts; the phone shows ClientName and Code and the user compares the code with the one the
-// desktop shows (`INV-09`).
+// PairRequest asks the phone's user to pair with a desktop reached over adb (`adb forward`) or
+// an EasyTier mesh loopback forward.
+// Notes: accepted only as the first frame of a local socket or loopback connection, so LAN peers
+// cannot raise prompts; when UseSAS is true, Code is bound to the TLS 1.3 ExportKeyingMaterial
+// SAS (`INV-07`, `INV-09`).
 type PairRequest struct {
 	ClientName string `json:"client_name"`
 	Code       string `json:"code"`
 	ComputerID string `json:"computer_id,omitempty"`
+	UseSAS     bool   `json:"use_sas,omitempty"`
 }
 
 // PairResponse carries the pairing token, identity metadata, and optional initial status after the
@@ -305,9 +307,9 @@ func SanitizeFileName(name string) (string, error) {
 
 const tokenAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
-// GeneratePairingToken generates a cryptographically random 8-character pairing token (`INV-07`).
+// GeneratePairingToken generates a cryptographically random 32-character (160-bit) pairing token (`INV-07`).
 func GeneratePairingToken() (string, error) {
-	var raw [8]byte
+	var raw [32]byte
 	if _, err := rand.Read(raw[:]); err != nil {
 		return "", err
 	}
@@ -317,4 +319,58 @@ func GeneratePairingToken() (string, error) {
 		b.WriteByte(tokenAlphabet[int(v)%len(tokenAlphabet)])
 	}
 	return b.String(), nil
+}
+
+// SanitizeClientName normalizes a pairing requester's display name for safe notification and UI
+// rendering, stripping control characters, collapsing whitespace, and bounding length to 64 runes.
+func SanitizeClientName(s string) string {
+	var clean strings.Builder
+	clean.Grow(len(s))
+	for _, r := range s {
+		switch {
+		case r == '\r' || r == '\n' || r == '\t':
+			clean.WriteByte(' ')
+		case r < 0x20 || r == 0x7f:
+			continue
+		default:
+			clean.WriteRune(r)
+		}
+	}
+	collapsed := strings.Join(strings.Fields(clean.String()), " ")
+	if collapsed == "" {
+		return "Computer"
+	}
+	runes := []rune(collapsed)
+	if len(runes) > 64 {
+		return string(runes[:64])
+	}
+	return collapsed
+}
+
+// SanitizeComputerID validates and bounds a client's persistent ComputerID identifier.
+func SanitizeComputerID(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) == 0 || len(s) > 64 {
+		return ""
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-' || c == ':') {
+			return ""
+		}
+	}
+	return s
+}
+
+// ValidPairCode reports whether code is exactly 6 ASCII decimal digits.
+func ValidPairCode(code string) bool {
+	if len(code) != 6 {
+		return false
+	}
+	for i := 0; i < 6; i++ {
+		if code[i] < '0' || code[i] > '9' {
+			return false
+		}
+	}
+	return true
 }

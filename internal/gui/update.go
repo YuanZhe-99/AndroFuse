@@ -3,6 +3,9 @@ package gui
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -83,8 +86,38 @@ func (a *App) CheckForUpdates() {
 	}()
 }
 
-// InstallUpdate downloads and installs the version found, then relaunches AndroFuse.
-// Side effects: closes the open pictures as AndroFuse relaunches.
+func (a *App) isInstallingUpdate() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.update_.Installing
+}
+
+// stopBundledADBForUpdate shuts down adb.exe when running from the executable's own directory
+// (bundled `platform-tools/`) so Windows directory locks do not block in-place update swaps.
+func (a *App) stopBundledADBForUpdate() {
+	a.rt.coreMu.Lock()
+	client := a.rt.adbClient
+	a.rt.coreMu.Unlock()
+	if client == nil || client.Path == "" {
+		return
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	cleanClient := strings.ToLower(filepath.Clean(client.Path))
+	cleanDir := strings.ToLower(filepath.Clean(filepath.Dir(exe))) + string(filepath.Separator)
+	if !strings.HasPrefix(cleanClient, cleanDir) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	_, _ = client.Run(ctx, "kill-server")
+	cancel()
+}
+
+// InstallUpdate downloads and installs the version found, then cleanly exits and relaunches AndroFuse.
+// Side effects: stops bundled ADB, closes active sessions, marks quitting so the tray hook allows
+// shutdown, and triggers mygo.App.Relaunch.
 func (a *App) InstallUpdate() {
 	a.mu.Lock()
 	up := a.update_.Found
@@ -95,6 +128,7 @@ func (a *App) InstallUpdate() {
 	a.update_.Installing, a.update_.Progress, a.update_.Err = true, 0, ""
 	a.mu.Unlock()
 	go func() {
+		a.stopBundledADBForUpdate()
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer cancel()
 		err := up.Install(ctx, func(done, total int64) {
@@ -110,8 +144,12 @@ func (a *App) InstallUpdate() {
 			})
 			return
 		}
+		a.mu.Lock()
+		a.quitting = true
+		a.mu.Unlock()
 		a.CloseAllSessions()
 		a.stopTunnels()
+		a.stopBundledADBForUpdate()
 		mygo.App.Relaunch()
 	}()
 }

@@ -88,21 +88,31 @@ func sectionTitle(c *ui.Context, s string) {
 	ui.Text(c, s).FontSize(12).Bold().TextColor(c.Theme().TextMuted)
 }
 
-// pairPrompt asks the phone's user to allow a computer's adb pairing request, showing its code.
+// pairPrompt asks the phone's user to confirm a computer's pairing request by tapping the
+// 6-digit SAS code matching what the computer shows (`INV-09`).
 func (h *Host) pairPrompt(c *ui.Context) {
-	req, ok := h.PendingPair()
+	req, choices, ok := h.PendingPairChoices()
 	if !ok {
 		return
 	}
 	t := c.Theme()
 	card(c.Key("comp-pair-card")).Border(2, t.Accent).Children(func() {
 		ui.Text(c, L.PairPromptTitle()).Bold().FontSize(16)
-		ui.Text(c, L.PairPromptBody(req.ClientName, req.Code)).FontSize(13).TextColor(t.TextMuted)
-		ui.Text(c.Key("comp-pair-code"), spaced(req.Code)).Bold().FontSize(28).FontFeatures("tnum")
-		ui.Row(c.Key("comp-pair-actions")).Gap(8).Children(func() {
-			if ui.PrimaryButton(c.Key("comp-pair-allow"), L.PairAllow()).Clicked() {
-				go h.AnswerPair(true)
+		ui.Text(c, L.PairPromptChoose(req.ClientName)).FontSize(13).TextColor(t.TextMuted)
+		ui.Row(c.Key("comp-pair-choices")).FillWidth().Gap(8).Children(func() {
+			for i, ch := range choices {
+				ch := ch
+				b := ui.ButtonBase(c.Key(fmt.Sprintf("comp-pair-choice-%d", i))).Grow(1).Basis(0).Height(44).
+					Radius(10).Background(t.Background).Border(1, t.Border).Center().Label(spaced(ch))
+				b.Children(func() {
+					ui.Text(c, spaced(ch)).Bold().FontSize(18).FontFeatures("tnum")
+				})
+				if b.Clicked() {
+					go h.AnswerPairChoice(ch)
+				}
 			}
+		})
+		ui.Row(c.Key("comp-pair-actions")).Gap(8).Children(func() {
 			if ui.Button(c.Key("comp-pair-decline"), L.PairDecline()).Clicked() {
 				go h.AnswerPair(false)
 			}

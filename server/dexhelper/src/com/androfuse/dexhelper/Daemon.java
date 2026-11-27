@@ -14,8 +14,10 @@ import android.os.ParcelFileDescriptor;
 import android.os.Process;
 import android.os.RemoteException;
 import android.system.Os;
+import android.system.StructStat;
 
 import java.io.BufferedReader;
+import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -27,6 +29,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.nio.channels.FileLock;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -63,6 +66,43 @@ final class Daemon {
     private static final int TX_CLOSE_SESSION = IBinder.FIRST_CALL_TRANSACTION + 5;
     private static final int TX_LIST_APPS = IBinder.FIRST_CALL_TRANSACTION + 6;
 
+    private static String verifyAndHashJar(String path) throws Exception {
+        StructStat st = Os.stat(path);
+        int selfUid = Os.getuid();
+        if (st.st_uid != selfUid && st.st_uid != 0) {
+            throw new SecurityException("Untrusted owner UID " + st.st_uid + " for " + path);
+        }
+        if ((st.st_mode & 0x0002) != 0) {
+            throw new SecurityException("World-writable JAR rejected: " + path);
+        }
+        MessageDigest md = MessageDigest.getInstance("SHA-256");
+        byte[] buf = new byte[32 * 1024];
+        try (FileInputStream in = new FileInputStream(path)) {
+            int n;
+            while ((n = in.read(buf)) > 0) {
+                md.update(buf, 0, n);
+            }
+        }
+        byte[] digest = md.digest();
+        StringBuilder hex = new StringBuilder(digest.length * 2);
+        for (byte b : digest) {
+            int v = b & 0xff;
+            if (v < 0x10) {
+                hex.append('0');
+            }
+            hex.append(Integer.toHexString(v));
+        }
+        return hex.toString();
+    }
+
+    private static String verifyPinnedJar(String path, String expectedSha256) throws Exception {
+        String actual = verifyAndHashJar(path);
+        if (expectedSha256 != null && !expectedSha256.isEmpty() && !expectedSha256.equalsIgnoreCase(actual)) {
+            throw new SecurityException("JAR integrity mismatch for " + path);
+        }
+        return actual;
+    }
+
     private Daemon() {}
 
     static void run(String[] args) throws Exception {
@@ -95,8 +135,11 @@ final class Daemon {
         boolean hasTrustedDisplay = pm.checkPermission("android.permission.ADD_TRUSTED_DISPLAY", "com.android.shell")
             == PackageManager.PERMISSION_GRANTED;
 
+        String helperSha = verifyAndHashJar(DEX_HELPER_PATH);
+        String scrcpySha = new File(SCRCPY_SERVER_PATH).isFile() ? verifyAndHashJar(SCRCPY_SERVER_PATH) : "";
+
         CountDownLatch stopLatch = new CountDownLatch(1);
-        DaemonBinder binder = new DaemonBinder(authority, expectedUid, hasTrustedDisplay, stopLatch);
+        DaemonBinder binder = new DaemonBinder(authority, expectedUid, hasTrustedDisplay, helperSha, scrcpySha, stopLatch);
 
         try {
             pushBinderWithRetry(authority, binder, 15_000L);
@@ -292,6 +335,8 @@ final class Daemon {
         private final String authority;
         private final int expectedUid;
         private final boolean hasTrustedDisplay;
+        private final String helperSha256;
+        private String scrcpySha256;
         private final CountDownLatch stopLatch;
         private final SecureRandom rng = new SecureRandom();
         private final Object clientLock = new Object();
@@ -301,10 +346,12 @@ final class Daemon {
         private IBinder.DeathRecipient clientDeath;
         private boolean reattaching;
 
-        DaemonBinder(String authority, int expectedUid, boolean hasTrustedDisplay, CountDownLatch stopLatch) {
+        DaemonBinder(String authority, int expectedUid, boolean hasTrustedDisplay, String helperSha256, String scrcpySha256, CountDownLatch stopLatch) {
             this.authority = authority;
             this.expectedUid = expectedUid;
             this.hasTrustedDisplay = hasTrustedDisplay;
+            this.helperSha256 = helperSha256;
+            this.scrcpySha256 = scrcpySha256;
             this.stopLatch = stopLatch;
         }
 
@@ -463,6 +510,24 @@ final class Daemon {
                 throw new IllegalArgumentException("invalid new_display spec");
             }
             int safeBitRate = bitRate > 0 ? Math.min(bitRate, 64_000_000) : 8_000_000;
+            String expectedScrcpy;
+            synchronized (sessionLock) {
+                expectedScrcpy = scrcpySha256;
+            }
+            try {
+                String actualScrcpy = verifyPinnedJar(SCRCPY_SERVER_PATH, expectedScrcpy);
+                if (expectedScrcpy == null || expectedScrcpy.isEmpty()) {
+                    synchronized (sessionLock) {
+                        if (scrcpySha256 == null || scrcpySha256.isEmpty()) {
+                            scrcpySha256 = actualScrcpy;
+                        }
+                    }
+                }
+            } catch (Throwable t) {
+                closeQuiet(videoPfd);
+                closeQuiet(ctrlPfd);
+                throw new SecurityException("scrcpy-server verification failed: " + t.getMessage(), t);
+            }
             boolean wantCtrl = ctrlPfd != null;
             int scid = rng.nextInt(0x7fffffff);
             String scidHex = String.format("%08x", scid);
@@ -486,7 +551,7 @@ final class Daemon {
                 }
                 String dexToken = String.format("%08x", rng.nextInt(0x7fffffff));
                 try {
-                    DexServeHandle dh = startDeXLoopback(dexToken, dexW, dexH, dexDpi);
+                    DexServeHandle dh = startDeXLoopback(dexToken, dexW, dexH, dexDpi, helperSha256);
                     dexProc = dh.proc;
                     targetDisplayId = dh.displayId;
                     scrcpyNewDisplay = "";
@@ -619,7 +684,8 @@ final class Daemon {
             }
         }
 
-        private static DexServeHandle startDeXLoopback(String token, int width, int height, int dpi) throws Exception {
+        private static DexServeHandle startDeXLoopback(String token, int width, int height, int dpi, String expectedHelperSha256) throws Exception {
+            verifyPinnedJar(DEX_HELPER_PATH, expectedHelperSha256);
             ProcessBuilder pb = new ProcessBuilder(
                 "/system/bin/app_process",
                 "/",
@@ -722,8 +788,9 @@ final class Daemon {
             t.start();
         }
 
-        private static String listAppsJson() {
+        private String listAppsJson() {
             try {
+                verifyPinnedJar(DEX_HELPER_PATH, helperSha256);
                 ProcessBuilder pb = new ProcessBuilder(
                     "/system/bin/app_process",
                     "/",

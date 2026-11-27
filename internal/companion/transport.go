@@ -2,6 +2,7 @@ package companion
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -12,6 +13,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
@@ -69,6 +71,12 @@ type Handler struct {
 	CheckToken func(req AuthRequest) bool
 }
 
+const (
+	maxPreAuthLineBytes = 8 << 10
+	maxAuthLineBytes    = 24 << 20
+	maxUnauthConns      = 32
+)
+
 // Server serves authenticated TLS 1.3 Companion NDJSON requests.
 type Server struct {
 	cert        tls.Certificate
@@ -77,18 +85,42 @@ type Server struct {
 	androidRel  string
 	sdkInt      int
 	handler     Handler
+	unauthSem   chan struct{}
 
-	mu          sync.Mutex
-	token       string
-	listeners   []net.Listener
-	pendingCtrl map[string]pendingCtrlEntry
-	closed      bool
-	wg          sync.WaitGroup
+	mu                sync.Mutex
+	token             string
+	listeners         []net.Listener
+	pendingCtrl       map[string]pendingCtrlEntry
+	authFailures      map[string]authFailEntry
+	pairFails         int
+	pairCooldownUntil time.Time
+	closed            bool
+	wg                sync.WaitGroup
+}
+
+type authFailEntry struct {
+	count        int
+	windowStart  time.Time
+	blockedUntil time.Time
 }
 
 type pendingCtrlEntry struct {
-	conn net.Conn
-	stop func()
+	conn      net.Conn
+	stop      func()
+	ownerHash string
+}
+
+type bufferedConn struct {
+	net.Conn
+	r *bufio.Reader
+}
+
+func (b *bufferedConn) Read(p []byte) (int, error) {
+	return b.r.Read(p)
+}
+
+func (b *bufferedConn) NetConn() net.Conn {
+	return b.Conn
 }
 
 // ErrFingerprint means the Companion answered with another certificate than the one pinned at
@@ -163,13 +195,15 @@ func NewServer(token, deviceModel, androidRel string, sdk int, handler Handler) 
 		}
 	}
 	return &Server{
-		cert:        cert,
-		fingerprint: fp,
-		token:       strings.TrimSpace(token),
-		model:       deviceModel,
-		androidRel:  androidRel,
-		sdkInt:      sdk,
-		handler:     handler,
+		cert:         cert,
+		fingerprint:  fp,
+		token:        strings.TrimSpace(token),
+		model:        deviceModel,
+		androidRel:   androidRel,
+		sdkInt:       sdk,
+		handler:      handler,
+		unauthSem:    make(chan struct{}, maxUnauthConns),
+		authFailures: make(map[string]authFailEntry),
 	}, nil
 }
 
@@ -327,19 +361,123 @@ func (s *Server) permissions() Permissions {
 	return DefaultPermissions()
 }
 
+func readJSONLine(r *bufio.Reader, maxBytes int) ([]byte, error) {
+	var buf []byte
+	for {
+		frag, err := r.ReadSlice('\n')
+		if len(buf)+len(frag) > maxBytes {
+			return nil, fmt.Errorf("frame exceeds %d byte limit", maxBytes)
+		}
+		if len(frag) > 0 {
+			if len(buf) == 0 && err != bufio.ErrBufferFull {
+				return bytes.TrimRight(frag, "\r\n"), err
+			}
+			buf = append(buf, frag...)
+		}
+		if err != bufio.ErrBufferFull {
+			return bytes.TrimRight(buf, "\r\n"), err
+		}
+	}
+}
+
+func remoteIPKey(a net.Addr) string {
+	if a == nil {
+		return "unknown"
+	}
+	if a.Network() == "unix" {
+		return "unix"
+	}
+	if ap, err := netip.ParseAddrPort(a.String()); err == nil {
+		return ap.Addr().Unmap().String()
+	}
+	if h, _, err := net.SplitHostPort(a.String()); err == nil && h != "" {
+		return h
+	}
+	return a.String()
+}
+
+func tokenOwnerHash(tok string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(tok)))
+	return hex.EncodeToString(sum[:])
+}
+
+func (s *Server) authBlocked(ipKey string, now time.Time) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.authFailures == nil {
+		return false
+	}
+	e, ok := s.authFailures[ipKey]
+	return ok && now.Before(e.blockedUntil)
+}
+
+func (s *Server) recordAuthFailure(ipKey string, now time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.authFailures == nil {
+		s.authFailures = make(map[string]authFailEntry)
+	}
+	e := s.authFailures[ipKey]
+	if e.windowStart.IsZero() || now.Sub(e.windowStart) > time.Minute {
+		e = authFailEntry{count: 1, windowStart: now}
+	} else {
+		e.count++
+	}
+	if e.count >= 5 {
+		backoff := time.Duration(e.count-4) * 5 * time.Second
+		if backoff > time.Minute {
+			backoff = time.Minute
+		}
+		e.blockedUntil = now.Add(backoff)
+	}
+	s.authFailures[ipKey] = e
+}
+
+func (s *Server) clearAuthFailures(ipKey string) {
+	s.mu.Lock()
+	if s.authFailures != nil {
+		delete(s.authFailures, ipKey)
+	}
+	s.mu.Unlock()
+}
+
 func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
+	if s.unauthSem != nil {
+		timer := time.NewTimer(2 * time.Second)
+		select {
+		case s.unauthSem <- struct{}{}:
+			timer.Stop()
+		case <-timer.C:
+			return
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		}
+	}
+	var releaseOnce sync.Once
+	releaseUnauth := func() {
+		releaseOnce.Do(func() {
+			if s.unauthSem != nil {
+				<-s.unauthSem
+			}
+		})
+	}
+	defer releaseUnauth()
 
-	sc := bufio.NewScanner(conn)
-	sc.Buffer(make([]byte, 0, 64*1024), 24<<20)
+	_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
+	br := bufio.NewReaderSize(conn, maxPreAuthLineBytes)
 	enc := json.NewEncoder(conn)
 
-	if !sc.Scan() {
+	firstLine, err := readJSONLine(br, maxPreAuthLineBytes)
+	if len(firstLine) == 0 && err != nil {
+		return
+	}
+	if err != nil && !errors.Is(err, io.EOF) {
 		return
 	}
 	var authEnv Envelope
-	if err := json.Unmarshal(sc.Bytes(), &authEnv); err == nil && authEnv.Type == "pair.request" {
+	if uErr := json.Unmarshal(firstLine, &authEnv); uErr == nil && authEnv.Type == "pair.request" {
 		s.handlePair(conn, enc, authEnv)
 		return
 	}
@@ -352,10 +490,20 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 		_ = enc.Encode(Envelope{ID: authEnv.ID, Type: "auth.res", Error: "invalid auth payload"})
 		return
 	}
+	ipKey := remoteIPKey(conn.RemoteAddr())
+	now := time.Now()
+	if s.authBlocked(ipKey, now) {
+		_ = writeEnvelope(enc, authEnv.ID, "auth.res", AuthResponse{OK: false, Error: "too many authentication failures; try again shortly"}, "too many authentication failures; try again shortly")
+		return
+	}
 	if !s.tokenOK(authReq) {
+		s.recordAuthFailure(ipKey, now)
 		_ = writeEnvelope(enc, authEnv.ID, "auth.res", AuthResponse{OK: false, Error: "invalid pairing token"}, "invalid pairing token")
 		return
 	}
+	s.clearAuthFailures(ipKey)
+	releaseUnauth()
+	ownerHash := tokenOwnerHash(authReq.Token)
 	_ = conn.SetDeadline(time.Time{})
 	devName, maker, brand := s.identityExtras()
 	_ = writeEnvelope(enc, authEnv.ID, "auth.res", AuthResponse{
@@ -371,37 +519,48 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 		MeshHost:        s.meshHost(),
 	}, "")
 
-	for sc.Scan() {
+	for {
+		line, rErr := readJSONLine(br, maxAuthLineBytes)
+		if len(line) == 0 && rErr != nil {
+			return
+		}
 		if ctx.Err() != nil {
 			return
 		}
 		var env Envelope
-		if err := json.Unmarshal(sc.Bytes(), &env); err != nil {
+		if err := json.Unmarshal(line, &env); err != nil {
 			_ = enc.Encode(Envelope{Type: "error", Error: fmt.Sprintf("invalid json: %v", err)})
+			if rErr != nil {
+				return
+			}
 			continue
 		}
+		streamConn := net.Conn(&bufferedConn{Conn: conn, r: br})
 		if env.Type == "tunnel.open" {
-			tuneStreamConn(conn)
-			s.serveTunnel(conn, enc, env)
+			tuneStreamConn(streamConn)
+			s.serveTunnel(streamConn, enc, env)
 			return
 		}
 		if env.Type == "share.open" {
-			tuneStreamConn(conn)
-			s.serveShare(conn, enc, env)
+			tuneStreamConn(streamConn)
+			s.serveShare(streamConn, enc, env)
 			return
 		}
 		if env.Type == "daemon.open" {
-			tuneStreamConn(conn)
-			s.serveDaemonOpen(conn, enc, env)
+			tuneStreamConn(streamConn)
+			s.serveDaemonOpen(streamConn, enc, env, ownerHash)
 			return
 		}
 		if env.Type == "daemon.ctrl" {
-			tuneStreamConn(conn)
-			s.serveDaemonCtrl(conn, enc, env)
+			tuneStreamConn(streamConn)
+			s.serveDaemonCtrl(streamConn, enc, env, ownerHash)
 			return
 		}
 		resp := s.dispatch(env)
 		if err := enc.Encode(resp); err != nil {
+			return
+		}
+		if rErr != nil {
 			return
 		}
 	}
@@ -430,10 +589,15 @@ func (s *Server) dispatch(env Envelope) Envelope {
 		}
 		if !perms.ADBBeacon {
 			st.WirelessADBPort = 0
+			st.WirelessADBPairPort = 0
+			st.WifiIPv4 = ""
 		}
 		return mustEnvelope(env.ID, "status.res", st)
 
 	case "apps.list":
+		if !perms.ScreenShare {
+			return Envelope{ID: env.ID, Type: "apps.list.res", Error: "screen sharing permission disabled"}
+		}
 		if s.handler.OnListApps == nil {
 			return Envelope{ID: env.ID, Type: "apps.list.res", Error: "app list unavailable"}
 		}
@@ -749,12 +913,39 @@ func (c *Client) RunDisplayGuard(ctx context.Context) (DisplayGuardResponse, err
 	return res, err
 }
 
-// handlePair answers a `pair.request` frame: only over the local socket or loopback (`adb
-// forward`) and only after the phone's user allowed it, it returns the pairing token and
-// certificate fingerprint.
+// DerivePairSAS derives a 6-digit Short Authentication String bound to the active TLS 1.3
+// handshake and server certificate DER bytes (`RFC 5705` / `ExportKeyingMaterial`), so an active
+// TLS MitM proxy produces distinct codes on client and server (`INV-07`).
+func DerivePairSAS(cs tls.ConnectionState, certDER []byte) (string, error) {
+	if len(certDER) == 0 {
+		return "", errors.New("missing peer certificate for SAS derivation")
+	}
+	ekm, err := cs.ExportKeyingMaterial("androfuse-pair-sas-v1", certDER, 8)
+	if err != nil {
+		return "", err
+	}
+	n := binary.BigEndian.Uint64(ekm) % 1_000_000
+	return fmt.Sprintf("%06d", n), nil
+}
+
+// handlePair answers a `pair.request` frame: only over a verified local socket or loopback
+// (`adb forward` / mesh forward), respecting pairing cooldowns and optional TLS SAS binding
+// (`INV-07`, `INV-09`), then returns the pairing token and certificate fingerprint once allowed.
 func (s *Server) handlePair(conn net.Conn, enc *json.Encoder, env Envelope) {
-	if !isLocal(conn.RemoteAddr()) {
-		_ = enc.Encode(Envelope{ID: env.ID, Type: "pair.res", Error: "pairing requests are only accepted over adb"})
+	rawConn := conn
+	if tc, ok := conn.(*tls.Conn); ok {
+		rawConn = tc.NetConn()
+	}
+	if !isLocal(conn.RemoteAddr()) || !verifyLocalPeerCred(rawConn) {
+		_ = enc.Encode(Envelope{ID: env.ID, Type: "pair.res", Error: "pairing requests are only accepted over local adb or mesh loopback"})
+		return
+	}
+	now := time.Now()
+	s.mu.Lock()
+	cooldownUntil := s.pairCooldownUntil
+	s.mu.Unlock()
+	if now.Before(cooldownUntil) {
+		_ = enc.Encode(Envelope{ID: env.ID, Type: "pair.res", Error: "too many pairing requests; wait before trying again"})
 		return
 	}
 	var req PairRequest
@@ -762,20 +953,69 @@ func (s *Server) handlePair(conn net.Conn, enc *json.Encoder, env Envelope) {
 		_ = enc.Encode(Envelope{ID: env.ID, Type: "pair.res", Error: "pairing is not available"})
 		return
 	}
+	req.ClientName = SanitizeClientName(req.ClientName)
+	req.ComputerID = SanitizeComputerID(req.ComputerID)
+	req.Code = strings.TrimSpace(req.Code)
+
+	recordPairFailure := func() {
+		s.mu.Lock()
+		s.pairFails++
+		if s.pairFails >= 2 {
+			d := time.Duration(s.pairFails) * 3 * time.Second
+			if d > 30*time.Second {
+				d = 30 * time.Second
+			}
+			s.pairCooldownUntil = time.Now().Add(d)
+		}
+		s.mu.Unlock()
+	}
+
+	if tc, ok := conn.(*tls.Conn); ok && len(s.cert.Certificate) > 0 {
+		serverSAS, sErr := DerivePairSAS(tc.ConnectionState(), s.cert.Certificate[0])
+		if req.UseSAS {
+			if sErr != nil || subtle.ConstantTimeCompare([]byte(req.Code), []byte(serverSAS)) != 1 {
+				recordPairFailure()
+				_ = enc.Encode(Envelope{ID: env.ID, Type: "pair.res", Error: "pairing TLS session mismatch"})
+				return
+			}
+			req.Code = serverSAS
+		} else if !ValidPairCode(req.Code) {
+			recordPairFailure()
+			_ = enc.Encode(Envelope{ID: env.ID, Type: "pair.res", Error: "invalid pairing code"})
+			return
+		}
+	} else if !ValidPairCode(req.Code) {
+		recordPairFailure()
+		_ = enc.Encode(Envelope{ID: env.ID, Type: "pair.res", Error: "invalid pairing code"})
+		return
+	}
+
 	_ = conn.SetDeadline(time.Now().Add(PairWait + 10*time.Second))
 	if !s.handler.OnPairRequest(req) {
+		recordPairFailure()
 		_ = enc.Encode(Envelope{ID: env.ID, Type: "pair.res", Error: "pairing was declined on the phone"})
 		return
 	}
+	s.mu.Lock()
+	s.pairFails = 0
+	s.pairCooldownUntil = time.Time{}
+	s.mu.Unlock()
+
 	tok, err := s.issueToken(req)
 	if err != nil {
 		_ = enc.Encode(Envelope{ID: env.ID, Type: "pair.res", Error: err.Error()})
 		return
 	}
 	devName, maker, brand := s.identityExtras()
+	perms := s.permissions()
 	var initStatus *DeviceStatus
-	if s.permissions().Telemetry && s.handler.GetStatus != nil {
+	if perms.Telemetry && s.handler.GetStatus != nil {
 		st := s.handler.GetStatus()
+		if !perms.ADBBeacon {
+			st.WirelessADBPort = 0
+			st.WirelessADBPairPort = 0
+			st.WifiIPv4 = ""
+		}
 		initStatus = &st
 	}
 	_ = writeEnvelope(enc, env.ID, "pair.res", PairResponse{
@@ -800,11 +1040,64 @@ func (s *Server) identityExtras() (deviceName, manufacturer, brand string) {
 	return "", "", ""
 }
 
-// RequestPairing asks the phone at addr (an `adb forward` of the Companion LocalSocket) to pair, showing
-// clientName and code there; it waits for the phone's user to answer.
+// RequestPairingSAS connects to the Companion at addr over TLS 1.3, derives a 6-digit Short
+// Authentication String bound to the live TLS handshake (`DerivePairSAS`), passes that code to
+// onCode for display on the desktop, and requests user confirmation on the phone (`INV-07`).
+// Returns: the pairing token and certificate fingerprint verified against the TLS peer cert.
+func RequestPairingSAS(ctx context.Context, addr, clientName string, onCode func(code string)) (PairResponse, error) {
+	var gotFP string
+	var peerDER []byte
+	dialer := &tls.Dialer{Config: &tls.Config{
+		MinVersion:         tls.VersionTLS13,
+		InsecureSkipVerify: true, // The fingerprint is returned to the caller and pinned for Dial.
+		VerifyConnection: func(cs tls.ConnectionState) error {
+			if len(cs.PeerCertificates) == 0 {
+				return errors.New("missing companion peer certificate")
+			}
+			peerDER = cs.PeerCertificates[0].Raw
+			gotFP = certFingerprint(peerDER)
+			return nil
+		},
+	}}
+	raw, err := dialer.DialContext(ctx, "tcp", strings.TrimSpace(addr))
+	if err != nil {
+		return PairResponse{}, err
+	}
+	conn := raw.(*tls.Conn)
+	defer conn.Close()
+	code, err := DerivePairSAS(conn.ConnectionState(), peerDER)
+	if err != nil {
+		return PairResponse{}, err
+	}
+	if onCode != nil {
+		onCode(code)
+	}
+	sc := bufio.NewScanner(conn)
+	c := &Client{conn: conn, sc: sc, enc: json.NewEncoder(conn)}
+	var res PairResponse
+	if err := c.call(ctx, "pair.request", PairRequest{
+		ClientName: SanitizeClientName(clientName),
+		Code:       code,
+		ComputerID: clientID(),
+		UseSAS:     true,
+	}, &res); err != nil {
+		return PairResponse{}, err
+	}
+	if !strings.EqualFold(res.CertFingerprint, gotFP) {
+		return PairResponse{}, errors.New("companion certificate changed during pairing")
+	}
+	return res, nil
+}
+
+// RequestPairing asks the phone at addr (`adb forward` or mesh forward) to pair, showing
+// clientName and code there and waiting for the phone's user to answer. When code is empty,
+// RequestPairingSAS is used instead.
 // Returns: the pairing token and the certificate fingerprint, already checked against the TLS
 // connection, for Dial.
 func RequestPairing(ctx context.Context, addr, clientName, code string) (PairResponse, error) {
+	if strings.TrimSpace(code) == "" {
+		return RequestPairingSAS(ctx, addr, clientName, nil)
+	}
 	var gotFP string
 	dialer := &tls.Dialer{Config: &tls.Config{
 		MinVersion:         tls.VersionTLS13,
@@ -826,7 +1119,11 @@ func RequestPairing(ctx context.Context, addr, clientName, code string) (PairRes
 	sc := bufio.NewScanner(conn)
 	c := &Client{conn: conn, sc: sc, enc: json.NewEncoder(conn)}
 	var res PairResponse
-	if err := c.call(ctx, "pair.request", PairRequest{ClientName: clientName, Code: code, ComputerID: clientID()}, &res); err != nil {
+	if err := c.call(ctx, "pair.request", PairRequest{
+		ClientName: SanitizeClientName(clientName),
+		Code:       strings.TrimSpace(code),
+		ComputerID: clientID(),
+	}, &res); err != nil {
 		return PairResponse{}, err
 	}
 	if !strings.EqualFold(res.CertFingerprint, gotFP) {
@@ -937,13 +1234,26 @@ func (s *Server) serveTunnel(conn net.Conn, enc *json.Encoder, env Envelope) {
 	pipe(conn, target)
 }
 
+func unwrapTCPConn(c net.Conn) *net.TCPConn {
+	for c != nil {
+		switch x := c.(type) {
+		case *net.TCPConn:
+			return x
+		case *tls.Conn:
+			c = x.NetConn()
+		case *bufferedConn:
+			c = x.Conn
+		default:
+			return nil
+		}
+	}
+	return nil
+}
+
 // tuneStreamConn disables Nagle's algorithm and enables fast TCP keepalive on TCP/TLS stream
 // sockets so small packets flow immediately and half-open cellular/Wi-Fi switches fail fast.
 func tuneStreamConn(c net.Conn) {
-	if tc, ok := c.(*tls.Conn); ok {
-		c = tc.NetConn()
-	}
-	if tcp, ok := c.(*net.TCPConn); ok {
+	if tcp := unwrapTCPConn(c); tcp != nil {
 		_ = tcp.SetNoDelay(true)
 		_ = tcp.SetKeepAlive(true)
 		_ = tcp.SetKeepAlivePeriod(3 * time.Second)
@@ -954,10 +1264,7 @@ func tuneStreamConn(c net.Conn) {
 // streams so slow 5G or relay paths exert backpressure instead of queuing seconds of frames.
 func tuneVideoConn(c net.Conn) {
 	tuneStreamConn(c)
-	if tc, ok := c.(*tls.Conn); ok {
-		c = tc.NetConn()
-	}
-	if tcp, ok := c.(*net.TCPConn); ok {
+	if tcp := unwrapTCPConn(c); tcp != nil {
 		_ = tcp.SetWriteBuffer(64 * 1024)
 	}
 }
@@ -1077,7 +1384,11 @@ func (c *Client) Key(ctx context.Context, action string) error {
 	return c.call(ctx, "input.key", KeyRequest{Action: action}, nil)
 }
 
-func (s *Server) serveDaemonOpen(conn net.Conn, enc *json.Encoder, env Envelope) {
+func (s *Server) serveDaemonOpen(conn net.Conn, enc *json.Encoder, env Envelope, ownerHash string) {
+	if !s.permissions().ScreenShare {
+		_ = enc.Encode(Envelope{ID: env.ID, Type: "daemon.open.res", Error: "screen sharing permission disabled"})
+		return
+	}
 	if s.handler.OnDaemonStream == nil {
 		_ = enc.Encode(Envelope{ID: env.ID, Type: "daemon.open.res", Error: "uid=2000 daemon streaming is unavailable"})
 		return
@@ -1101,7 +1412,7 @@ func (s *Server) serveDaemonOpen(conn net.Conn, enc *json.Encoder, env Envelope)
 		if s.pendingCtrl == nil {
 			s.pendingCtrl = make(map[string]pendingCtrlEntry)
 		}
-		s.pendingCtrl[sid] = pendingCtrlEntry{conn: ctrl, stop: closeFn}
+		s.pendingCtrl[sid] = pendingCtrlEntry{conn: ctrl, stop: closeFn, ownerHash: ownerHash}
 		s.mu.Unlock()
 		time.AfterFunc(15*time.Second, func() {
 			s.mu.Lock()
@@ -1127,19 +1438,27 @@ func (s *Server) serveDaemonOpen(conn net.Conn, enc *json.Encoder, env Envelope)
 	pipe(conn, video)
 }
 
-func (s *Server) serveDaemonCtrl(conn net.Conn, enc *json.Encoder, env Envelope) {
+func (s *Server) serveDaemonCtrl(conn net.Conn, enc *json.Encoder, env Envelope, ownerHash string) {
+	if !s.permissions().ScreenShare {
+		_ = enc.Encode(Envelope{ID: env.ID, Type: "daemon.ctrl.res", Error: "screen sharing permission disabled"})
+		return
+	}
 	var req DaemonCtrlRequest
 	_ = json.Unmarshal(env.Payload, &req)
 	s.mu.Lock()
 	e, ok := s.pendingCtrl[req.SessionID]
-	if ok {
-		delete(s.pendingCtrl, req.SessionID)
-	}
-	s.mu.Unlock()
 	if !ok {
+		s.mu.Unlock()
 		_ = enc.Encode(Envelope{ID: env.ID, Type: "daemon.ctrl.res", Error: "daemon control session not found or timed out"})
 		return
 	}
+	if subtle.ConstantTimeCompare([]byte(e.ownerHash), []byte(ownerHash)) != 1 {
+		s.mu.Unlock()
+		_ = enc.Encode(Envelope{ID: env.ID, Type: "daemon.ctrl.res", Error: "daemon control session unauthorized"})
+		return
+	}
+	delete(s.pendingCtrl, req.SessionID)
+	s.mu.Unlock()
 	defer e.conn.Close()
 	_ = conn.SetDeadline(time.Time{})
 	if err := enc.Encode(Envelope{ID: env.ID, Type: "daemon.ctrl.res"}); err != nil {

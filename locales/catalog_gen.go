@@ -740,6 +740,16 @@ func (msgs Messages) PairPromptBody(name string, code string) string {
 	return Catalog.Format(msgs.locale, "PairPromptBody", map[string]any{"name": name, "code": code})
 }
 
+// PairPromptChoose says "{name} wants to pair with this phone. Tap the code shown on your computer:"
+// in the language the app shows.
+func PairPromptChoose(name string) string { return In(i18n.Locale()).PairPromptChoose(name) }
+
+// PairPromptChoose says "{name} wants to pair with this phone. Tap the code shown on your computer:"
+// in the language of msgs.
+func (msgs Messages) PairPromptChoose(name string) string {
+	return Catalog.Format(msgs.locale, "PairPromptChoose", map[string]any{"name": name})
+}
+
 // PairNotifTitle says "Pair with this computer?"
 // in the language the app shows.
 func PairNotifTitle() string { return In(i18n.Locale()).PairNotifTitle() }
@@ -760,6 +770,16 @@ func PairNotifBody(name string, code string) string {
 // in the language of msgs.
 func (msgs Messages) PairNotifBody(name string, code string) string {
 	return Catalog.Format(msgs.locale, "PairNotifBody", map[string]any{"name": name, "code": code})
+}
+
+// PairNotifPrompt says "{name} wants to pair. Tap to open and choose the code shown on your computer."
+// in the language the app shows.
+func PairNotifPrompt(name string) string { return In(i18n.Locale()).PairNotifPrompt(name) }
+
+// PairNotifPrompt says "{name} wants to pair. Tap to open and choose the code shown on your computer."
+// in the language of msgs.
+func (msgs Messages) PairNotifPrompt(name string) string {
+	return Catalog.Format(msgs.locale, "PairNotifPrompt", map[string]any{"name": name})
 }
 
 // PairAllow says "Allow"
@@ -800,6 +820,18 @@ func MeshPhoneJoined(name string) string { return In(i18n.Locale()).MeshPhoneJoi
 // in the language of msgs.
 func (msgs Messages) MeshPhoneJoined(name string) string {
 	return Catalog.Format(msgs.locale, "MeshPhoneJoined", map[string]any{"name": name})
+}
+
+// MeshPhoneAlreadyJoined says "Phone is already in network \"{name}\". Leave it on the phone first to switch networks."
+// in the language the app shows.
+func MeshPhoneAlreadyJoined(name string) string {
+	return In(i18n.Locale()).MeshPhoneAlreadyJoined(name)
+}
+
+// MeshPhoneAlreadyJoined says "Phone is already in network \"{name}\". Leave it on the phone first to switch networks."
+// in the language of msgs.
+func (msgs Messages) MeshPhoneAlreadyJoined(name string) string {
+	return Catalog.Format(msgs.locale, "MeshPhoneAlreadyJoined", map[string]any{"name": name})
 }
 
 // MeshPhoneConnecting says "Connecting to the mesh…"
@@ -2744,11 +2776,11 @@ func (msgs Messages) PairNotYet() string {
 	return Catalog.Format(msgs.locale, "PairNotYet", nil)
 }
 
-// PairOnPhoneSub says "Check the notification or open AndroFuse Companion on the phone, verify the code matches, and tap Allow."
+// PairOnPhoneSub says "Open the notification or AndroFuse Companion on the phone and tap the matching code."
 // in the language the app shows.
 func PairOnPhoneSub() string { return In(i18n.Locale()).PairOnPhoneSub() }
 
-// PairOnPhoneSub says "Check the notification or open AndroFuse Companion on the phone, verify the code matches, and tap Allow."
+// PairOnPhoneSub says "Open the notification or AndroFuse Companion on the phone and tap the matching code."
 // in the language of msgs.
 func (msgs Messages) PairOnPhoneSub() string {
 	return Catalog.Format(msgs.locale, "PairOnPhoneSub", nil)
@@ -5364,13 +5396,13 @@ func (msgs Messages) MeshPairStarting(name string) string {
 	return Catalog.Format(msgs.locale, "MeshPairStarting", map[string]any{"name": name})
 }
 
-// MeshPairWaiting says "Check {name} and allow pairing (code {code})."
+// MeshPairWaiting says "Tap {code} on {name} to finish pairing."
 // in the language the app shows.
 func MeshPairWaiting(name string, code string) string {
 	return In(i18n.Locale()).MeshPairWaiting(name, code)
 }
 
-// MeshPairWaiting says "Check {name} and allow pairing (code {code})."
+// MeshPairWaiting says "Tap {code} on {name} to finish pairing."
 // in the language of msgs.
 func (msgs Messages) MeshPairWaiting(name string, code string) string {
 	return Catalog.Format(msgs.locale, "MeshPairWaiting", map[string]any{"name": name, "code": code})

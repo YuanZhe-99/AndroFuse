@@ -26,6 +26,10 @@ import (
 // legacyListenPort is the fixed TCP port builds before random ports used and saved.
 const legacyListenPort = 27189
 
+// wirelessADBPairTTL bounds how long a phone keeps a discovered pairing port open in OnTunnel
+// if Android omits a service-lost callback (`INV-07`).
+const wirelessADBPairTTL = 3 * time.Minute
+
 // Config persists per-user Android Companion settings under `<stateDir>/companion.json`.
 type Config struct {
 	// ListenPort is the TCP port the Companion last listened on (companion.PickDevicePort), shown on
@@ -68,7 +72,8 @@ type Host struct {
 	receiveBytes         int64
 	network              string // default network kind from the Android NetworkCallback
 	stopNetWatch         func()
-	wirelessADBPairPort  int // temporary _adb-tls-pairing._tcp port discovered by NsdManager
+	wirelessADBPairPort  int       // temporary _adb-tls-pairing._tcp port discovered by NsdManager
+	wirelessADBPairAt    time.Time // timestamp of the latest NsdManager advertisement
 	pair                 *pairPrompt
 	tab                  string // Companion tab shown on phones (tabHome when "")
 	beaconCheck          string // outcome of the last wireless debugging port check
@@ -100,9 +105,6 @@ type Host struct {
 // New constructs an Android Companion Host rooted at stateDir and loads saved config.
 func New(stateDir string, onChange func()) *Host {
 	tok, _ := companion.GeneratePairingToken()
-	if tok == "" {
-		tok = "ANDROFUS"
-	}
 	h := &Host{
 		stateDir:  stateDir,
 		onChange:  onChange,
@@ -125,7 +127,7 @@ func New(stateDir string, onChange func()) *Host {
 		// Builds before random ports saved the old fixed port; draw a random one instead.
 		h.cfg.ListenPort = 0
 	}
-	if strings.TrimSpace(h.cfg.Token) == "" {
+	if trimmed := strings.TrimSpace(h.cfg.Token); trimmed == "" || trimmed == "ANDROFUS" || (len(trimmed) < 16 && len(h.cfg.Computers) == 0) {
 		h.cfg.Token = tok
 	}
 	if h.cfg.WirelessADBPort > 0 {
@@ -302,19 +304,26 @@ func (h *Host) StartServer() error {
 		OnTunnel: func(port int) (net.Conn, error) {
 			h.mu.Lock()
 			allowed := h.cfg.WirelessADBPort
-			pairAllowed := h.wirelessADBPairPort
+			pairAllowed := h.activeWirelessADBPairPortLocked()
 			h.mu.Unlock()
 			if port > 0 && pairAllowed > 0 && port == pairAllowed {
-				// `_adb-tls-pairing._tcp` uses direct TLS+SPAKE2+ without ADB CNXN, so only check
-				// that this port matches the live NsdManager advertisement on loopback (`INV-07`).
+				// `_adb-tls-pairing._tcp` uses direct TLS+SPAKE2+ without ADB CNXN, so check that
+				// this port matches the live non-expired NsdManager advertisement and responds on loopback (`INV-07`).
 				c, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)), 3*time.Second)
-				if err == nil {
+				if err != nil {
 					h.mu.Lock()
-					h.appendAuditLocked("computer opened Wireless debugging pairing through the Companion")
+					if h.wirelessADBPairPort == port {
+						h.wirelessADBPairPort = 0
+						h.wirelessADBPairAt = time.Time{}
+					}
 					h.mu.Unlock()
-					h.notify()
+					return nil, err
 				}
-				return c, err
+				h.mu.Lock()
+				h.appendAuditLocked("computer opened Wireless debugging pairing through the Companion")
+				h.mu.Unlock()
+				h.notify()
+				return c, nil
 			}
 			if allowed <= 0 || port != allowed {
 				return nil, fmt.Errorf("port %d is not this phone's Wireless debugging port", port)
@@ -510,6 +519,7 @@ func (h *Host) StopServer() error {
 	stopNet := h.stopNetWatch
 	h.stopNetWatch = nil
 	h.wirelessADBPairPort = 0
+	h.wirelessADBPairAt = time.Time{}
 	if h.meshRebindTimer != nil {
 		h.meshRebindTimer.Stop()
 		h.meshRebindTimer = nil
@@ -612,8 +622,8 @@ func (h *Host) Status() companion.DeviceStatus {
 	if h.cfg.WirelessADBPort > 0 {
 		st.WirelessADBPort = h.cfg.WirelessADBPort
 	}
-	if h.wirelessADBPairPort > 0 {
-		st.WirelessADBPairPort = h.wirelessADBPairPort
+	if pairPort := h.activeWirelessADBPairPortLocked(); pairPort > 0 {
+		st.WirelessADBPairPort = pairPort
 	}
 	st.ADBTunnelAllowed = h.cfg.Permissions.ADBBeacon
 	st.ScreenShareAllowed = h.cfg.Permissions.ScreenShare
@@ -821,12 +831,30 @@ func (h *Host) SetWirelessADBPairPort(port int) {
 	}
 	h.mu.Lock()
 	if h.wirelessADBPairPort == port {
+		if port > 0 {
+			h.wirelessADBPairAt = time.Now()
+		}
 		h.mu.Unlock()
 		return
 	}
 	h.wirelessADBPairPort = port
+	if port > 0 {
+		h.wirelessADBPairAt = time.Now()
+	} else {
+		h.wirelessADBPairAt = time.Time{}
+	}
 	h.mu.Unlock()
 	h.notify()
+}
+
+func (h *Host) activeWirelessADBPairPortLocked() int {
+	if h.wirelessADBPairPort <= 0 {
+		return 0
+	}
+	if !h.wirelessADBPairAt.IsZero() && time.Since(h.wirelessADBPairAt) > wirelessADBPairTTL {
+		return 0
+	}
+	return h.wirelessADBPairPort
 }
 
 // AuditLog returns a copy of recent scrubbed Companion activity lines (`INV-08`).

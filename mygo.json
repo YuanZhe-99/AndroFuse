@@ -1,7 +1,7 @@
 {
   "name": "AndroFuse",
   "identifier": "com.yuanzhe.androfuse",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "copyright": "Copyright (C) 2026 YuanZhe",
   "license": "GPL-3.0-only",
   "main": "./cmd/androfuse",
@@ -19,7 +19,7 @@
   "description": "Samsung DeX, Android screen mirroring, and independent app windows for Windows",
   "android": {
     "minSdk": 26,
-    "versionCode": 201,
+    "versionCode": 202,
     "permissions": [
       "ACCESS_NETWORK_STATE",
       "ACCESS_WIFI_STATE",

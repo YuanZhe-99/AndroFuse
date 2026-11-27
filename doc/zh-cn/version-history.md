@@ -1,5 +1,13 @@
 # 版本历史
 
+## v0.2.2（2026-11-27）
+
+- **增强协同（Companion）配对与会话安全加固（`INV-07`、`INV-09`）**：
+  - 新增基于 TLS 1.3 `ExportKeyingMaterial` 的会话绑定 6 位校验码（`DerivePairSAS` / `RequestPairingSAS`），配合手机端乱序三选一数字确认按钮（`AnswerPairChoice`，通知正文隐藏校验码、过滤 `ClientName` 控制字符与换行注入、连续失败自动冷却）以及 `@androfuse-companion` 内核 `SO_PEERCRED` UID 校验。
+  - 将配对令牌从 40 位升级为 160 位（32 字符）密码学随机串（`GeneratePairingToken`），移除硬编码兜底令牌，限制未鉴权并发握手数（32）与鉴权前单行帧上限（`8 KiB`），并增加按源 IP 维度的认证失败限流。
+  - 将 `daemon.open`、`daemon.ctrl` 与 `apps.list` 统一纳入手机端 `ScreenShare` 开关门控，将 `daemon.ctrl` 控制通道绑定至发起电脑的令牌摘要；关闭 `ADBBeacon` 时在 `status.get` / `pair.res` 中一并脱敏 `WirelessADBPairPort` 与 `WifiIPv4` 并为配对端口设置 3 分钟 TTL；阻止远端 `mesh.join` 静默覆盖已加入的其他网络；`Daemon.java` 对 `/data/local/tmp` 助手与服务端 JAR 强制执行 `chmod 600` 与启动前 SHA-256 完整性锁定。
+- **修复应用内更新无法自动退出并重启的问题（`internal/gui/update.go`）**：`InstallUpdate` 现在在替换文件前先安全停止内置 `platform-tools/adb.exe` 并暂停设备轮询，在更新完成后设置 `App.quitting = true`，避免关闭到托盘拦截窗口关闭事件，确保 `mygo.App.Relaunch()` 顺利退出并重启至新版本。
+
 ## v0.2.1（2026-11-27）
 
 - **零配置托管 ADB（`internal/adb` 与发行打包）**：Windows 发行包现在将官方 Android Platform Tools 随附于 `resources/windows/platform-tools/`（含 `NOTICE.txt` 且与 `bin/` 隔离），同时桌面端通过 `adb.FindClient` 与 `adb.InstallPlatformTools` 在普通用户电脑缺少 ADB 时自动经 Google HTTPS 下载并安全校验（防 Zip-Slip）解压；主页在工具就绪时保持安静，仅在缺失或下载中显示清晰提示与重试入口。

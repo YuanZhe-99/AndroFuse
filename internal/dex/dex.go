@@ -298,6 +298,7 @@ func PushAndProbe(ctx context.Context, client *adb.Client, serial string) (Probe
 	if err := client.PushFile(ctx, serial, jar, RemoteHelperPath); err != nil {
 		return ProbeReport{}, fmt.Errorf("push dex helper: %w", err)
 	}
+	_, _ = client.Shell(ctx, serial, "chmod 600 "+RemoteHelperPath+" 2>/dev/null || true")
 	cmd := fmt.Sprintf("CLASSPATH=%s app_process / com.androfuse.dexhelper.Main probe", RemoteHelperPath)
 	out, err := client.Shell(ctx, serial, cmd)
 	if err != nil {
@@ -367,6 +368,7 @@ func StartNativeLoopback(
 	if err := client.PushFile(ctx, serial, jar, RemoteHelperPath); err != nil {
 		return nil, fmt.Errorf("push dex helper: %w", err)
 	}
+	_, _ = client.Shell(ctx, serial, "chmod 600 "+RemoteHelperPath+" 2>/dev/null || true")
 	var tokBytes [6]byte
 	if _, err := rand.Read(tokBytes[:]); err != nil {
 		return nil, err
@@ -863,6 +865,7 @@ func StartDaemon(ctx context.Context, client *adb.Client, serial, companionPkg s
 			return fmt.Errorf("push scrcpy-server: %w", err)
 		}
 	}
+	_, _ = client.Shell(ctx, serial, "chmod 600 "+RemoteHelperPath+" "+scrcpy.RemoteServerPath+" 2>/dev/null || true")
 	// Terminate any prior uid=2000 daemon so the new JAR/binary takes over the lock cleanly.
 	_, _ = client.Shell(ctx, serial, "pkill -f 'com.androfuse.dexhelper.Main daemon' >/dev/null 2>&1 || true; sleep 0.2")
 	inner := detachedHelperCommand(fmt.Sprintf("daemon --pkg %s", companionPkg))

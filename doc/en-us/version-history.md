@@ -1,5 +1,13 @@
 # Version History
 
+## v0.2.2 (2026-11-27)
+
+- **Companion Pairing & Session Security Hardening (`INV-07`, `INV-09`)**:
+  - Added TLS 1.3 `ExportKeyingMaterial` session-bound 6-digit Short Authentication String (`DerivePairSAS` / `RequestPairingSAS`) combined with a shuffled 3-number confirmation card (`AnswerPairChoice`, notification text omits the secret code, `ClientName` control characters stripped, and repeated-decline cooldown enforced) plus kernel `SO_PEERCRED` UID checks on `@androfuse-companion`.
+  - Upgraded pairing tokens from 40 bits to 160-bit (32-char) CSPRNG strings (`GeneratePairingToken`), removed the hardcoded fallback token, bounded unauthenticated handshakes to 32 concurrent slots and `8 KiB` line reads (`maxPreAuthLineBytes`), and added per-IP authentication failure throttling.
+  - Gated `daemon.open`, `daemon.ctrl`, and `apps.list` behind the phone's `ScreenShare` permission switch, bound `daemon.ctrl` pending channels to the initiating paired token digest, scrubbed `WirelessADBPairPort` and `WifiIPv4` in `status.get` / `pair.res` when `ADBBeacon` is off, added a 3-minute TTL to pairing-port forwarding, blocked remote `mesh.join` from silently switching an already-joined phone to a different network, and pinned `chmod 600` + SHA-256 verification on `/data/local/tmp` helper JARs in `Daemon.java`.
+- **In-App Updater Quit & Relaunch Fix (`internal/gui/update.go`)**: `InstallUpdate` now shuts down bundled `platform-tools/adb.exe` before swapping files, pauses device polling during installation, marks `App.quitting = true` so the close-to-tray window hook no longer blocks `mygo.App.Relaunch()`, and restarts into the new version cleanly.
+
 ## v0.2.1 (2026-11-27)
 
 - **Zero-Setup Managed ADB (`internal/adb`, Release Packaging)**: Windows release builds now bundle official Android Platform Tools in `resources/windows/platform-tools/` (with `NOTICE.txt`, kept separate from `bin/`), and `adb.FindClient` / `adb.InstallPlatformTools` automatically download and Zip-Slip-safely extract `platform-tools` over Google HTTPS whenever ADB is absent on end-user PCs; Home stays quiet once ready and shows clear progress/retry banners only when missing.

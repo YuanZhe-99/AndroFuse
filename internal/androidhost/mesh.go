@@ -1,8 +1,11 @@
 package androidhost
 
 import (
+	"crypto/rand"
+	"crypto/subtle"
 	"errors"
 	"fmt"
+	"math/big"
 	"strings"
 	"time"
 
@@ -23,10 +26,11 @@ type MeshSettings struct {
 	FullSpeed bool `json:"full_speed,omitempty"`
 }
 
-// pairPrompt is an adb pairing request waiting for the phone's user.
+// pairPrompt is a pairing confirmation request waiting for the phone's user.
 type pairPrompt struct {
-	req    companion.PairRequest
-	answer chan bool
+	req     companion.PairRequest
+	choices [3]string
+	answer  chan bool
 }
 
 // meshRuntime is the phone's embedded core and mesh, opened on first use.
@@ -38,8 +42,22 @@ type meshRuntime struct {
 
 // JoinMesh starts the embedded mesh in the desktop's network and remembers it, so it rejoins
 // whenever the Companion starts again.
-// Side effects: seals and persists the secret; opens outbound EasyTier connections.
+// Side effects: seals and persists the secret; opens outbound EasyTier connections; refuses
+// switching an already-joined phone to a different network without local leave first (`INV-07`).
 func (h *Host) JoinMesh(req companion.MeshJoinRequest) (companion.MeshJoinResponse, error) {
+	target := strings.TrimSpace(req.NetworkName)
+	h.mu.Lock()
+	cur := ""
+	if h.cfg.Mesh != nil {
+		cur = strings.TrimSpace(h.cfg.Mesh.NetworkName)
+	}
+	if cur != "" && target != "" && !strings.EqualFold(cur, target) {
+		h.appendAuditLocked(fmt.Sprintf("refused mesh switch from %q to %q by paired computer", cur, target))
+		h.mu.Unlock()
+		h.notify()
+		return companion.MeshJoinResponse{Running: false, Message: L.MeshPhoneAlreadyJoined(cur)}, nil
+	}
+	h.mu.Unlock()
 	return h.joinMesh(req, "from paired computer")
 }
 
@@ -178,11 +196,50 @@ func (h *Host) setMeshErr(err error) {
 	h.notify()
 }
 
-// askPair shows an adb pairing request to the phone's user and waits for the answer.
-// Returns: true only when the user allowed it within companion.PairWait; a second request while
-// one is showing is declined.
+func makePairChoices(code string) [3]string {
+	out := [3]string{code}
+	for i := 1; i < len(out); i++ {
+		for {
+			n, err := rand.Int(rand.Reader, big.NewInt(1_000_000))
+			var cand string
+			if err == nil {
+				cand = fmt.Sprintf("%06d", n.Int64())
+			} else {
+				cand = fmt.Sprintf("%06d", (time.Now().UnixNano()+int64(i)*137)%1_000_000)
+			}
+			dup := false
+			for j := 0; j < i; j++ {
+				if out[j] == cand {
+					dup = true
+					break
+				}
+			}
+			if !dup {
+				out[i] = cand
+				break
+			}
+		}
+	}
+	for i := len(out) - 1; i > 0; i-- {
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(i+1)))
+		if err != nil {
+			continue
+		}
+		j := int(n.Int64())
+		out[i], out[j] = out[j], out[i]
+	}
+	return out
+}
+
+// askPair shows a 3-choice pairing confirmation prompt to the phone's user and waits for the answer.
+// Returns: true only when the user taps the matching 6-digit SAS code within companion.PairWait; a second
+// request while one is showing is declined.
 func (h *Host) askPair(req companion.PairRequest) bool {
-	p := &pairPrompt{req: req, answer: make(chan bool, 1)}
+	p := &pairPrompt{
+		req:     req,
+		choices: makePairChoices(req.Code),
+		answer:  make(chan bool, 1),
+	}
 	h.mu.Lock()
 	if h.pair != nil {
 		h.mu.Unlock()
@@ -191,7 +248,7 @@ func (h *Host) askPair(req companion.PairRequest) bool {
 	h.pair = p
 	h.mu.Unlock()
 	h.notify()
-	androidbridge.ShowPairNotification(L.PairNotifTitle(), L.PairNotifBody(req.ClientName, spaced(req.Code)))
+	androidbridge.ShowPairNotification(L.PairNotifTitle(), L.PairNotifPrompt(req.ClientName))
 	defer androidbridge.CancelPairNotification()
 
 	var ok bool
@@ -216,10 +273,26 @@ func (h *Host) AnswerPair(allow bool) {
 	h.pair = nil
 	h.mu.Unlock()
 	if p != nil {
-		p.answer <- allow
+		select {
+		case p.answer <- allow:
+		default:
+		}
 	}
 	androidbridge.CancelPairNotification()
 	h.notify()
+}
+
+// AnswerPairChoice delivers the user's tapped 6-digit confirmation code choice, allowing pairing
+// only if chosen matches the active request's TLS-bound code in constant time (`INV-09`).
+func (h *Host) AnswerPairChoice(chosen string) {
+	h.mu.Lock()
+	p := h.pair
+	h.mu.Unlock()
+	if p == nil {
+		return
+	}
+	ok := subtle.ConstantTimeCompare([]byte(strings.TrimSpace(chosen)), []byte(strings.TrimSpace(p.req.Code))) == 1
+	h.AnswerPair(ok)
 }
 
 // PendingPair returns the pairing request waiting for the user, if any.
@@ -230,6 +303,17 @@ func (h *Host) PendingPair() (companion.PairRequest, bool) {
 		return companion.PairRequest{}, false
 	}
 	return h.pair.req, true
+}
+
+// PendingPairChoices returns the pairing request waiting for the user along with three shuffled
+// 6-digit options (one real SAS code and two decoys), if any.
+func (h *Host) PendingPairChoices() (companion.PairRequest, [3]string, bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.pair == nil {
+		return companion.PairRequest{}, [3]string{}, false
+	}
+	return h.pair.req, h.pair.choices, true
 }
 
 // SetMeshFullSpeed switches the joined mesh between low-power (the default) and full speed.
