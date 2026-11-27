@@ -370,6 +370,7 @@ func (a *App) mergeMeshRememberedLocked(realHash, fingerprint, meshHost string) 
 	} else {
 		a.remembered[meshIdx].HardwareHash = realHash
 	}
+	a.migrateCachedAppsLocked(oldHash, realHash)
 	if a.peerStatus != nil {
 		if st, ok := a.peerStatus[oldHash]; ok {
 			if _, exists := a.peerStatus[realHash]; !exists {
@@ -648,11 +649,35 @@ func (a *App) portScanDue(hash string) bool {
 	return true
 }
 
-func (a *App) deviceIconDir(hash string) string {
-	if a.stateDir == "" {
-		return filepath.Join(os.TempDir(), "androfuse-icon-cache", hash)
+// sanitizeCacheKey turns a device identifier (including provisional `mesh:<id>` keys containing
+// `:`) into a single filesystem-safe directory name on Windows and Unix.
+func sanitizeCacheKey(hash string) string {
+	var b strings.Builder
+	b.Grow(len(hash))
+	for i := 0; i < len(hash); i++ {
+		c := hash[i]
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-' {
+			b.WriteByte(c)
+		} else {
+			b.WriteByte('_')
+		}
 	}
-	return filepath.Join(a.stateDir, "icon-cache", hash)
+	if b.Len() == 0 {
+		return "device"
+	}
+	return b.String()
+}
+
+func sanitizeIconPkg(pkg string) string {
+	return sanitizeCacheKey(pkg)
+}
+
+func (a *App) deviceIconDir(hash string) string {
+	key := sanitizeCacheKey(hash)
+	if a.stateDir == "" {
+		return filepath.Join(os.TempDir(), "androfuse-icon-cache", key)
+	}
+	return filepath.Join(a.stateDir, "icon-cache", key)
 }
 
 // saveDeviceApps persists a probed phone's launchable apps to `<iconDir>/apps.json` and updates
@@ -735,4 +760,132 @@ func (a *App) appsForDevice(hash string) []adb.AppEntry {
 		}
 	}
 	return a.loadDeviceAppsLocked(hash)
+}
+
+// needsCompanionAppFetch reports whether hash lacks a cached app list or lacks any cached PNG
+// app icons (so Enhanced mode should refresh icons from Companion).
+func (a *App) needsCompanionAppFetch(hash string) bool {
+	apps := a.appsForDevice(hash)
+	if len(apps) == 0 {
+		return true
+	}
+	hasUserApps := false
+	for _, ap := range apps {
+		if !ap.System {
+			hasUserApps = true
+		}
+		if ap.IconPath != "" {
+			if info, err := os.Stat(ap.IconPath); err == nil && info.Size() > 0 {
+				return false
+			}
+		}
+	}
+	return hasUserApps || len(apps) > 0
+}
+
+// findCachedApp looks up the metadata/icon entry for pkg on hash.
+func (a *App) findCachedApp(hash, pkg string) (adb.AppEntry, bool) {
+	if hash == "" || pkg == "" {
+		return adb.AppEntry{}, false
+	}
+	for _, ap := range a.appsForDevice(hash) {
+		if ap.Package == pkg {
+			return ap, true
+		}
+	}
+	return adb.AppEntry{}, false
+}
+
+// appIconByPackage resolves the decoded bitmap icon for pkg on hash from memory or disk cache.
+func (a *App) appIconByPackage(hash, pkg string) *ui.Bitmap {
+	if pkg == "" {
+		return nil
+	}
+	if ap, ok := a.findCachedApp(hash, pkg); ok && ap.IconPath != "" {
+		if bmp := a.appIconFor(ap.IconPath); bmp != nil {
+			return bmp
+		}
+	}
+	if a.stateDir == "" || hash == "" {
+		return nil
+	}
+	p := filepath.Join(a.deviceIconDir(hash), sanitizeIconPkg(pkg)+".png")
+	if bmp := a.appIconFor(p); bmp != nil {
+		return bmp
+	}
+	if raw, err := os.ReadFile(p); err == nil && len(raw) > 0 {
+		if bmp, bErr := ui.DecodeBitmap(raw); bErr == nil {
+			a.mu.Lock()
+			if a.appIcons == nil {
+				a.appIcons = make(map[string]*ui.Bitmap)
+			}
+			a.appIcons[p] = bmp
+			a.mu.Unlock()
+			return bmp
+		}
+	}
+	return nil
+}
+
+// migrateCachedAppsLocked copies/migrates cached app metadata and PNG icons from provisional oldHash
+// (`mesh:<id>`) into realHash (`ro.serialno` hash) while holding a.mu.
+func (a *App) migrateCachedAppsLocked(oldHash, realHash string) {
+	if oldHash == "" || realHash == "" || oldHash == realHash {
+		return
+	}
+	apps := a.loadDeviceAppsLocked(oldHash)
+	if len(apps) == 0 && a.cachedApps != nil {
+		apps = a.cachedApps[oldHash]
+	}
+	if len(apps) == 0 {
+		return
+	}
+	oldDir := a.deviceIconDir(oldHash)
+	newDir := a.deviceIconDir(realHash)
+	if a.stateDir != "" {
+		_ = os.MkdirAll(newDir, 0o755)
+	}
+	migrated := make([]adb.AppEntry, 0, len(apps))
+	for _, ap := range apps {
+		srcPath := ap.IconPath
+		if srcPath == "" && a.stateDir != "" {
+			cand := filepath.Join(oldDir, sanitizeIconPkg(ap.Package)+".png")
+			if _, err := os.Stat(cand); err == nil {
+				srcPath = cand
+			}
+		}
+		if srcPath != "" && a.stateDir != "" {
+			dstPath := filepath.Join(newDir, sanitizeIconPkg(ap.Package)+".png")
+			if _, err := os.Stat(dstPath); err != nil {
+				if raw, rErr := os.ReadFile(srcPath); rErr == nil && len(raw) > 0 {
+					if os.WriteFile(dstPath+".tmp", raw, 0o600) == nil {
+						_ = os.Rename(dstPath+".tmp", dstPath)
+					}
+				}
+			}
+			if _, err := os.Stat(dstPath); err == nil {
+				ap.IconPath = dstPath
+				if a.appIcons != nil && a.appIcons[srcPath] != nil && a.appIcons[dstPath] == nil {
+					a.appIcons[dstPath] = a.appIcons[srcPath]
+				}
+			}
+		}
+		migrated = append(migrated, ap)
+	}
+	if existing := a.loadDeviceAppsLocked(realHash); len(existing) == 0 {
+		if a.cachedApps == nil {
+			a.cachedApps = make(map[string][]adb.AppEntry)
+		}
+		a.cachedApps[realHash] = migrated
+		if a.stateDir != "" {
+			if raw, err := json.Marshal(migrated); err == nil {
+				if os.WriteFile(filepath.Join(newDir, "apps.json.tmp"), raw, 0o600) == nil {
+					_ = os.Rename(filepath.Join(newDir, "apps.json.tmp"), filepath.Join(newDir, "apps.json"))
+				}
+			}
+		}
+	}
+	if a.cachedApps != nil {
+		delete(a.cachedApps, oldHash)
+	}
 }

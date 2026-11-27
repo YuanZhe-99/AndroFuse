@@ -1,5 +1,18 @@
 # 版本历史
 
+## v0.2.3（2026-11-27）
+
+- **独立应用窗口物理息屏保活与双层「有限返回」（`AppGuard.java`、`internal/dex/appguard.go`）**：
+  - 新增 UID 2000 `AppGuard` 守护进程监控每个 `SessionModeApp` 虚拟显示（`display_id > 0`）：免 Root 持有 `PARTIAL_WAKE_LOCK` 与绑定该虚拟屏的 `SCREEN_BRIGHT_WAKE_LOCK | ACQUIRE_CAUSES_WAKEUP`（`PowerManager.newWakeLock(int, String, int)`）并刷新 `IPowerManager.userActivity(displayId, ...)`；通过 `DisplayManager.DisplayListener` 感知物理主屏 `Display 0` 熄屏后唤醒虚拟屏（`cmd power wakeup --display-id <id> --restore-wakelocks`），在独立 `DisplayGroup`（`> 0`）下保持主屏 `Display 0` 熄灭，在共享 `DisplayGroup 0` 系统下回退通过 `SurfaceControl.setDisplayPowerMode(POWER_MODE_OFF)` 熄灭物理面板并在退出时恢复，使独立应用窗口可持续交互。
+  - 实现双层「**有限返回**」与纯净应用标题栏：从 `SessionModeApp` 工具栏、菜单与快捷键中移除主页、最近任务和旋转按钮（在任意宽度下始终保留有限返回按钮），在控制流与 `Daemon.java`（`pumpCtrlForAppSession`）拦截 `KeycodeHome` / `KeycodeAppSwitch`，返回前综合检测 Activity 任务栈与预测性返回回调（主页面拦截并轻提示「已在应用主页面」），并在旧应用意外关闭根任务时通过 `ITaskStackListener` 自动拉回，避免黑屏。
+- **增强协同流式应用图标与独立应用头像（`Daemon.java`、`Daemon.kt`）**：
+  - 将 `TX_LIST_APPS` 改为经 `Os.socketpair` `ParcelFileDescriptor` 流式传输完整 UTF-8 应用清单与 `96x96` PNG 图标，绕开 Android Binder 1 MB 事务上限，并支持按桌面已缓存列表过滤（`known_icons` / `--skip-icons`）及复用 One UI `--resume` 防崩溃恢复逻辑；桌面端检测到无图标旧缓存时自动补拉图标。
+  - 对 `mesh:<devID>` 缓存目录名执行 Windows NTFS 安全转义（`sanitizeCacheKey`），并在 `mergeMeshRememberedLocked` 合并真实硬件哈希时迁移已缓存图标。
+  - `SessionModeApp` 在侧栏与窗格标题栏（`sessionIcon`）始终展示真实应用图标（支持后台加载完成后自动补绘）或应用首字/应用徽标，绝不再退回显示手机品牌头像。
+- **侧栏单加号简化与双端互助配对引导**：
+  - 移除侧栏重复的「添加手机」入口（`internal/gui/shell.go`），只保留顶部单一 `+` 选择器并为其内置一键「添加手机…」入口。
+  - 在仅配对增强协同或仅配对无线 ADB 的手机卡片上显示温和的互助配对提示条，并在每台手机（在线/离线）卡片 `⋯` 菜单中提供手动「配对/重新配对增强协同…」与「配对/重新配对无线调试 (ADB)…」选项（配套 `OpenPairADBModal` 与 `RepairMeshCompanion`）。
+
 ## v0.2.2（2026-11-27）
 
 - **增强协同（Companion）配对与会话安全加固（`INV-07`、`INV-09`）**：

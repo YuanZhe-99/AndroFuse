@@ -25,6 +25,7 @@ AndroFuse 文档（`doc/en-us/` → `doc/zh-cn/`）的权威英文→简体中�
 | Touch Mode | 触控模式 | `PointerIDGenericFinger` 触屏点击与滑动模拟 |
 | App Launcher Grid | 应用启动器网格 | 展示真实本地化 Android 应用名称与 96x96 PNG 缓存图标的瓷砖启动网格 |
 | Chromeless App Window | 无系统边框独立应用窗口 | 通过 `vd_system_decorations=false` 启动并绑定原生标题栏的虚拟屏应用窗口 |
+| Bounded Back | 有限返回 | 独立应用窗口中的受限返回控制：允许应用内返回，位于主页面时阻止退出成黑屏 |
 | Fragmented MP4 Recording | 分片 MP4 直存录屏 | 零重编码将 H.264 Annex-B 封装为 `ftyp`/`moov`/`moof`/`mdat` 分片 MP4 |
 | Background Standby | 后台待机 | 用户开启后由最低重要性前台服务保持伴侣在后台可被连接 |
 | Activity Lease | 活动租约 | 仅在传输期间持有、空闲 30 秒后释放的唤醒锁与 Wi-Fi 锁 |

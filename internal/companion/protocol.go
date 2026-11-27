@@ -130,6 +130,13 @@ type DaemonAppEntry struct {
 	Label      string `json:"label"`
 	System     bool   `json:"system,omitempty"`
 	Resizeable bool   `json:"resizeable"`
+	IconB64    string `json:"icon_b64,omitempty"`
+}
+
+// AppListRequest optionally names packages whose icons the desktop already has cached on disk,
+// so Companion Enhanced mode streams only missing icons (`apps.list`).
+type AppListRequest struct {
+	KnownIcons []string `json:"known_icons,omitempty"`
 }
 
 // AppListResponse returns the launchable app list queried over Companion (`apps.list`).

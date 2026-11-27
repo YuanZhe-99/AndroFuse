@@ -219,7 +219,7 @@ func TestEncoderHeadroom(t *testing.T) {
 func TestViewsRender(t *testing.T) {
 	views := []string{
 		"home", "home-adb-dl", "search", "picker", "pane", "split",
-		"wizard-usb", "wizard-wifi", "wizard-mesh", "activate-wifi", "activate-cell",
+		"wizard-usb", "wizard-wifi", "wizard-mesh", "activate-wifi", "activate-cell", "pair-adb",
 	}
 	for _, p := range []string{setGeneral, setPhones, setCamera, setNetwork, setVM, setSecurity, setAbout} {
 		views = append(views, "settings-"+p)
@@ -264,6 +264,9 @@ func TestViewsRender(t *testing.T) {
 					case v == "activate-cell":
 						a.peerStatus["0123456789abcdef"] = companion.DeviceStatus{NetworkType: "cellular", WirelessDebugOn: false}
 						a.activate = activateState{Open: true, Hash: "0123456789abcdef"} //gitleaks:allow
+					case v == "pair-adb":
+						a.peerStatus["0123456789abcdef"] = companion.DeviceStatus{NetworkType: "wifi", WirelessDebugOn: true, WirelessADBPairPort: 41234}
+						a.activate = activateState{Open: true, Hash: "0123456789abcdef", PairADBOnly: true, PairCode: "123456"} //gitleaks:allow
 					case v == "search":
 						a.searchOpen, a.searchQuery = true, "set"
 					case v == "picker":
@@ -383,6 +386,7 @@ func TestSessionWindowRenderAndInputMapping(t *testing.T) {
 		DecodeUs: 2400,
 	}, 59.8, 2400)
 
+	sw.scrcpySess = &scrcpy.Session{}
 	for _, lang := range []string{"en", "zh-Hans"} {
 		i18n.SetLocaleFunc(func() string { return lang })
 		for _, dark := range []bool{false, true} {
@@ -392,6 +396,11 @@ func TestSessionWindowRenderAndInputMapping(t *testing.T) {
 			img := tt.Image()
 			if img.Bounds().Dx() != 960 || img.Bounds().Dy() != 640 {
 				t.Fatalf("unexpected SessionWindow bounds: %v", img.Bounds())
+			}
+			for _, label := range []string{L.ActionBack(), L.ActionHome(), L.ActionRecents()} {
+				if _, found := tt.Find(label); !found {
+					t.Fatalf("mirror/DeX SessionWindow (%s/dark=%v) missing %q", lang, dark, label)
+				}
 			}
 		}
 	}
@@ -424,9 +433,11 @@ func TestSessionWindowRenderAndInputMapping(t *testing.T) {
 		BackendLabel: "Calculator",
 		TargetSpec:   "540×960 flex · 60 fps",
 		AllowResize:  true,
+		ScreenOffCap: true,
 		AppIcon:      appIconBmp,
 		AppPackage:   "com.android.calculator2",
 	})
+	appWin.scrcpySess = &scrcpy.Session{}
 	appWin.PushNV12(core.NV12Frame{
 		Width:    vw,
 		Height:   vh,
@@ -437,16 +448,59 @@ func TestSessionWindowRenderAndInputMapping(t *testing.T) {
 		Hardware: true,
 		DecodeUs: 1900,
 	}, 60.0, 1900)
+	// App window exposes Bounded Back only (never Home/Recents) at both portrait and desktop widths.
+	appWin.pressKey("home")
+	appWin.pressKey("recents")
 	for _, lang := range []string{"en", "zh-Hans"} {
 		i18n.SetLocaleFunc(func() string { return lang })
 		for _, dark := range []bool{false, true} {
-			tt := ui.NewTester(appWin.view, appWinPortraitW, appWinPortraitH)
-			tt.SetDark(dark)
-			tt.Frame()
-			if tt.Image().Bounds().Dx() != appWinPortraitW {
-				t.Fatalf("unexpected appWin bounds: %v", tt.Image().Bounds())
+			for _, sz := range [][2]int{{appWinPortraitW, appWinPortraitH}, {960, 640}} {
+				tt := ui.NewTester(appWin.view, sz[0], sz[1])
+				tt.SetDark(dark)
+				tt.Frame()
+				if tt.Image().Bounds().Dx() != sz[0] {
+					t.Fatalf("unexpected appWin bounds: %v", tt.Image().Bounds())
+				}
+				if _, hasBack := tt.Find(L.ActionBack()); !hasBack {
+					t.Fatalf("appWin (%s/dark=%v/%dx%d) missing Back button", lang, dark, sz[0], sz[1])
+				}
+				if _, hasHome := tt.Find(L.ActionHome()); hasHome {
+					t.Fatalf("appWin (%s/dark=%v/%dx%d) must not show Home button", lang, dark, sz[0], sz[1])
+				}
+				if _, hasRecents := tt.Find(L.ActionRecents()); hasRecents {
+					t.Fatalf("appWin (%s/dark=%v/%dx%d) must not show Recents button", lang, dark, sz[0], sz[1])
+				}
 			}
 		}
+	}
+}
+
+func TestSingleSidebarPlusAndAppMonogramAvatar(t *testing.T) {
+	i18n.SetLocaleFunc(func() string { return "en" })
+	a := testApp(t)
+	// Switch main window away from Home (so Home's hero button is absent) and inspect sidebar.
+	a.sessions["app1"] = newSessionWindow(a, SessionSpec{
+		ID:         "app1",
+		DeviceKey:  "0123456789abcdef", // Samsung Fold8 ([S] / Samsung avatar)
+		Mode:       SessionModeApp,
+		Title:      "Telegram",
+		AppPackage: "org.telegram.messenger",
+		AppIcon:    nil, // Explicitly omit app icon to verify fallback never uses phone avatar
+	})
+	a.sessions["app1"].docked = true
+	a.sessions["app1"].scrcpySess = &scrcpy.Session{}
+	a.page = panePrefix + "app1"
+
+	tt := ui.NewTester(a.view, mainDefW, mainDefH)
+	tt.Frame()
+	if _, dupAdd := tt.Find(L.NavAddPhone()); dupAdd {
+		t.Fatal("sidebar must not render a duplicate NavAddPhone row")
+	}
+	if _, hasPlus := tt.Find(L.PickerOpen()); !hasPlus {
+		t.Fatal("sidebar missing primary '+' picker button")
+	}
+	if !tt.HasText("T") {
+		t.Fatal("expected iconless SessionModeApp to render app initial 'T' rather than phone avatar")
 	}
 }
 
@@ -637,19 +691,19 @@ func TestWirelessEndpointAndPortScanCooldown(t *testing.T) {
 	dir := t.TempDir()
 	a := New("test", dir)
 	a.remembered = []RememberedDevice{
-		{HardwareHash: "hw-fold8", Name: "Fold8", Endpoint: "192.168.156.54:43139", AutoReconnect: true},
+		{HardwareHash: "hw-fold8", Name: "Fold8", Endpoint: "192.0.2.10:38101", AutoReconnect: true},
 	}
 	a.saveDevicesLocked()
 
-	a.noteWirelessEndpoint("hw-fold8", "192.168.156.54:39543")
+	a.noteWirelessEndpoint("hw-fold8", "192.0.2.10:38102")
 	reloaded := New("test", dir)
 	r, ok := reloaded.RememberedFor("hw-fold8")
-	if !ok || r.Endpoint != "192.168.156.54:39543" {
-		t.Fatalf("persisted endpoint = %q, want 192.168.156.54:39543", r.Endpoint)
+	if !ok || r.Endpoint != "192.0.2.10:38102" {
+		t.Fatalf("persisted endpoint = %q, want 192.0.2.10:38102", r.Endpoint)
 	}
 	// Loopback tunnel endpoints must never overwrite the phone's Wi-Fi endpoint.
 	reloaded.noteWirelessEndpoint("hw-fold8", "127.0.0.1:50001")
-	if r2, _ := reloaded.RememberedFor("hw-fold8"); r2.Endpoint != "192.168.156.54:39543" {
+	if r2, _ := reloaded.RememberedFor("hw-fold8"); r2.Endpoint != "192.0.2.10:38102" {
 		t.Fatalf("loopback endpoint overwrote Wi-Fi endpoint: %q", r2.Endpoint)
 	}
 
@@ -710,18 +764,18 @@ func TestDirectLANRoutesAndAdaptiveStreamProfile(t *testing.T) {
 		{
 			HardwareHash: hash,
 			Name:         "Fold8",
-			Endpoint:     "192.168.156.55:39543",
+			Endpoint:     "192.0.2.11:38102",
 			Companion: &CompanionBinding{
-				Port:     43856,
+				Port:     38200,
 				MeshHost: "AF-p-01234567 Fold8",
 			},
 		},
 	}
-	a.peerStatus[hash] = companion.DeviceStatus{WifiIPv4: "192.168.156.54"}
+	a.peerStatus[hash] = companion.DeviceStatus{WifiIPv4: "192.0.2.10"}
 	a.rt.meshCfgs = map[string]mesh.Config{
 		"net1": {
 			PortForwards: []mesh.PortForward{
-				{LocalPort: 51234, RemoteHost: "10.126.126.2", RemotePort: 43856},
+				{LocalPort: 51234, RemoteHost: "10.126.126.2", RemotePort: 38200},
 			},
 		},
 	}
@@ -740,7 +794,7 @@ func TestDirectLANRoutesAndAdaptiveStreamProfile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("companionRoutes returned error: %v", err)
 	}
-	if len(routes) < 2 || !routes[0].directLAN || routes[0].addr != "192.168.156.54:43856" {
+	if len(routes) < 2 || !routes[0].directLAN || routes[0].addr != "192.0.2.10:38200" {
 		t.Fatalf("expected WifiIPv4 direct LAN route first, got %+v", routes)
 	}
 	if a.isMeshRoute(routes[0].addr) || !a.isMeshRoute("127.0.0.1:51234") {
@@ -748,7 +802,7 @@ func TestDirectLANRoutesAndAdaptiveStreamProfile(t *testing.T) {
 	}
 
 	// Direct LAN / ADB stays full-speed regardless of relayed mesh peer state.
-	br, fps, sz, codec, _, relayed := a.companionStreamProfile("AF-p-01234567 Fold8", "192.168.156.54:43856", false)
+	br, fps, sz, codec, _, relayed := a.companionStreamProfile("AF-p-01234567 Fold8", "192.0.2.10:38200", false)
 	if relayed || br != 6_000_000 || fps != 60 || sz != 0 || codec != "h264" {
 		t.Fatalf("direct LAN mirror profile = (%d, %d, %d, %s, relayed=%v)", br, fps, sz, codec, relayed)
 	}

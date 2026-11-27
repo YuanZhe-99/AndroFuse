@@ -277,15 +277,15 @@ func TestStatusReportsWirelessPortEvenWhenTunnelDisabled(t *testing.T) {
 		t.Fatalf("expected ADBBeacon and ScreenShare enabled by default: %+v", h.Config().Permissions)
 	}
 	h.SetPermission("adb_beacon", false)
-	h.SetWirelessADBPort(39543)
+	h.SetWirelessADBPort(38102)
 	h.mu.Lock()
-	h.cfg.ListenPort = 43856
+	h.cfg.ListenPort = 38200
 	h.cfg.Standby = true
 	h.a11yOn = true
 	h.apkHash = "deadbeef"
 	h.mu.Unlock()
 	st := h.Status()
-	if st.WirelessADBPort != 39543 || st.ADBTunnelAllowed || !st.ScreenShareAllowed || st.AppVersion == "" || st.CompanionPort != 43856 || !st.StandbyRunning || !st.AccessibilityOn || st.AppBuildHash != "deadbeef" {
+	if st.WirelessADBPort != 38102 || st.ADBTunnelAllowed || !st.ScreenShareAllowed || st.AppVersion == "" || st.CompanionPort != 38200 || !st.StandbyRunning || !st.AccessibilityOn || st.AppBuildHash != "deadbeef" {
 		t.Fatalf("Status() missing full phone state: %+v", st)
 	}
 }

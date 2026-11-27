@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -91,14 +92,16 @@ type Session struct {
 	recMu    sync.Mutex
 	recorder *MP4Recorder
 
-	ctrlMu    sync.Mutex
-	mu        sync.Mutex
-	stats     SessionStats
-	lastFrame time.Time // when the last frame was decoded; Stats reports 0 fps once it is stale
-	lastErr   error
-	doneCh    chan struct{}
-	errCh     chan error
-	closed    bool
+	ctrlMu           sync.Mutex
+	mu               sync.Mutex
+	stats            SessionStats
+	lastFrame        time.Time // when the last frame was decoded; Stats reports 0 fps once it is stale
+	lastErr          error
+	doneCh           chan struct{}
+	errCh            chan error
+	closed           bool
+	virtualDisplayID int
+	vdReadyCh        chan struct{}
 }
 
 // BuildServerArgs constructs valid scrcpy-server v5.0.1 key=value options.
@@ -147,7 +150,9 @@ func BuildServerArgs(scid uint32, cfg LaunchConfig) []string {
 			args = append(args, fmt.Sprintf("camera_fps=%d", cfg.CameraFPS))
 		}
 	} else {
-		args = append(args, "power_on=true")
+		// Independent app windows wake only their own virtual display via AppGuard so Display 0 stays dark.
+		powerOn := cfg.NewDisplay == "" || cfg.StartAppPackage == ""
+		args = append(args, "power_on="+strconv.FormatBool(powerOn))
 	}
 	if cfg.Audio {
 		args = append(args, "audio_codec=raw")
@@ -231,7 +236,7 @@ func StartADB(ctx context.Context, client *adb.Client, lib *core.Lib, store *lea
 		RemoteServerPath, strings.Join(serverArgs, " "))
 	cmd := exec.Command(client.Path, "-s", cfg.Serial, "shell", shellCmd)
 	sysproc.HideConsole(cmd)
-	var outBuf bytes.Buffer
+	var outBuf serverLogWriter
 	cmd.Stdout = &outBuf
 	cmd.Stderr = &outBuf
 	if err := cmd.Start(); err != nil {
@@ -251,7 +256,7 @@ func StartADB(ctx context.Context, client *adb.Client, lib *core.Lib, store *lea
 		if store != nil {
 			_ = store.Release(cfg.SessionID)
 		}
-		return nil, fmt.Errorf("connect video socket (%s): %w (%s)", addr, err, strings.TrimSpace(outBuf.String()))
+		return nil, fmt.Errorf("connect video socket (%s): %w (%s)", addr, err, outBuf.String())
 	}
 
 	var audioConn net.Conn
@@ -295,6 +300,7 @@ func StartADB(ctx context.Context, client *adb.Client, lib *core.Lib, store *lea
 		}
 		return nil, err
 	}
+	outBuf.attachSession(s)
 	if audioConn != nil {
 		s.mu.Lock()
 		s.audioConn = audioConn
@@ -354,8 +360,9 @@ func StartFromConns(
 			DeviceName: hs.DeviceName,
 			CodecID:    hs.CodecID,
 		},
-		doneCh: make(chan struct{}),
-		errCh:  make(chan error, 1),
+		doneCh:    make(chan struct{}),
+		errCh:     make(chan error, 1),
+		vdReadyCh: make(chan struct{}),
 	}
 
 	if ctrlConn != nil {
@@ -809,4 +816,130 @@ func (p *prefixedConn) Read(b []byte) (int, error) {
 		return n + 1, err
 	}
 	return p.Conn.Read(b)
+}
+
+var newDisplayIDPattern = regexp.MustCompile(`New display: .*?\(id=(\d+)\)`)
+
+func parseNewDisplayID(line string) (int, bool) {
+	m := newDisplayIDPattern.FindStringSubmatch(line)
+	if len(m) != 2 {
+		return 0, false
+	}
+	id, err := strconv.Atoi(m[1])
+	if err != nil || id <= 0 {
+		return 0, false
+	}
+	return id, true
+}
+
+func (s *Session) setVirtualDisplayID(id int) {
+	if id <= 0 {
+		return
+	}
+	s.mu.Lock()
+	if s.virtualDisplayID == 0 {
+		s.virtualDisplayID = id
+		if s.vdReadyCh != nil {
+			close(s.vdReadyCh)
+		}
+	}
+	s.mu.Unlock()
+}
+
+// VirtualDisplayID returns the virtual display ID logged by scrcpy-server `--new-display`,
+// or 0 if the session uses an existing display or has not parsed the log line yet.
+func (s *Session) VirtualDisplayID() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.virtualDisplayID
+}
+
+// WaitVirtualDisplayID waits until scrcpy-server logs a new virtual display ID, the session
+// ends, or timeout expires.
+func (s *Session) WaitVirtualDisplayID(timeout time.Duration) (int, bool) {
+	s.mu.Lock()
+	id := s.virtualDisplayID
+	ch := s.vdReadyCh
+	done := s.doneCh
+	s.mu.Unlock()
+	if id > 0 {
+		return id, true
+	}
+	if ch == nil {
+		return 0, false
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-ch:
+		return s.VirtualDisplayID(), s.VirtualDisplayID() > 0
+	case <-done:
+		return s.VirtualDisplayID(), s.VirtualDisplayID() > 0
+	case <-timer.C:
+		return 0, false
+	}
+}
+
+type serverLogWriter struct {
+	mu      sync.Mutex
+	buf     bytes.Buffer
+	lineBuf bytes.Buffer
+	dispID  int
+	sess    *Session
+}
+
+func (w *serverLogWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	if w.buf.Len() < 8192 {
+		rem := 8192 - w.buf.Len()
+		if len(p) > rem {
+			w.buf.Write(p[:rem])
+		} else {
+			w.buf.Write(p)
+		}
+	}
+	var target *Session
+	var foundID int
+	for _, b := range p {
+		if b == '\n' {
+			if id, ok := parseNewDisplayID(w.lineBuf.String()); ok && w.dispID == 0 {
+				w.dispID = id
+				foundID = id
+				target = w.sess
+			}
+			w.lineBuf.Reset()
+		} else if b != '\r' {
+			w.lineBuf.WriteByte(b)
+		}
+	}
+	w.mu.Unlock()
+	if target != nil && foundID > 0 {
+		target.setVirtualDisplayID(foundID)
+	}
+	return len(p), nil
+}
+
+func (w *serverLogWriter) attachSession(s *Session) {
+	if s == nil {
+		return
+	}
+	w.mu.Lock()
+	w.sess = s
+	id := w.dispID
+	if id == 0 && w.lineBuf.Len() > 0 {
+		if parsed, ok := parseNewDisplayID(w.lineBuf.String()); ok {
+			w.dispID = parsed
+			id = parsed
+		}
+	}
+	w.mu.Unlock()
+	if id > 0 {
+		s.setVirtualDisplayID(id)
+	}
+}
+
+func (w *serverLogWriter) String() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return strings.TrimSpace(w.buf.String())
 }

@@ -606,5 +606,22 @@
   "ActivateUSBSub": "用数据线连一下电脑并在手机允许授权即可自动完成，开启后马上拔掉线也能继续使用。",
   "ActivateOptionUSBBrief": "方式二：用 USB 数据线连接一次电脑",
   "ActivateCellularTitle": "当前手机正在使用移动网络",
-  "ActivateCellularBody": "受 Android 系统限制，手机重启后的首次增强激活需要插一次数据线或连一次任意 Wi-Fi 完成；开启后，切回 5G 也能随时使用三星 DeX 与应用窗口。"
+  "ActivateCellularBody": "受 Android 系统限制，手机重启后的首次增强激活需要插一次数据线或连一次任意 Wi-Fi 完成；开启后，切回 5G 也能随时使用三星 DeX 与应用窗口。",
+  "AppAtMainScreen": "已在应用主页面",
+  "CardSuggestCompanion": "无线 ADB 已连接，配对「增强协同」后可在 5G 下使用三星 DeX 与应用窗口。",
+  "CardOfflineSuggestCompanion": "此手机曾使用无线 ADB，连一次数据线或在同 Wi-Fi 下配对「增强协同」后体验更完整。",
+  "CardSuggestWirelessADB": "增强协同已配对；再配对「无线调试 (ADB)」可在同 Wi-Fi 下获得更流畅的高帧率与音频体验。",
+  "ActionPairEnhancedShort": "配对增强协同",
+  "ActionPairWirelessADBShort": "配对无线 ADB",
+  "ActionMenuPairEnhanced": "配对增强协同…",
+  "ActionMenuRepairEnhanced": "重新配对增强协同…",
+  "ActionMenuPairADB": "配对无线调试 (ADB)…",
+  "ActionMenuRepairADB": "重新配对无线调试 (ADB)…",
+  "PairADBModalTitle": "为 {name} 配对无线调试 (ADB)",
+  "@PairADBModalTitle": {"placeholders": {"name": {"type": "String"}}},
+  "PairADBModalSub": "在同 Wi-Fi 下完成一次无线调试配对，之后连接同一 Wi-Fi 时即可自动免线使用无线 ADB 与高帧率投屏。",
+  "PairADBModalBtn": "配对无线调试",
+  "PairADBDoneTitle": "无线调试配对完成",
+  "PairADBDoneSub": "之后这台电脑连上同一 Wi-Fi 即可自动免线连接。",
+  "ActionDone": "完成"
 }

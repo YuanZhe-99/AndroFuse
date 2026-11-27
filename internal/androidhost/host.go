@@ -211,8 +211,8 @@ func (h *Host) StartServer() error {
 		GetStatus: func() companion.DeviceStatus {
 			return h.Status()
 		},
-		OnListApps: func() ([]companion.DaemonAppEntry, error) {
-			raw, err := androidbridge.ListDaemonApps()
+		OnListApps: func(req companion.AppListRequest) ([]companion.DaemonAppEntry, error) {
+			raw, err := androidbridge.ListDaemonApps(strings.Join(req.KnownIcons, ","))
 			if err != nil {
 				return nil, err
 			}

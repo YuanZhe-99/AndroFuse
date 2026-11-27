@@ -257,12 +257,13 @@ func APKHash() string {
 	return sum
 }
 
-// ListDaemonApps queries the JSON array of launchable apps from the attached UID 2000 daemon.
-func ListDaemonApps() (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 18*time.Second)
+// ListDaemonApps queries the JSON array of launchable apps from the attached UID 2000 daemon,
+// omitting icons for any comma-separated package names listed in knownCSV.
+func ListDaemonApps(knownCSV string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	var raw string
-	if err := power.Call(ctx, "daemonListApps", nil, &raw); err != nil {
+	if err := power.Call(ctx, "daemonListApps", map[string]string{"knownIcons": knownCSV}, &raw); err != nil {
 		return "", err
 	}
 	return raw, nil

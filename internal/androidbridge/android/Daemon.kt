@@ -353,20 +353,51 @@ object AndroFuseDaemon {
         }
     }
 
-    fun listApps(): String {
+    fun listApps(knownPackagesCsv: String = ""): String {
         val b = synchronized(lock) { remote } ?: return "[]"
+        var localPfd: ParcelFileDescriptor? = null
+        var remotePfd: ParcelFileDescriptor? = null
         val data = Parcel.obtain()
         val reply = Parcel.obtain()
         return try {
+            val fd0 = java.io.FileDescriptor()
+            val fd1 = java.io.FileDescriptor()
+            Os.socketpair(OsConstants.AF_UNIX, OsConstants.SOCK_STREAM, 0, fd0, fd1)
+            try {
+                localPfd = ParcelFileDescriptor.dup(fd0)
+                remotePfd = ParcelFileDescriptor.dup(fd1)
+            } finally {
+                try { Os.close(fd0) } catch (_: Throwable) {}
+                try { Os.close(fd1) } catch (_: Throwable) {}
+            }
+
             data.writeInterfaceToken(DESCRIPTOR)
+            data.writeInt(1)
+            remotePfd.writeToParcel(data, 0)
+            data.writeString(knownPackagesCsv)
             b.transact(TX_LIST_APPS, data, reply, 0)
             reply.readException()
-            reply.readString() ?: "[]"
+            try { remotePfd.close() } catch (_: Throwable) {}
+            remotePfd = null
+
+            val baos = java.io.ByteArrayOutputStream(64 * 1024)
+            val buf = ByteArray(32 * 1024)
+            FileInputStream(localPfd.fileDescriptor).use { fin ->
+                while (baos.size() < 20 * 1024 * 1024) {
+                    val n = fin.read(buf)
+                    if (n <= 0) break
+                    baos.write(buf, 0, n)
+                }
+            }
+            val raw = baos.toString("UTF-8").trim()
+            if (raw.startsWith("[")) raw else "[]"
         } catch (_: Exception) {
             "[]"
         } finally {
             data.recycle()
             reply.recycle()
+            try { localPfd?.close() } catch (_: Throwable) {}
+            try { remotePfd?.close() } catch (_: Throwable) {}
         }
     }
 

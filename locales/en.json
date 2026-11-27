@@ -686,5 +686,22 @@
   "ActivateUSBSub": "Plug in a USB cable and tap Allow once — activation completes automatically, then you can unplug.",
   "ActivateOptionUSBBrief": "Option 2: Connect briefly via USB cable",
   "ActivateCellularTitle": "Why a one-time setup is needed on mobile data",
-  "ActivateCellularBody": "Due to Android system rules, the first activation after a phone reboot needs a brief USB cable or Wi-Fi connection. After that, Samsung DeX and App windows work over 5G too."
+  "ActivateCellularBody": "Due to Android system rules, the first activation after a phone reboot needs a brief USB cable or Wi-Fi connection. After that, Samsung DeX and App windows work over 5G too.",
+  "AppAtMainScreen": "Already on the app's main screen",
+  "CardSuggestCompanion": "Wireless ADB is ready. Pair Enhanced mode to unlock 5G DeX and App windows.",
+  "CardOfflineSuggestCompanion": "Wireless ADB was used before. Connect once over USB or Wi-Fi to pair Enhanced mode.",
+  "CardSuggestWirelessADB": "Enhanced mode is paired. Also pair Wireless debugging (ADB) for smoother Wi-Fi streaming.",
+  "ActionPairEnhancedShort": "Pair Enhanced",
+  "ActionPairWirelessADBShort": "Pair Wireless ADB",
+  "ActionMenuPairEnhanced": "Pair Enhanced mode…",
+  "ActionMenuRepairEnhanced": "Re-pair Enhanced mode…",
+  "ActionMenuPairADB": "Pair Wireless debugging (ADB)…",
+  "ActionMenuRepairADB": "Re-pair Wireless debugging (ADB)…",
+  "PairADBModalTitle": "Pair Wireless debugging on {name}",
+  "@PairADBModalTitle": {"placeholders": {"name": {"type": "String"}}},
+  "PairADBModalSub": "Pairs this computer with Wireless debugging so Wi-Fi connections and streaming start automatically without a USB cable.",
+  "PairADBModalBtn": "Pair Wireless ADB",
+  "PairADBDoneTitle": "Wireless debugging is paired",
+  "PairADBDoneSub": "This computer can now connect automatically over Wi-Fi.",
+  "ActionDone": "Done"
 }

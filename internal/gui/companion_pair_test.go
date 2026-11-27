@@ -2,10 +2,13 @@ package gui
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/YuanZhe-99/AndroFuse/internal/adb"
 	"github.com/YuanZhe-99/AndroFuse/internal/companion"
 	"github.com/YuanZhe-99/AndroFuse/internal/mesh"
 )
@@ -160,5 +163,50 @@ func TestMeshPairEndToEndLoopback(t *testing.T) {
 	}
 	if st, ok := a.peerStatusFor(hash); !ok || st.WirelessADBPairPort != 42345 {
 		t.Fatalf("expected seeded peerStatus WirelessADBPairPort=42345, got %+v ok=%v", st, ok)
+	}
+}
+
+func TestCacheKeySanitizationAndAppIconMigration(t *testing.T) {
+	a := New("test", t.TempDir())
+	meshHash := "mesh:0a1b2c3d"
+	dir := a.deviceIconDir(meshHash)
+	if strings.Contains(filepath.Base(dir), ":") {
+		t.Fatalf("deviceIconDir leaked ':' on NTFS path: %q", dir)
+	}
+	if !a.needsCompanionAppFetch(meshHash) {
+		t.Fatal("expected empty cache to need Companion app fetch")
+	}
+	apps := []adb.AppEntry{{Package: "com.android.chrome", Label: "Chrome", System: false, Resizeable: true}}
+	a.saveDeviceApps(meshHash, apps)
+	if !a.needsCompanionAppFetch(meshHash) {
+		t.Fatal("expected app cache without PNG icon files to trigger Companion icon refresh")
+	}
+	// Seed cached PNG icon under mesh_0a1b2c3d and migrate to real HardwareHash.
+	iconPath := filepath.Join(dir, "com.android.chrome.png")
+	if err := os.WriteFile(iconPath, []byte{0x89, 'P', 'N', 'G'}, 0o600); err != nil {
+		t.Fatalf("WriteFile icon: %v", err)
+	}
+	apps[0].IconPath = iconPath
+	a.saveDeviceApps(meshHash, apps)
+	if a.needsCompanionAppFetch(meshHash) {
+		t.Fatal("expected app cache with non-empty PNG icon not to need icon refresh")
+	}
+	a.remembered = []RememberedDevice{{
+		HardwareHash: meshHash,
+		Name:         "Fold",
+		Companion:    &CompanionBinding{Fingerprint: "fp-mig", MeshHost: "AF-p-0a1b2c3d Fold"},
+	}}
+	a.mu.Lock()
+	merged := a.mergeMeshRememberedLocked("real-hw-123", "fp-mig", "AF-p-0a1b2c3d Fold")
+	a.mu.Unlock()
+	if !merged {
+		t.Fatal("expected mergeMeshRememberedLocked to merge")
+	}
+	migrated := a.appsForDevice("real-hw-123")
+	if len(migrated) != 1 || migrated[0].IconPath == "" {
+		t.Fatalf("expected migrated app icon path, got %+v", migrated)
+	}
+	if _, err := os.Stat(migrated[0].IconPath); err != nil {
+		t.Fatalf("expected migrated icon file to exist: %v", err)
 	}
 }

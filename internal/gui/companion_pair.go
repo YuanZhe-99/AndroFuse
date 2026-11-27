@@ -3,6 +3,7 @@ package gui
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -64,11 +65,13 @@ func (a *App) PairCompanionOverADB(serial, model string, joinMesh bool) {
 		if apk == "" {
 			apk = companionAPK()
 		}
-		if apk == "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		installedOnPhone := isCompanionInstalledOnSerial(ctx, client, serial)
+		if apk == "" && !installedOnPhone {
+			cancel()
 			note(L.CompanionApkMissing())
 			return
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		a.update(func() { a.pairingCancel = cancel })
 		defer func() {
 			cancel()
@@ -306,16 +309,79 @@ func (a *App) PairMeshPhone(p networkPhone) {
 	}()
 }
 
-// pairOverADB installs apk on serial, starts its Companion service with the secret-free
-// `androfuse://pair` link, forwards its local socket and requests pairing with a fresh code
-// (reported through progress), retrying while the phone's service starts.
+// isCompanionInstalledOnSerial reports whether com.yuanzhe.androfuse is already installed on serial.
+func isCompanionInstalledOnSerial(ctx context.Context, client *adb.Client, serial string) bool {
+	if client == nil || serial == "" {
+		return false
+	}
+	out, _ := client.Shell(ctx, serial, "pm path "+companionPackage)
+	return strings.Contains(out, "package:")
+}
+
+// RepairMeshCompanion manually initiates Companion re-pairing for remembered device r across the
+// running EasyTier mesh when reachable, or falls back to the Add Phone wizard otherwise.
+func (a *App) RepairMeshCompanion(r RememberedDevice) {
+	var devID string
+	if r.Companion != nil && r.Companion.MeshHost != "" {
+		if _, id, _, ok := mesh.ParseHostname(r.Companion.MeshHost); ok {
+			devID = id
+		}
+	}
+	if devID == "" {
+		if rest, ok := strings.CutPrefix(r.HardwareHash, "mesh:"); ok {
+			devID = rest
+		}
+	}
+	if devID != "" {
+		nets := map[string]string{}
+		for _, n := range a.networks() {
+			nets[n.ID] = n.shownName()
+		}
+		a.mu.Lock()
+		for netID, v := range a.netViews {
+			if !v.Status.Running {
+				continue
+			}
+			for _, p := range v.Info.Peers {
+				if kind, id, pName, ok := mesh.ParseHostname(p.Hostname); ok && kind == mesh.KindPhone && id == devID {
+					if pName == "" {
+						pName = r.displayName()
+					}
+					a.mu.Unlock()
+					a.PairMeshPhone(networkPhone{
+						NetworkID: netID,
+						Network:   nets[netID],
+						Peer:      p.Hostname,
+						Name:      pName,
+						IPv4:      p.IPv4,
+						Direct:    p.Direct,
+						Latency:   p.Latency,
+					})
+					return
+				}
+			}
+		}
+		a.mu.Unlock()
+	}
+	a.OpenAddWizard(0)
+}
+
+// pairOverADB installs apk (when supplied, tolerance for already-installed release-signed APKs) on
+// serial, starts its Companion service with the secret-free `androfuse://pair` link, forwards its
+// local socket and requests pairing with a fresh code (reported through progress), retrying while
+// the phone's service starts.
 // Returns: the authenticated client, its forwarded loopback address and the pairing result.
-// Side effects: `adb install -r`, `am start`, an `adb forward` kept for the session.
+// Side effects: `adb install -r` (when apk is present), `am start`, an `adb forward` kept for the session.
 func pairOverADB(ctx context.Context, client *adb.Client, serial, apk string, progress, onCode func(string)) (*companion.Client, string, companion.PairResponse, error) {
 	var res companion.PairResponse
-	progress(L.CompanionInstalling())
-	if out, err := client.Run(ctx, "-s", serial, "install", "-r", apk); err != nil || !strings.Contains(out, "Success") {
-		return nil, "", res, fmt.Errorf("install companion: %s %v", strings.TrimSpace(out), err)
+	if apk != "" {
+		progress(L.CompanionInstalling())
+		out, err := client.Run(ctx, "-s", serial, "install", "-r", apk)
+		if err != nil || !strings.Contains(out, "Success") {
+			if !(strings.Contains(out, "INSTALL_FAILED_UPDATE_INCOMPATIBLE") && isCompanionInstalledOnSerial(ctx, client, serial)) {
+				return nil, "", res, fmt.Errorf("install companion: %s %v", strings.TrimSpace(out), err)
+			}
+		}
 	}
 	_, _ = client.Shell(ctx, serial, "am start -a android.intent.action.VIEW -d androfuse://pair com.yuanzhe.androfuse")
 	port, err := client.ForwardPort(ctx, serial, 0, "localabstract:"+companion.LocalSocket)
@@ -914,8 +980,9 @@ func phoneNeedsAction(st companion.DeviceStatus, localHash string, onlineADB, al
 	return needsAPK, needsDaemon, wantsADB
 }
 
-// fetchCompanionApps populates the per-device app list directly from Companion Enhanced mode
-// (`apps.list`), reusing any cached icon PNGs on disk so Independent App Windows work without ADB.
+// fetchCompanionApps populates the per-device app list and 96x96 PNG icons directly from
+// Companion Enhanced mode (`apps.list`), requesting only icons missing from disk (`known_icons`)
+// so Independent App Windows and the App Launcher Grid have real icons without ADB.
 func (a *App) fetchCompanionApps(hash string) {
 	r, ok := a.RememberedFor(hash)
 	if !ok || r.Companion == nil {
@@ -941,40 +1008,75 @@ func (a *App) fetchCompanionApps(hash string) {
 	if err != nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	iconDir := a.deviceIconDir(hash)
+	if iconDir != "" {
+		_ = os.MkdirAll(iconDir, 0o755)
+	}
+	knownIcons := existingCachedIconPackages(a.appsForDevice(hash), iconDir)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
 	defer cancel()
 	c, _, err := a.findCompanion(ctx, hash, *r.Companion, string(tok))
 	if err != nil {
 		return
 	}
-	list, lErr := c.ListApps(ctx)
+	list, lErr := c.ListAppsWithKnown(ctx, knownIcons)
 	_ = c.Close()
 	if lErr != nil || len(list) == 0 {
 		return
 	}
-	iconDir := a.deviceIconDir(hash)
+
 	apps := make([]adb.AppEntry, 0, len(list))
 	decoded := make(map[string]*ui.Bitmap)
+	decodedByPkg := make(map[string]*ui.Bitmap)
 	for _, ap := range list {
+		pkg := strings.TrimSpace(ap.Package)
+		if pkg == "" || adb.IsNoisyAppPackage(pkg) {
+			continue
+		}
+		label := strings.TrimSpace(ap.Label)
+		if label == "" {
+			label = pkg
+		}
 		entry := adb.AppEntry{
-			Package:    ap.Package,
-			Label:      ap.Label,
+			Package:    pkg,
+			Label:      label,
 			System:     ap.System,
 			Resizeable: ap.Resizeable,
 		}
 		if iconDir != "" {
-			p := filepath.Join(iconDir, ap.Package+".png")
-			if _, sErr := os.Stat(p); sErr == nil {
+			p := filepath.Join(iconDir, sanitizeIconPkg(pkg)+".png")
+			if ap.IconB64 != "" {
+				if rawPNG, dErr := base64.StdEncoding.DecodeString(ap.IconB64); dErr == nil && len(rawPNG) > 0 {
+					tmp := p + ".tmp"
+					if wErr := os.WriteFile(tmp, rawPNG, 0o600); wErr == nil {
+						if rErr := os.Rename(tmp, p); rErr != nil {
+							_ = os.Remove(tmp)
+						}
+					}
+				}
+			}
+			if info, sErr := os.Stat(p); sErr == nil && info.Size() > 0 {
 				entry.IconPath = p
 				if raw, rErr := os.ReadFile(p); rErr == nil {
 					if bmp, bErr := ui.DecodeBitmap(raw); bErr == nil {
 						decoded[p] = bmp
+						decodedByPkg[pkg] = bmp
 					}
 				}
 			}
 		}
 		apps = append(apps, entry)
 	}
+	if len(apps) == 0 {
+		return
+	}
+	slices.SortFunc(apps, func(x, y adb.AppEntry) int {
+		if d := strings.Compare(strings.ToLower(x.Label), strings.ToLower(y.Label)); d != 0 {
+			return d
+		}
+		return strings.Compare(x.Package, y.Package)
+	})
 	a.saveDeviceApps(hash, apps)
 	a.update(func() {
 		if a.appIcons == nil {
@@ -984,6 +1086,51 @@ func (a *App) fetchCompanionApps(hash string) {
 			a.appIcons[p] = bmp
 		}
 	})
+	a.backfillSessionAppIcons(hash, decodedByPkg)
+}
+
+func existingCachedIconPackages(cached []adb.AppEntry, iconDir string) []string {
+	var known []string
+	seen := make(map[string]bool)
+	for _, ap := range cached {
+		if ap.Package == "" || seen[ap.Package] {
+			continue
+		}
+		path := ap.IconPath
+		if path == "" && iconDir != "" {
+			path = filepath.Join(iconDir, sanitizeIconPkg(ap.Package)+".png")
+		}
+		if path == "" {
+			continue
+		}
+		if info, err := os.Stat(path); err == nil && info.Size() > 0 {
+			seen[ap.Package] = true
+			known = append(known, ap.Package)
+		}
+	}
+	return known
+}
+
+func (a *App) backfillSessionAppIcons(devKey string, byPkg map[string]*ui.Bitmap) {
+	if devKey == "" || len(byPkg) == 0 {
+		return
+	}
+	a.mu.Lock()
+	var dirty []*SessionWindow
+	for _, sw := range a.sessions {
+		sw.mu.Lock()
+		if sw.spec.DeviceKey == devKey && sw.spec.Mode == SessionModeApp && sw.spec.AppIcon == nil {
+			if bmp := byPkg[sw.spec.AppPackage]; bmp != nil {
+				sw.spec.AppIcon = bmp
+				dirty = append(dirty, sw)
+			}
+		}
+		sw.mu.Unlock()
+	}
+	a.mu.Unlock()
+	for _, sw := range dirty {
+		sw.redraw()
+	}
 }
 
 func (a *App) pollCompanionHealth(ctx context.Context) {
@@ -1051,7 +1198,7 @@ func (a *App) checkCompanionHealthOnce(ctx context.Context, r RememberedDevice) 
 }
 
 func (a *App) ensurePhoneReady(ctx context.Context, r RememberedDevice, st companion.DeviceStatus) {
-	if st.DaemonReady && len(a.appsForDevice(r.HardwareHash)) == 0 {
+	if st.DaemonReady && a.needsCompanionAppFetch(r.HardwareHash) {
 		go a.fetchCompanionApps(r.HardwareHash)
 	}
 	if a.activate.Open && a.activate.Hash == r.HardwareHash && st.DaemonReady {

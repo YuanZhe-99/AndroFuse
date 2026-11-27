@@ -4,11 +4,11 @@
 |---|---|---|
 | `cmd/androfuse` | 统一 MyGo 原生 UI 入口 | `main` |
 | `cmd/androfuse-svc` | 无头引擎命令行（`version`、`check`、`probe`、`run`） | `main`、`runFullProbe`、`runDaemon` |
-| `internal/version` | 全局唯一版本号（`0.2.2`） | `Version` |
+| `internal/version` | 全局唯一版本号（`0.2.3`） | `Version` |
 | `internal/core` | Rust 核心 C-ABI v6 加载器、零分配 NV12 环形缓冲与 WASAPI 播放/采集 | `Open`、`Lib.Start`、`Lib.SelfCheck`、`Lib.OpenDecoder`、`Lib.OpenAudioPlayer`、`Lib.OpenMicCapture`、`Decoder.PullInto`、`NV12Ring`、`AudioPlayer`、`MicCapturer` |
 | `internal/localapi` | 同用户 AF_UNIX NDJSON 服务（Windows SID 校验） | `Listen`、`Server.Serve`、`RecoverLeases`、`Call` |
 | `internal/vm` | 按需下载的轻量无头 Android 虚拟机管理器（`INV-03`、`INV-10`） | `NewManager`、`NativeABIForArch`、`DefaultVMRoot`、`ParseCmdlineToolsManifest`、`Manager.Status`、`Manager.Provision`、`Manager.Start`、`Manager.Stop`、`Manager.DeleteManaged` |
-| `internal/companion` | TLS 1.3 加密 Companion NDJSON 协议栈（`INV-07`、`INV-09`） | `NewServer`、`PickPort`、`Dial`、`GenerateSelfSignedCert`、`GeneratePairingToken`、`DerivePairSAS`、`RequestPairingSAS`、`SanitizeClientName`、`SanitizeFileName`、`Client.GetStatus`、`Client.PushFile`、`Client.RequestContinuity`、`Client.RunDisplayGuard`、`RequestPairing`、`Client.JoinMesh` |
+| `internal/companion` | TLS 1.3 加密 Companion NDJSON 协议栈（`INV-07`、`INV-09`） | `NewServer`、`PickPort`、`Dial`、`GenerateSelfSignedCert`、`GeneratePairingToken`、`DerivePairSAS`、`RequestPairingSAS`、`SanitizeClientName`、`SanitizeFileName`、`Client.GetStatus`、`Client.ListAppsWithKnown`、`Client.PushFile`、`Client.RequestContinuity`、`Client.RunDisplayGuard`、`RequestPairing`、`Client.JoinMesh` |
 | `internal/androidhost` | 可选 Android Companion APK 宿主状态、授权管理与 MyGo 移动界面（`INV-09`） | `New`、`Host.StartServer`、`Host.StopServer`、`Host.SetPermission`、`Host.SetStandby`、`Host.JoinMesh`、`Host.LeaveMesh`、`Host.SetMeshFullSpeed`、`Host.AnswerPair`、`Host.AnswerPairChoice`、`Host.PendingPairChoices`、`Host.RotateToken`、`Host.SetWirelessADBPort`、`Host.SetWirelessADBPairPort`、`RenderCompanionView` |
 | `internal/androidbridge` | 平台安全的 Android 系统服务与桌面小组件状态桥接（配合 `CompanionServices.kt`） | `Capabilities`、`WidgetState`、`Probe`、`UpdateGranted`、`SyncCompanionWidget`、`CurrentWidgetState`、`TouchActive`、`ReleaseActive`、`ActiveHeld`、`SetStandby`、`WatchNetwork` |
 | `internal/androidcore` | 在 APK 中携带并加载 Android 核心库，提供 Keystore 密封 | `NewLibrary`、`Library.Load`、`NewVault`、`Vault.Seal`、`Vault.Open` |
@@ -20,10 +20,10 @@
 | `internal/sysproc` | Windows 下无控制台窗口的子进程 | `HideConsole` |
 | `internal/lease` | 原子 `leases.json` 崩溃回收租约账本 | `Open`、`Store.Acquire`、`Store.Release`、`Store.List`、`Store.RecoverAll` |
 | `internal/scrcpy` | `scrcpy-server v5.0.1` 线协议、交互控制、音频/剪贴板、MP4 录屏与回放样本 | `BuildServerArgs`、`StartADB`、`Session.Resize`、`Session.SetClipboard`、`Session.StartRecording`、`MP4Recorder`、`StartMockFixture` |
-| `internal/dex` | Samsung Native DeX 调度器（`server/dexhelper` 回环与宽限重连）与应用图标缓存 | `PushAndProbe`、`StartNativeLoopback`、`LoopbackSession.Reattach`、`LoopbackSession.Resize`、`Recover`、`SelectRoute`、`FormatOneUIVersion`、`EvaluateTruth`、`ListAppsWithIcons` |
-| `internal/gui` | MyGo 原生界面外壳、添加手机与增强协同引导弹窗、统一设备卡片、应用启动器网格、无边框 `SessionModeApp`、`SaveNV12AsPNG`、`InputTracker` 与托盘 | `New`、`ApplyTheme`、`RunDiagnostics`、`NewTray`、`SessionWindow`、`EncoderHeadroom`、`SaveNV12AsPNG`、`InputTracker`、`App.LaunchDeX`、`App.LaunchAppWindow`、`App.PairCompanionOverADB`、`App.PairMeshPhone`、`App.EnsureEnhancedAndRun`、`App.OpenAddWizard`、`App.OpenActivateModal`、`App.InstallADB`、`App.HandleURL`、`App.ReconnectCompanion`、`App.ForgetDevice`、`SessionWindow.PopOut`、`SessionWindow.Dock` |
+| `internal/dex` | Samsung Native DeX 调度器（`server/dexhelper` 回环与宽限重连）、应用图标缓存与 `AppGuard` | `PushAndProbe`、`StartNativeLoopback`、`LoopbackSession.Reattach`、`LoopbackSession.Resize`、`Recover`、`SelectRoute`、`FormatOneUIVersion`、`EvaluateTruth`、`ListAppsWithIcons`、`StartAppGuard` |
+| `internal/gui` | MyGo 原生界面外壳、添加手机/增强协同与无线调试引导弹窗、统一设备卡片、应用启动器网格、无边框 `SessionModeApp`、`SaveNV12AsPNG`、`InputTracker` 与托盘 | `New`、`ApplyTheme`、`RunDiagnostics`、`NewTray`、`SessionWindow`、`EncoderHeadroom`、`SaveNV12AsPNG`、`InputTracker`、`App.LaunchDeX`、`App.LaunchAppWindow`、`App.PairCompanionOverADB`、`App.PairMeshPhone`、`App.RepairMeshCompanion`、`App.EnsureEnhancedAndRun`、`App.OpenAddWizard`、`App.OpenActivateModal`、`App.OpenPairADBModal`、`App.InstallADB`、`App.HandleURL`、`App.ReconnectCompanion`、`App.ForgetDevice`、`SessionWindow.PopOut`、`SessionWindow.Dock` |
 | `locales` | 英文与简体中文 ARB 词条目录 | `catalog_gen.go` |
-| `server/dexhelper` | UID 2000 Java `app_process` 辅助器（`probe`、`apps`、`serve`、`attach`、`recover`） | `com.androfuse.dexhelper.Main` |
+| `server/dexhelper` | UID 2000 Java `app_process` 辅助器（`probe`、`apps`、`serve`、`attach`、`recover`、`appguard`、`daemon`） | `com.androfuse.dexhelper.Main`、`com.androfuse.dexhelper.AppGuard`、`com.androfuse.dexhelper.Daemon` |
 | `tools/fetchdeps` | 带 SHA-256 校验的 `scrcpy-server-v5.0.1` 与构建期 `protoc` 下载器；EasyTier 上游版本检查 | `main`、`fetchProtoc`、`runUpstreamCheck` |
 | `tools/builddex` | 编译并 dex 打包 `androfuse-dex-helper.jar` | `main` |
 | `tools/buildapk` | Android `arm64-v8a` Companion APK 构建、原生库存在性与 16 KB `zipalign` 校验器 | `main`、`ensureGradlewBat`、`findJDK17`、`requireNativeLibs` |

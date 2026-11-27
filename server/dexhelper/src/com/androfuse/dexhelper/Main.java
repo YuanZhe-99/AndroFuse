@@ -64,6 +64,7 @@ import java.util.regex.Pattern;
  *   attach <token> <ctrl_port>
  *   recover
  *   daemon [--pkg <package>] [--authority <authority>]
+ *   appguard <display_id> <package>
  */
 public final class Main {
 
@@ -87,14 +88,17 @@ public final class Main {
             if ("apps".equals(args[0])) {
                 boolean includeIcons = true;
                 String resume = null;
+                Set<String> skipIcons = null;
                 for (int i = 1; i < args.length; i++) {
                     if ("--no-icons".equals(args[i])) {
                         includeIcons = false;
                     } else if ("--resume".equals(args[i]) && i + 1 < args.length) {
                         resume = args[++i];
+                    } else if ("--skip-icons".equals(args[i]) && i + 1 < args.length) {
+                        skipIcons = parsePackageCsv(args[++i]);
                     }
                 }
-                runApps(includeIcons, resume);
+                runApps(includeIcons, resume, skipIcons);
                 return;
             }
             if ("attach".equals(args[0])) {
@@ -108,6 +112,14 @@ public final class Main {
             }
             if ("daemon".equals(args[0])) {
                 Daemon.run(args);
+                return;
+            }
+            if ("appguard".equals(args[0])) {
+                if (args.length != 3) {
+                    throw new IllegalArgumentException("appguard expects <display_id> <package>");
+                }
+                int displayId = Integer.parseInt(args[1]);
+                runAppGuard(displayId, args[2]);
                 return;
             }
             bootstrapWorkarounds();
@@ -222,16 +234,31 @@ public final class Main {
         System.out.flush();
     }
 
+    private static Set<String> parsePackageCsv(String csv) {
+        Set<String> out = new HashSet<>();
+        if (csv == null || csv.trim().isEmpty()) {
+            return out;
+        }
+        for (String part : csv.split(",")) {
+            String pkg = part.trim();
+            if (!pkg.isEmpty()) {
+                out.add(pkg);
+            }
+        }
+        return out;
+    }
+
     /**
      * Prints one AFDEX1|APP line per launcher app, then AFDEX1|APPS_DONE.
      *
      * Inputs: includeIcons renders 96x96 PNG icons; resume, when set, skips the apps listed
-     * before that package and lists it without an icon.
+     * before that package and lists it without an icon; skipIcons omits icons for packages whose
+     * PNG icons are already cached on the desktop.
      * Notes: some icons (Samsung Calendar's, which draws today's date) abort app_process natively
      * while drawing, which Java cannot catch; AFDEX1|ICON|pkg is printed before each icon so the
-     * desktop sees which one and runs again with --resume pkg.
+     * host sees which one and runs again with --resume pkg.
      */
-    private static void runApps(boolean includeIcons, String resume) throws Exception {
+    private static void runApps(boolean includeIcons, String resume, Set<String> skipIcons) throws Exception {
         Context sysCtx = getSystemContextWorkaround();
         PackageManager pm = sysCtx.getPackageManager();
         if (pm == null) {
@@ -260,6 +287,8 @@ public final class Main {
                         continue;
                     }
                     resume = null;
+                    skipIcon = true;
+                } else if (skipIcons != null && skipIcons.contains(pkg)) {
                     skipIcon = true;
                 }
                 ApplicationInfo appInfo = act.applicationInfo;
@@ -412,6 +441,57 @@ public final class Main {
             return Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP);
         } finally {
             bmp.recycle();
+        }
+    }
+
+    /**
+     * Supervises an Independent App Window virtual display under UID 2000 for wakefulness and Bounded Back.
+     *
+     * <p>Inputs: virtual {@code displayId > 0} and {@code pkg} (package name).
+     * <p>Side effects: emits {@code AFAPP1|READY|<displayId>} and services {@code BACK}, {@code PING},
+     * and {@code STOP} lines on stdin while emitting {@code AFAPP1|ROOT_BACK|1} when root Back is guarded.
+     */
+    private static void runAppGuard(int displayId, String pkg) throws Exception {
+        Context sysCtx = getSystemContextWorkaround();
+        final Object outLock = new Object();
+        AppGuard guard = AppGuard.start(sysCtx, displayId, pkg, () -> {
+            synchronized (outLock) {
+                System.out.println("AFAPP1|ROOT_BACK|1");
+                System.out.flush();
+            }
+        });
+        Runtime.getRuntime().addShutdownHook(new Thread(guard::close, "AndroFuse-AppGuard-Shutdown"));
+
+        synchronized (outLock) {
+            System.out.println("AFAPP1|READY|" + displayId + "|shared=" + guard.isSharedDisplayGroup());
+            System.out.flush();
+        }
+
+        try {
+            BufferedReader stdin = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.US_ASCII));
+            String line;
+            while ((line = stdin.readLine()) != null) {
+                String cmd = line.trim();
+                if (cmd.isEmpty()) {
+                    continue;
+                }
+                if ("STOP".equals(cmd)) {
+                    break;
+                } else if ("PING".equals(cmd)) {
+                    synchronized (outLock) {
+                        System.out.println("AFAPP1|PONG|" + displayId);
+                        System.out.flush();
+                    }
+                } else if ("BACK".equals(cmd)) {
+                    boolean acted = guard.performBoundedBack();
+                    synchronized (outLock) {
+                        System.out.println(acted ? "AFAPP1|BACK|OK" : "AFAPP1|BACK|ROOT");
+                        System.out.flush();
+                    }
+                }
+            }
+        } finally {
+            guard.close();
         }
     }
 

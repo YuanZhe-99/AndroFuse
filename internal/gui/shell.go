@@ -90,10 +90,6 @@ func (a *App) sidebar(c *ui.Context, k tokens, rail bool) {
 			a.plusButton(c, "side-plus")
 		}
 		a.navRow(c, k, "nav-home", rail, page == pageHome, func() { appMark(c, 20) }, L.NavHome(), "", func() { a.choosePage(pageHome) })
-		a.mu.Lock()
-		wizOpen := a.addWizard.Open
-		a.mu.Unlock()
-		a.navRow(c, k, "nav-add", rail, wizOpen, func() { ui.Icon(c, iconPlus).Size(navIconSize, navIconSize).TextColor(k.brandSoftText) }, L.NavAddPhone(), "", func() { a.OpenAddWizard(0) })
 
 		ui.Scroll(c.Key("side-scroll")).Grow(1).FillWidth().Children(func() {
 			ui.Column(c.Key("side-open")).FillWidth().Gap(2).AlignItems(align).Children(func() {
@@ -232,10 +228,22 @@ func (a *App) sessionRow(c *ui.Context, k tokens, s *SessionWindow, rail, select
 	a.navRow(c, k, "side-"+s.spec.ID, rail, selected, func() { a.sessionIcon(c, s, avatarSmall) }, title, kind, func() { a.choosePage(target) })
 }
 
-// sessionIcon is a session's small icon: the app's icon, else the phone's avatar.
+// sessionIcon is a session's small icon: for Independent App Windows, the app's icon or an app
+// monogram/glyph (never the phone avatar); for all other sessions, the phone's avatar.
 func (a *App) sessionIcon(c *ui.Context, s *SessionWindow, size float32) {
-	if s.spec.Mode == SessionModeApp && s.spec.AppIcon != nil {
-		ui.Image(c, s.spec.AppIcon).Size(size, size).Radius(size / 4)
+	if s.spec.Mode == SessionModeApp {
+		if bmp := s.appIcon(); bmp != nil {
+			ui.Image(c, bmp).Size(size, size).Radius(size / 4)
+			return
+		}
+		k := tok(c)
+		ui.Box(c).Size(size, size).Shrink(0).Radius(size / 4).Background(k.brandSoft).Center().Children(func() {
+			if strings.TrimSpace(s.spec.Title) != "" {
+				ui.Text(c, appInitial(s.spec.Title)).Bold().FontSize(size * 0.44).TextColor(k.brandSoftText)
+			} else {
+				ui.Icon(c, iconAppWin).Size(size*0.58, size*0.58).TextColor(k.brandSoftText)
+			}
+		})
 		return
 	}
 	logo, glyph, name := a.phoneMark(s.spec.DeviceKey)

@@ -6127,3 +6127,163 @@ func ActivateCellularBody() string { return In(i18n.Locale()).ActivateCellularBo
 func (msgs Messages) ActivateCellularBody() string {
 	return Catalog.Format(msgs.locale, "ActivateCellularBody", nil)
 }
+
+// AppAtMainScreen says "Already on the app's main screen"
+// in the language the app shows.
+func AppAtMainScreen() string { return In(i18n.Locale()).AppAtMainScreen() }
+
+// AppAtMainScreen says "Already on the app's main screen"
+// in the language of msgs.
+func (msgs Messages) AppAtMainScreen() string {
+	return Catalog.Format(msgs.locale, "AppAtMainScreen", nil)
+}
+
+// CardSuggestCompanion says "Wireless ADB is ready. Pair Enhanced mode to unlock 5G DeX and App windows."
+// in the language the app shows.
+func CardSuggestCompanion() string { return In(i18n.Locale()).CardSuggestCompanion() }
+
+// CardSuggestCompanion says "Wireless ADB is ready. Pair Enhanced mode to unlock 5G DeX and App windows."
+// in the language of msgs.
+func (msgs Messages) CardSuggestCompanion() string {
+	return Catalog.Format(msgs.locale, "CardSuggestCompanion", nil)
+}
+
+// CardOfflineSuggestCompanion says "Wireless ADB was used before. Connect once over USB or Wi-Fi to pair Enhanced mode."
+// in the language the app shows.
+func CardOfflineSuggestCompanion() string { return In(i18n.Locale()).CardOfflineSuggestCompanion() }
+
+// CardOfflineSuggestCompanion says "Wireless ADB was used before. Connect once over USB or Wi-Fi to pair Enhanced mode."
+// in the language of msgs.
+func (msgs Messages) CardOfflineSuggestCompanion() string {
+	return Catalog.Format(msgs.locale, "CardOfflineSuggestCompanion", nil)
+}
+
+// CardSuggestWirelessADB says "Enhanced mode is paired. Also pair Wireless debugging (ADB) for smoother Wi-Fi streaming."
+// in the language the app shows.
+func CardSuggestWirelessADB() string { return In(i18n.Locale()).CardSuggestWirelessADB() }
+
+// CardSuggestWirelessADB says "Enhanced mode is paired. Also pair Wireless debugging (ADB) for smoother Wi-Fi streaming."
+// in the language of msgs.
+func (msgs Messages) CardSuggestWirelessADB() string {
+	return Catalog.Format(msgs.locale, "CardSuggestWirelessADB", nil)
+}
+
+// ActionPairEnhancedShort says "Pair Enhanced"
+// in the language the app shows.
+func ActionPairEnhancedShort() string { return In(i18n.Locale()).ActionPairEnhancedShort() }
+
+// ActionPairEnhancedShort says "Pair Enhanced"
+// in the language of msgs.
+func (msgs Messages) ActionPairEnhancedShort() string {
+	return Catalog.Format(msgs.locale, "ActionPairEnhancedShort", nil)
+}
+
+// ActionPairWirelessADBShort says "Pair Wireless ADB"
+// in the language the app shows.
+func ActionPairWirelessADBShort() string { return In(i18n.Locale()).ActionPairWirelessADBShort() }
+
+// ActionPairWirelessADBShort says "Pair Wireless ADB"
+// in the language of msgs.
+func (msgs Messages) ActionPairWirelessADBShort() string {
+	return Catalog.Format(msgs.locale, "ActionPairWirelessADBShort", nil)
+}
+
+// ActionMenuPairEnhanced says "Pair Enhanced mode…"
+// in the language the app shows.
+func ActionMenuPairEnhanced() string { return In(i18n.Locale()).ActionMenuPairEnhanced() }
+
+// ActionMenuPairEnhanced says "Pair Enhanced mode…"
+// in the language of msgs.
+func (msgs Messages) ActionMenuPairEnhanced() string {
+	return Catalog.Format(msgs.locale, "ActionMenuPairEnhanced", nil)
+}
+
+// ActionMenuRepairEnhanced says "Re-pair Enhanced mode…"
+// in the language the app shows.
+func ActionMenuRepairEnhanced() string { return In(i18n.Locale()).ActionMenuRepairEnhanced() }
+
+// ActionMenuRepairEnhanced says "Re-pair Enhanced mode…"
+// in the language of msgs.
+func (msgs Messages) ActionMenuRepairEnhanced() string {
+	return Catalog.Format(msgs.locale, "ActionMenuRepairEnhanced", nil)
+}
+
+// ActionMenuPairADB says "Pair Wireless debugging (ADB)…"
+// in the language the app shows.
+func ActionMenuPairADB() string { return In(i18n.Locale()).ActionMenuPairADB() }
+
+// ActionMenuPairADB says "Pair Wireless debugging (ADB)…"
+// in the language of msgs.
+func (msgs Messages) ActionMenuPairADB() string {
+	return Catalog.Format(msgs.locale, "ActionMenuPairADB", nil)
+}
+
+// ActionMenuRepairADB says "Re-pair Wireless debugging (ADB)…"
+// in the language the app shows.
+func ActionMenuRepairADB() string { return In(i18n.Locale()).ActionMenuRepairADB() }
+
+// ActionMenuRepairADB says "Re-pair Wireless debugging (ADB)…"
+// in the language of msgs.
+func (msgs Messages) ActionMenuRepairADB() string {
+	return Catalog.Format(msgs.locale, "ActionMenuRepairADB", nil)
+}
+
+// PairADBModalTitle says "Pair Wireless debugging on {name}"
+// in the language the app shows.
+func PairADBModalTitle(name string) string { return In(i18n.Locale()).PairADBModalTitle(name) }
+
+// PairADBModalTitle says "Pair Wireless debugging on {name}"
+// in the language of msgs.
+func (msgs Messages) PairADBModalTitle(name string) string {
+	return Catalog.Format(msgs.locale, "PairADBModalTitle", map[string]any{"name": name})
+}
+
+// PairADBModalSub says "Pairs this computer with Wireless debugging so Wi-Fi connections and streaming start automatically without a USB cable."
+// in the language the app shows.
+func PairADBModalSub() string { return In(i18n.Locale()).PairADBModalSub() }
+
+// PairADBModalSub says "Pairs this computer with Wireless debugging so Wi-Fi connections and streaming start automatically without a USB cable."
+// in the language of msgs.
+func (msgs Messages) PairADBModalSub() string {
+	return Catalog.Format(msgs.locale, "PairADBModalSub", nil)
+}
+
+// PairADBModalBtn says "Pair Wireless ADB"
+// in the language the app shows.
+func PairADBModalBtn() string { return In(i18n.Locale()).PairADBModalBtn() }
+
+// PairADBModalBtn says "Pair Wireless ADB"
+// in the language of msgs.
+func (msgs Messages) PairADBModalBtn() string {
+	return Catalog.Format(msgs.locale, "PairADBModalBtn", nil)
+}
+
+// PairADBDoneTitle says "Wireless debugging is paired"
+// in the language the app shows.
+func PairADBDoneTitle() string { return In(i18n.Locale()).PairADBDoneTitle() }
+
+// PairADBDoneTitle says "Wireless debugging is paired"
+// in the language of msgs.
+func (msgs Messages) PairADBDoneTitle() string {
+	return Catalog.Format(msgs.locale, "PairADBDoneTitle", nil)
+}
+
+// PairADBDoneSub says "This computer can now connect automatically over Wi-Fi."
+// in the language the app shows.
+func PairADBDoneSub() string { return In(i18n.Locale()).PairADBDoneSub() }
+
+// PairADBDoneSub says "This computer can now connect automatically over Wi-Fi."
+// in the language of msgs.
+func (msgs Messages) PairADBDoneSub() string {
+	return Catalog.Format(msgs.locale, "PairADBDoneSub", nil)
+}
+
+// ActionDone says "Done"
+// in the language the app shows.
+func ActionDone() string { return In(i18n.Locale()).ActionDone() }
+
+// ActionDone says "Done"
+// in the language of msgs.
+func (msgs Messages) ActionDone() string {
+	return Catalog.Format(msgs.locale, "ActionDone", nil)
+}

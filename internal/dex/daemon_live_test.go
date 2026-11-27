@@ -477,6 +477,150 @@ func TestLiveFold8Daemon(t *testing.T) {
 	}
 }
 
+// TestLiveAppWindowScreenOffAndBoundedBack verifies on an attached emulator (`ANDROFUSE_LIVE_EMULATOR=1`)
+// or opt-in physical device (`ANDROFUSE_LIVE_DEVICE=1`) that an Independent App Window
+// (`SessionModeApp` equivalent) with AppGuard:
+//   - Keeps the virtual display awake and decoding frames while physical Display 0 is OFF (`Dozing` / `STATE_OFF`),
+//   - Prevents root-level Back from finishing the app into an empty black virtual display,
+//   - Releases all displays, wakelocks, and processes cleanly on close (`INV-03`).
+func TestLiveAppWindowScreenOffAndBoundedBack(t *testing.T) {
+	liveEmu := os.Getenv("ANDROFUSE_LIVE_EMULATOR") == "1"
+	liveDev := os.Getenv("ANDROFUSE_LIVE_DEVICE") == "1"
+	if !liveEmu && !liveDev {
+		t.Skip("set ANDROFUSE_LIVE_EMULATOR=1 or ANDROFUSE_LIVE_DEVICE=1 to run the live app-window screen-off + bounded back test")
+	}
+	client, err := adb.FindClient()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+
+	devs, err := client.Devices(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var serial string
+	for _, d := range devs {
+		if d.State != "device" {
+			continue
+		}
+		isEmu := strings.HasPrefix(d.Serial, "emulator-")
+		if liveEmu && isEmu {
+			serial = d.Serial
+			break
+		}
+		if liveDev && !isEmu {
+			serial = d.Serial
+			break
+		}
+	}
+	if serial == "" {
+		t.Skip("no matching Android emulator or live device attached")
+	}
+
+	lib := openDaemonLiveCore(t)
+	defer lib.Stop()
+	if _, err := lib.Start(core.Config{Version: version.Version, StateDir: t.TempDir(), Profile: "live-appguard"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Ensure Display 0 starts dark without permanently altering user state if already sleeping.
+	pwrBefore, _ := client.Shell(ctx, serial, "dumpsys power | grep -E 'mWakefulness=' || true")
+	wasAwake := strings.Contains(pwrBefore, "mWakefulness=Awake")
+	if wasAwake {
+		_, _ = client.Shell(ctx, serial, "input keyevent 223") // KEYCODE_SLEEP
+		time.Sleep(800 * time.Millisecond)
+		defer func() {
+			_, _ = client.Shell(ctx, serial, "input keyevent 224") // KEYCODE_WAKEUP
+		}()
+	}
+
+	const targetPkg = "com.android.settings"
+	sess, err := scrcpy.StartADB(ctx, client, lib, nil, scrcpy.LaunchConfig{
+		SessionID:             "live-appguard-test",
+		Serial:                serial,
+		NewDisplay:            "640x1120/220",
+		FlexDisplay:           true,
+		HideSystemDecorations: true,
+		StartAppPackage:       "+" + targetPkg,
+		MaxFPS:                60,
+		VideoBitRate:          6_000_000,
+		EnableControl:         true,
+		InitialWidth:          640,
+		InitialHeight:         1120,
+	})
+	if err != nil {
+		t.Fatalf("scrcpy.StartADB app window: %v", err)
+	}
+	defer sess.Close()
+
+	vdID, ok := sess.WaitVirtualDisplayID(6 * time.Second)
+	if !ok || vdID <= 0 {
+		t.Fatalf("WaitVirtualDisplayID = (%d, %v), want >0", vdID, ok)
+	}
+	t.Logf("Virtual display id=%d opened on %s while physical Display 0 was off (wasAwake=%v)", vdID, serial, wasAwake)
+
+	var rootBlocked atomic.Int32
+	guard, err := StartAppGuard(ctx, client, serial, vdID, targetPkg, func() {
+		rootBlocked.Add(1)
+	})
+	if err != nil {
+		t.Fatalf("StartAppGuard: %v", err)
+	}
+	defer guard.Stop()
+
+	st, err := sess.WaitDecoded(3, 12*time.Second)
+	if err != nil {
+		t.Fatalf("WaitDecoded with physical screen off: %v (stats=%+v)", err, st)
+	}
+
+	// Inspect physical Display 0 state, virtual display state, and Display Groups.
+	disp0Out, _ := client.Shell(ctx, serial, `dumpsys display | grep -A 1 'DisplayDeviceInfo{"Built-in Screen"' | head -n 4 || true`)
+	dispVDOut, _ := client.Shell(ctx, serial, `dumpsys display | grep -A 1 'DisplayDeviceInfo{"scrcpy"' | head -n 4 || true`)
+	dispGroupsOut, _ := client.Shell(ctx, serial, `dumpsys display | grep -A 6 'Display Groups:' | head -n 8 || true`)
+	t.Logf("Decoded %d frames (%dx%d hw=%v) | Display0=%q | VD=%q | Groups=%q",
+		st.FramesDecoded, st.NegotiatedWidth, st.NegotiatedHeight, st.HardwareAccelerated,
+		strings.TrimSpace(disp0Out), strings.TrimSpace(dispVDOut), strings.TrimSpace(dispGroupsOut))
+
+	if !strings.Contains(dispGroupsOut, "size=1") && (strings.Contains(disp0Out, "state ON") || strings.Contains(disp0Out, "mState=ON")) {
+		t.Fatalf("expected physical Display 0 to remain OFF in multi-DisplayGroup mode while AppGuard woke VD %d:\n%s", vdID, disp0Out)
+	}
+
+	// Exercise Bounded Back twice on root screen and confirm activity on vdID does not vanish.
+	acted1, bErr1 := guard.Back(3 * time.Second)
+	if bErr1 != nil {
+		t.Fatalf("guard.Back #1: %v", bErr1)
+	}
+	time.Sleep(400 * time.Millisecond)
+	acted2, bErr2 := guard.Back(3 * time.Second)
+	if bErr2 != nil {
+		t.Fatalf("guard.Back #2: %v", bErr2)
+	}
+	actOut, _ := client.Shell(ctx, serial, fmt.Sprintf(`dumpsys activity activities | awk '/Display #%d/{flag=1; next} /Display #/{flag=0} flag' | grep -E 'Hist #|Task\{|mResumedActivity|%s' | head -n 12 || true`, vdID, targetPkg))
+	t.Logf("Bounded Back results: acted1=%v acted2=%v rootBlocked=%d vdActivities=%q",
+		acted1, acted2, rootBlocked.Load(), strings.TrimSpace(actOut))
+	if acted1 || acted2 {
+		t.Fatalf("expected root-screen Bounded Back to block exit (acted1=%v acted2=%v), rootBlocked=%d", acted1, acted2, rootBlocked.Load())
+	}
+	if rootBlocked.Load() < 1 {
+		t.Fatalf("expected rootBlocked >= 1 on root screen, got %d", rootBlocked.Load())
+	}
+	if strings.TrimSpace(actOut) == "" {
+		t.Fatalf("expected >= 1 activity remaining on virtual display %d after Bounded Back", vdID)
+	}
+
+	guard.Stop()
+	sess.Close()
+	time.Sleep(1500 * time.Millisecond)
+	if disp, _ := client.Shell(ctx, serial, "dumpsys display | grep -i scrcpy || true"); strings.TrimSpace(disp) != "" {
+		t.Fatalf("residual scrcpy display after close:\n%s", disp)
+	}
+	if wl, _ := client.Shell(ctx, serial, `dumpsys power | awk '/^Wake Locks:/{flag=1; next} flag && /^[[:space:]]*$/{flag=0} flag' | grep -i 'androfuse:app-' || true`); strings.TrimSpace(wl) != "" {
+		t.Fatalf("residual active AppGuard wakelock after close:\n%s", wl)
+	}
+}
+
 func openDaemonLiveCore(t *testing.T) *core.Lib {
 	t.Helper()
 	name := core.LibraryName()

@@ -35,6 +35,17 @@ func TestBuildServerArgsAndEncoders(t *testing.T) {
 	if strings.Contains(joined, "start_app=") || strings.Contains(joined, "uhid") {
 		t.Fatalf("unexpected control-only flag in server args: %s", joined)
 	}
+	if !strings.Contains(joined, "power_on=false") || strings.Contains(joined, "power_on=true") {
+		t.Fatalf("expected power_on=false for independent app virtual display: %s", joined)
+	}
+	mirrorJoined := strings.Join(BuildServerArgs(0x1234abcd, LaunchConfig{}), " ")
+	if !strings.Contains(mirrorJoined, "power_on=true") {
+		t.Fatalf("expected power_on=true for phone mirror: %s", mirrorJoined)
+	}
+	desktopJoined := strings.Join(BuildServerArgs(0x1234abcd, LaunchConfig{NewDisplay: "1920x1080/160"}), " ")
+	if !strings.Contains(desktopJoined, "power_on=true") {
+		t.Fatalf("expected power_on=true for virtual desktop without start_app: %s", desktopJoined)
+	}
 	if !strings.Contains(joined, "new_display=1280x800/160") ||
 		!strings.Contains(joined, "flex_display=true") ||
 		!strings.Contains(joined, "vd_system_decorations=false") ||
@@ -95,6 +106,14 @@ func TestBuildServerArgsAndEncoders(t *testing.T) {
 	txtPkt := EncodeInjectText("你好")
 	if txtPkt[0] != MsgInjectText || txtPkt[4] != 6 || string(txtPkt[5:]) != "你好" {
 		t.Fatalf("unexpected InjectText packet: %x", txtPkt)
+	}
+
+	var w serverLogWriter
+	s := &Session{vdReadyCh: make(chan struct{}), doneCh: make(chan struct{})}
+	_, _ = w.Write([]byte("[server] INFO: Device: Samsung\n[server] INFO: New display: 640x1120/220 (id=14)\n"))
+	w.attachSession(s)
+	if id, ok := s.WaitVirtualDisplayID(time.Second); !ok || id != 14 {
+		t.Fatalf("WaitVirtualDisplayID = (%d, %v), want (14, true)", id, ok)
 	}
 }
 

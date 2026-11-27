@@ -244,6 +244,12 @@ func (a *App) sessionHeader(c *ui.Context, sw *SessionWindow, partner *SessionWi
 			ui.Box(c.Key("sess-drag2")).Grow(1).MinWidth(8).FillHeight().DragWindow()
 		}
 		if narrow {
+			if sw.spec.Mode == SessionModeApp && sw.scrcpySess != nil {
+				if iconBtn(c, "tool-back", iconBack, L.ActionBack(), false).Clicked() {
+					go sw.pressKey("back")
+					sw.surface.Focus(c)
+				}
+			}
 			iconBtn(c, "sess-more", iconMore, L.PaneMore(), false).PopoverMenuButton(func(m *ui.Menu) {
 				sw.toolMenu(m, c, true)
 				m.Separator()
@@ -377,13 +383,15 @@ func (sw *SessionWindow) toolbar(c *ui.Context, k tokens, room bool) {
 				go sw.pressKey("back")
 				focus()
 			}
-			if iconBtn(c, "tool-home", iconRecord, L.ActionHome(), false).Clicked() {
-				go sw.pressKey("home")
-				focus()
-			}
-			if iconBtn(c, "tool-recents", iconMaximize, L.ActionRecents(), false).Clicked() {
-				go sw.pressKey("recents")
-				focus()
+			if sw.spec.Mode != SessionModeApp {
+				if iconBtn(c, "tool-home", iconRecord, L.ActionHome(), false).Clicked() {
+					go sw.pressKey("home")
+					focus()
+				}
+				if iconBtn(c, "tool-recents", iconMaximize, L.ActionRecents(), false).Clicked() {
+					go sw.pressKey("recents")
+					focus()
+				}
 			}
 			ui.Box(c).Width(1).Height(20).Background(t.Border).Margin(0, 4)
 			if iconBtn(c, "tool-shot", iconScreenshot, L.ActionScreenshot(), false).Clicked() {
@@ -396,6 +404,11 @@ func (sw *SessionWindow) toolbar(c *ui.Context, k tokens, room bool) {
 			}
 			if iconBtn(c, "tool-full", iconFullscreen, L.ActionFullscreen(), false).Clicked() {
 				sw.toggleFullScreen()
+				focus()
+			}
+		} else if !room && s != nil && sw.spec.Mode == SessionModeApp {
+			if iconBtn(c, "tool-back", iconBack, L.ActionBack(), false).Clicked() {
+				go sw.pressKey("back")
 				focus()
 			}
 		}
@@ -415,6 +428,7 @@ func (sw *SessionWindow) toolMenu(m *ui.Menu, c *ui.Context, all bool) {
 		return
 	}
 	share := sw.spec.Mode == SessionModeShare
+	isApp := sw.spec.Mode == SessionModeApp
 	if sw.spec.Mode == SessionModeCamera {
 		sw.cameraMenu(m, all, muted, recording)
 		return
@@ -423,11 +437,13 @@ func (sw *SessionWindow) toolMenu(m *ui.Menu, c *ui.Context, all bool) {
 		if m.Item(L.ActionBack()).Chosen() {
 			go sw.pressKey("back")
 		}
-		if m.Item(L.ActionHome()).Chosen() {
-			go sw.pressKey("home")
-		}
-		if m.Item(L.ActionRecents()).Chosen() {
-			go sw.pressKey("recents")
+		if !isApp {
+			if m.Item(L.ActionHome()).Chosen() {
+				go sw.pressKey("home")
+			}
+			if m.Item(L.ActionRecents()).Chosen() {
+				go sw.pressKey("recents")
+			}
 		}
 		if m.Item(L.ActionScreenshot()).Chosen() {
 			sw.Screenshot()
@@ -462,7 +478,7 @@ func (sw *SessionWindow) toolMenu(m *ui.Menu, c *ui.Context, all bool) {
 			go func() { _ = s.SetDisplayPower(!next) }()
 		}
 	}
-	if !sw.spec.IsDeX && m.Item(L.ActionRotate()).Chosen() {
+	if !sw.spec.IsDeX && !isApp && m.Item(L.ActionRotate()).Chosen() {
 		go func() { _ = s.RotateDevice() }()
 	}
 	if m.Item(L.InputModeTouch()).Checked(touch).Chosen() {
@@ -685,11 +701,30 @@ func drawWindowButtons(c *ui.Context, win *mygo.Window, onClose func()) {
 }
 
 // pressKey presses Back, Home or Recents ("back", "home", "recents") on the session's phone:
-// through scrcpy's control socket, or through the Companion for its screen sharing.
+// through scrcpy's control socket, Bounded Back AppGuard for Independent App Windows, or
+// through the Companion for its screen sharing.
 func (sw *SessionWindow) pressKey(action string) {
 	sw.mu.Lock()
-	s, share := sw.scrcpySess, sw.shareKey
+	s, share, guard := sw.scrcpySess, sw.shareKey, sw.appGuard
 	sw.mu.Unlock()
+	if sw.spec.Mode == SessionModeApp {
+		if action != "back" {
+			return
+		}
+		if guard != nil {
+			acted, err := guard.Back(1500 * time.Millisecond)
+			if err == nil {
+				if !acted {
+					sw.flashNote(L.AppAtMainScreen())
+				}
+				return
+			}
+		}
+		if s != nil {
+			_ = s.TapKeycode(scrcpy.KeycodeBack)
+		}
+		return
+	}
 	if sw.spec.Mode == SessionModeShare {
 		if share != nil {
 			share(action)

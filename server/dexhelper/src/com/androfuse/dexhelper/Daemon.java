@@ -3,6 +3,7 @@ package com.androfuse.dexhelper;
 import android.content.AttributionSource;
 import android.content.Context;
 import android.content.pm.PackageManager;
+import android.hardware.display.DisplayManager;
 import android.net.LocalSocket;
 import android.net.LocalSocketAddress;
 import android.os.Binder;
@@ -15,8 +16,12 @@ import android.os.Process;
 import android.os.RemoteException;
 import android.system.Os;
 import android.system.StructStat;
+import android.view.Display;
 
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
+import java.io.DataInputStream;
+import java.io.EOFException;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -34,10 +39,14 @@ import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Persistent zero-idle-wakeup UID 2000 daemon (`PLAN` §9.2) for AndroFuse.
@@ -139,7 +148,7 @@ final class Daemon {
         String scrcpySha = new File(SCRCPY_SERVER_PATH).isFile() ? verifyAndHashJar(SCRCPY_SERVER_PATH) : "";
 
         CountDownLatch stopLatch = new CountDownLatch(1);
-        DaemonBinder binder = new DaemonBinder(authority, expectedUid, hasTrustedDisplay, helperSha, scrcpySha, stopLatch);
+        DaemonBinder binder = new DaemonBinder(sysCtx, authority, expectedUid, hasTrustedDisplay, helperSha, scrcpySha, stopLatch);
 
         try {
             pushBinderWithRetry(authority, binder, 15_000L);
@@ -273,6 +282,7 @@ final class Daemon {
         final ParcelFileDescriptor ctrlPfd;
         final LocalSocket videoSock;
         final LocalSocket ctrlSock;
+        volatile AppGuard appGuard;
         volatile boolean closed;
 
         ActiveSession(
@@ -298,6 +308,11 @@ final class Daemon {
                 return;
             }
             closed = true;
+            AppGuard g = appGuard;
+            appGuard = null;
+            if (g != null) {
+                try { g.close(); } catch (Throwable ignored) {}
+            }
             try { if (videoSock != null) videoSock.close(); } catch (Throwable ignored) {}
             try { if (ctrlSock != null) ctrlSock.close(); } catch (Throwable ignored) {}
             try { if (videoPfd != null) videoPfd.close(); } catch (Throwable ignored) {}
@@ -332,6 +347,7 @@ final class Daemon {
     }
 
     private static final class DaemonBinder extends Binder {
+        private final Context sysCtx;
         private final String authority;
         private final int expectedUid;
         private final boolean hasTrustedDisplay;
@@ -346,7 +362,8 @@ final class Daemon {
         private IBinder.DeathRecipient clientDeath;
         private boolean reattaching;
 
-        DaemonBinder(String authority, int expectedUid, boolean hasTrustedDisplay, String helperSha256, String scrcpySha256, CountDownLatch stopLatch) {
+        DaemonBinder(Context sysCtx, String authority, int expectedUid, boolean hasTrustedDisplay, String helperSha256, String scrcpySha256, CountDownLatch stopLatch) {
+            this.sysCtx = sysCtx;
             this.authority = authority;
             this.expectedUid = expectedUid;
             this.hasTrustedDisplay = hasTrustedDisplay;
@@ -460,9 +477,19 @@ final class Daemon {
                 case TX_LIST_APPS: {
                     data.enforceInterface(DESCRIPTOR);
                     enforceCaller();
-                    String json = listAppsJson();
-                    reply.writeNoException();
-                    reply.writeString(json);
+                    boolean useFd = data.dataAvail() > 0 && data.readInt() == 1;
+                    if (useFd) {
+                        ParcelFileDescriptor outPfd = ParcelFileDescriptor.CREATOR.createFromParcel(data);
+                        String skipCsv = data.dataAvail() > 0 ? data.readString() : "";
+                        reply.writeNoException();
+                        if (outPfd != null) {
+                            streamAppsJsonToFd(outPfd, skipCsv);
+                        }
+                    } else {
+                        String json = listAppsJson();
+                        reply.writeNoException();
+                        reply.writeString(json);
+                    }
                     return true;
                 }
                 default:
@@ -562,6 +589,8 @@ final class Daemon {
                 }
             }
 
+            boolean isAppMode = !scrcpyNewDisplay.isEmpty() && !safeStartApp.isEmpty() && !isNativeDeX;
+
             List<String> cmd = new ArrayList<>();
             cmd.add("/system/bin/app_process");
             cmd.add("/");
@@ -579,7 +608,7 @@ final class Daemon {
             // Keep scrcpy-server.jar on disk across repeated 5G/daemon sessions; process exit
             // still releases any VirtualDisplay via binder death.
             cmd.add("cleanup=false");
-            cmd.add("power_on=true");
+            cmd.add("power_on=" + (!isAppMode));
             if (maxSize > 0) {
                 cmd.add("max_size=" + Math.min(maxSize, 4096));
             }
@@ -601,16 +630,22 @@ final class Daemon {
                 cmd.add("start_app=" + safeStartApp);
             }
 
+            Set<Integer> existingDisplayIds = isAppMode ? snapshotDisplayIds(sysCtx) : null;
+
             java.lang.Process proc = null;
             LocalSocket videoSock = null;
             LocalSocket ctrlSock = null;
             StringBuilder serverLog = new StringBuilder();
+            int[] parsedNewDisplayId = new int[] { 0 };
             try {
                 ProcessBuilder pb = new ProcessBuilder(cmd);
                 pb.environment().put("CLASSPATH", SCRCPY_SERVER_PATH);
                 pb.redirectErrorStream(true);
                 proc = pb.start();
-                drainProcessOutput(proc, serverLog);
+
+                ActiveSession s = new ActiveSession(sessionId, proc, dexProc, videoPfd, ctrlPfd, null, null);
+                drainProcessOutput(proc, serverLog, isAppMode ? parsedNewDisplayId : null,
+                    isAppMode ? (vdId -> attachAppGuardAsync(s, vdId, safeStartApp)) : null);
 
                 String sockName = "scrcpy_" + scidHex;
                 videoSock = connectLocalRetry(sockName, proc, 8_000L);
@@ -620,20 +655,40 @@ final class Daemon {
                     ctrlSock = connectLocalRetry(sockName, proc, 5_000L);
                 }
 
-                ActiveSession s = new ActiveSession(sessionId, proc, dexProc, videoPfd, ctrlPfd, videoSock, ctrlSock);
+                ActiveSession bound = new ActiveSession(sessionId, proc, dexProc, videoPfd, ctrlPfd, videoSock, ctrlSock);
+                // Transfer any AppGuard already attached while sockets were connecting, or poll fallback display ID.
                 ActiveSession prev;
                 synchronized (sessionLock) {
-                    prev = sessions.put(sessionId, s);
+                    prev = sessions.put(sessionId, bound);
                 }
                 if (prev != null) {
                     prev.close();
                 }
+                if (isAppMode) {
+                    AppGuard existingGuard = s.appGuard;
+                    if (existingGuard != null) {
+                        s.appGuard = null;
+                        if (!bound.closed) {
+                            bound.appGuard = existingGuard;
+                        } else {
+                            existingGuard.close();
+                        }
+                    } else if (parsedNewDisplayId[0] > 0) {
+                        attachAppGuardAsync(bound, parsedNewDisplayId[0], safeStartApp);
+                    } else {
+                        pollAndAttachAppGuardAsync(bound, existingDisplayIds, safeStartApp);
+                    }
+                }
 
-                pumpPair(s, videoSock.getInputStream(), new FileOutputStream(videoPfd.getFileDescriptor()), true);
-                pumpPair(s, new FileInputStream(videoPfd.getFileDescriptor()), videoSock.getOutputStream(), true);
+                pumpPair(bound, videoSock.getInputStream(), new FileOutputStream(videoPfd.getFileDescriptor()), true);
+                pumpPair(bound, new FileInputStream(videoPfd.getFileDescriptor()), videoSock.getOutputStream(), true);
                 if (wantCtrl && ctrlSock != null) {
-                    pumpPair(s, ctrlSock.getInputStream(), new FileOutputStream(ctrlPfd.getFileDescriptor()), false);
-                    pumpPair(s, new FileInputStream(ctrlPfd.getFileDescriptor()), ctrlSock.getOutputStream(), false);
+                    pumpPair(bound, ctrlSock.getInputStream(), new FileOutputStream(ctrlPfd.getFileDescriptor()), false);
+                    if (isAppMode) {
+                        pumpCtrlForAppSession(bound, new FileInputStream(ctrlPfd.getFileDescriptor()), ctrlSock.getOutputStream());
+                    } else {
+                        pumpPair(bound, new FileInputStream(ctrlPfd.getFileDescriptor()), ctrlSock.getOutputStream(), false);
+                    }
                 }
             } catch (Throwable t) {
                 try { if (videoSock != null) videoSock.close(); } catch (Throwable ignored) {}
@@ -648,6 +703,266 @@ final class Daemon {
                 }
                 throw new IllegalStateException("scrcpy daemon session failed: " + t.getMessage() + " (" + serverLog + ")", t);
             }
+        }
+
+        private static final Pattern NEW_DISPLAY_ID_PATTERN = Pattern.compile("New display: .*\\(id=(\\d+)\\)");
+
+        private interface IntConsumer {
+            void accept(int value);
+        }
+
+        private void attachAppGuardAsync(ActiveSession s, int vdId, String startApp) {
+            if (vdId <= 0 || s == null || s.closed) {
+                return;
+            }
+            Thread t = new Thread(() -> {
+                if (s.closed || s.appGuard != null) {
+                    return;
+                }
+                try {
+                    AppGuard guard = AppGuard.start(sysCtx, vdId, startApp, null);
+                    if (s.closed) {
+                        guard.close();
+                        return;
+                    }
+                    s.appGuard = guard;
+                } catch (Throwable ignored) {}
+            }, "AndroFuse-Daemon-AppGuard-" + vdId);
+            t.setDaemon(true);
+            t.start();
+        }
+
+        private void pollAndAttachAppGuardAsync(ActiveSession s, Set<Integer> beforeIds, String startApp) {
+            Thread t = new Thread(() -> {
+                long deadline = System.currentTimeMillis() + 3000L;
+                while (!s.closed && s.appGuard == null && System.currentTimeMillis() < deadline) {
+                    int found = findNewScrcpyDisplayId(sysCtx, beforeIds);
+                    if (found > 0) {
+                        attachAppGuardAsync(s, found, startApp);
+                        return;
+                    }
+                    try { Thread.sleep(100L); } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
+                }
+            }, "AndroFuse-Daemon-AppGuardPoll");
+            t.setDaemon(true);
+            t.start();
+        }
+
+        private static Set<Integer> snapshotDisplayIds(Context ctx) {
+            Set<Integer> ids = new HashSet<>();
+            try {
+                DisplayManager dm = (DisplayManager) ctx.getSystemService(Context.DISPLAY_SERVICE);
+                if (dm != null) {
+                    for (Display d : dm.getDisplays()) {
+                        ids.add(d.getDisplayId());
+                    }
+                }
+            } catch (Throwable ignored) {}
+            return ids;
+        }
+
+        private static int findNewScrcpyDisplayId(Context ctx, Set<Integer> beforeIds) {
+            try {
+                DisplayManager dm = (DisplayManager) ctx.getSystemService(Context.DISPLAY_SERVICE);
+                if (dm != null) {
+                    for (Display d : dm.getDisplays()) {
+                        int id = d.getDisplayId();
+                        if (id > 0 && (beforeIds == null || !beforeIds.contains(id)) && "scrcpy".equals(d.getName())) {
+                            return id;
+                        }
+                    }
+                }
+            } catch (Throwable ignored) {}
+            return 0;
+        }
+
+        /**
+         * Filters scrcpy v5.0.1 client-to-server control messages for Independent App Window sessions.
+         *
+         * <p>Notes: Drops Home (3) and Recents (187), and evaluates {@link AppGuard#shouldAllowBack()} on
+         * KEYCODE_BACK (4) and TYPE_BACK_OR_SCREEN_ON (4) key-down before forwarding the matching up event.
+         */
+        private void pumpCtrlForAppSession(ActiveSession s, InputStream rawIn, OutputStream out) {
+            Thread t = new Thread(() -> {
+                DataInputStream in = new DataInputStream(rawIn);
+                boolean allowBackDown = true;
+                try {
+                    while (!s.closed) {
+                        int type;
+                        try {
+                            type = in.readUnsignedByte();
+                        } catch (EOFException eof) {
+                            break;
+                        }
+                        switch (type) {
+                            case 0: { // TYPE_INJECT_KEYCODE (14 bytes total)
+                                int action = in.readUnsignedByte();
+                                int keycode = in.readInt();
+                                int repeat = in.readInt();
+                                int meta = in.readInt();
+                                if (keycode == 3 || keycode == 187) {
+                                    continue;
+                                }
+                                if (keycode == 4) {
+                                    if (action == 0) {
+                                        AppGuard g = s.appGuard;
+                                        allowBackDown = (g == null) || g.shouldAllowBack();
+                                    }
+                                    if (!allowBackDown) {
+                                        continue;
+                                    }
+                                }
+                                byte[] pkt = new byte[14];
+                                pkt[0] = 0;
+                                pkt[1] = (byte) action;
+                                putIntBE(pkt, 2, keycode);
+                                putIntBE(pkt, 6, repeat);
+                                putIntBE(pkt, 10, meta);
+                                out.write(pkt);
+                                out.flush();
+                                break;
+                            }
+                            case 4: { // TYPE_BACK_OR_SCREEN_ON (2 bytes total)
+                                int action = in.readUnsignedByte();
+                                if (action == 0) {
+                                    AppGuard g = s.appGuard;
+                                    allowBackDown = (g == null) || g.shouldAllowBack();
+                                }
+                                if (!allowBackDown) {
+                                    continue;
+                                }
+                                out.write(new byte[] { 4, (byte) action });
+                                out.flush();
+                                break;
+                            }
+                            case 1: // TYPE_INJECT_TEXT: u32 len + payload
+                            case 22: { // TYPE_SCAN_FILE: u32 len + payload
+                                int len = in.readInt();
+                                if (len < 0 || len > 1024 * 1024) {
+                                    return;
+                                }
+                                byte[] pkt = new byte[5 + len];
+                                pkt[0] = (byte) type;
+                                putIntBE(pkt, 1, len);
+                                in.readFully(pkt, 5, len);
+                                out.write(pkt);
+                                out.flush();
+                                break;
+                            }
+                            case 2: // TYPE_INJECT_TOUCH_EVENT (32 bytes total)
+                                forwardFixedControl(type, 31, in, out);
+                                break;
+                            case 3: // TYPE_INJECT_SCROLL_EVENT (21 bytes total)
+                                forwardFixedControl(type, 20, in, out);
+                                break;
+                            case 5: // EXPAND_NOTIFICATION_PANEL
+                            case 6: // EXPAND_SETTINGS_PANEL
+                            case 7: // COLLAPSE_PANELS
+                            case 11: // ROTATE_DEVICE
+                            case 15: // OPEN_HARD_KEYBOARD_SETTINGS
+                            case 17: // RESET_VIDEO
+                            case 18: // CAMERA_ZOOM_IN
+                            case 19: // CAMERA_ZOOM_OUT
+                                out.write(type);
+                                out.flush();
+                                break;
+                            case 8: // GET_CLIPBOARD
+                            case 10: // SET_DISPLAY_POWER
+                            case 20: // CAMERA_SET_TORCH
+                                forwardFixedControl(type, 1, in, out);
+                                break;
+                            case 9: { // TYPE_SET_CLIPBOARD: u64 seq + u8 paste + u32 len + payload
+                                byte[] hdr = new byte[14];
+                                hdr[0] = 9;
+                                in.readFully(hdr, 1, 13);
+                                int len = ((hdr[10] & 0xff) << 24) | ((hdr[11] & 0xff) << 16)
+                                    | ((hdr[12] & 0xff) << 8) | (hdr[13] & 0xff);
+                                if (len < 0 || len > 1024 * 1024) {
+                                    return;
+                                }
+                                byte[] pkt = new byte[14 + len];
+                                System.arraycopy(hdr, 0, pkt, 0, 14);
+                                in.readFully(pkt, 14, len);
+                                out.write(pkt);
+                                out.flush();
+                                break;
+                            }
+                            case 12: { // TYPE_UHID_CREATE: u16 id + u16 vid + u16 pid + u8 nameLen + name + u16 descLen + desc
+                                byte[] head = new byte[8];
+                                head[0] = 12;
+                                in.readFully(head, 1, 7);
+                                int nameLen = head[7] & 0xff;
+                                byte[] nameBuf = new byte[nameLen];
+                                in.readFully(nameBuf);
+                                byte[] dLenBuf = new byte[2];
+                                in.readFully(dLenBuf);
+                                int descLen = ((dLenBuf[0] & 0xff) << 8) | (dLenBuf[1] & 0xff);
+                                byte[] pkt = new byte[8 + nameLen + 2 + descLen];
+                                System.arraycopy(head, 0, pkt, 0, 8);
+                                System.arraycopy(nameBuf, 0, pkt, 8, nameLen);
+                                System.arraycopy(dLenBuf, 0, pkt, 8 + nameLen, 2);
+                                in.readFully(pkt, 10 + nameLen, descLen);
+                                out.write(pkt);
+                                out.flush();
+                                break;
+                            }
+                            case 13: { // TYPE_UHID_INPUT: u16 id + u16 len + data
+                                byte[] hdr = new byte[5];
+                                hdr[0] = 13;
+                                in.readFully(hdr, 1, 4);
+                                int len = ((hdr[3] & 0xff) << 8) | (hdr[4] & 0xff);
+                                byte[] pkt = new byte[5 + len];
+                                System.arraycopy(hdr, 0, pkt, 0, 5);
+                                in.readFully(pkt, 5, len);
+                                out.write(pkt);
+                                out.flush();
+                                break;
+                            }
+                            case 14: // TYPE_UHID_DESTROY (3 bytes total)
+                                forwardFixedControl(type, 2, in, out);
+                                break;
+                            case 16: { // TYPE_START_APP: u8 len + pkg
+                                int len = in.readUnsignedByte();
+                                byte[] pkt = new byte[2 + len];
+                                pkt[0] = 16;
+                                pkt[1] = (byte) len;
+                                in.readFully(pkt, 2, len);
+                                out.write(pkt);
+                                out.flush();
+                                break;
+                            }
+                            case 21: // TYPE_RESIZE_DISPLAY (5 bytes total)
+                                forwardFixedControl(type, 4, in, out);
+                                break;
+                            default:
+                                return;
+                        }
+                    }
+                } catch (Throwable ignored) {
+                } finally {
+                    closeSession(s.id);
+                }
+            }, "AndroFuse-Daemon-AppCtrl-" + s.id);
+            t.setDaemon(true);
+            t.start();
+        }
+
+        private static void forwardFixedControl(int type, int tailBytes, DataInputStream in, OutputStream out) throws IOException {
+            byte[] pkt = new byte[1 + tailBytes];
+            pkt[0] = (byte) type;
+            in.readFully(pkt, 1, tailBytes);
+            out.write(pkt);
+            out.flush();
+        }
+
+        private static void putIntBE(byte[] dst, int off, int v) {
+            dst[off] = (byte) (v >>> 24);
+            dst[off + 1] = (byte) (v >>> 16);
+            dst[off + 2] = (byte) (v >>> 8);
+            dst[off + 3] = (byte) v;
         }
 
         private static LocalSocket connectLocalRetry(String sockName, java.lang.Process proc, long timeoutMs) throws IOException {
@@ -769,16 +1084,30 @@ final class Daemon {
             t.start();
         }
 
-        private static void drainProcessOutput(java.lang.Process proc, StringBuilder log) {
+        private static void drainProcessOutput(java.lang.Process proc, StringBuilder log, int[] outDisplayId, IntConsumer onDisplayId) {
             Thread t = new Thread(() -> {
-                byte[] buf = new byte[1024];
-                try (InputStream in = proc.getInputStream()) {
-                    while (true) {
-                        int n = in.read(buf);
-                        if (n <= 0) break;
+                boolean notified = false;
+                try (BufferedReader br = new BufferedReader(new InputStreamReader(proc.getInputStream(), StandardCharsets.UTF_8))) {
+                    String line;
+                    while ((line = br.readLine()) != null) {
                         synchronized (log) {
                             if (log.length() < 1024) {
-                                log.append(new String(buf, 0, n, StandardCharsets.UTF_8));
+                                log.append(line).append('\n');
+                            }
+                        }
+                        if (!notified && onDisplayId != null) {
+                            Matcher m = NEW_DISPLAY_ID_PATTERN.matcher(line);
+                            if (m.find()) {
+                                try {
+                                    int id = Integer.parseInt(m.group(1));
+                                    if (id > 0) {
+                                        notified = true;
+                                        if (outDisplayId != null) {
+                                            outDisplayId[0] = id;
+                                        }
+                                        onDisplayId.accept(id);
+                                    }
+                                } catch (NumberFormatException ignored) {}
                             }
                         }
                     }
@@ -786,6 +1115,114 @@ final class Daemon {
             }, "AndroFuse-Scrcpy-Log");
             t.setDaemon(true);
             t.start();
+        }
+
+        private void streamAppsJsonToFd(ParcelFileDescriptor outPfd, String skipCsv) {
+            String cleanSkip = sanitizeSkipIconsCsv(skipCsv);
+            Thread t = new Thread(() -> {
+                try (ParcelFileDescriptor owned = outPfd;
+                     OutputStream out = new FileOutputStream(owned.getFileDescriptor())) {
+                    verifyPinnedJar(DEX_HELPER_PATH, helperSha256);
+                    out.write('[');
+                    boolean first = true;
+                    String resume = "";
+                    Set<String> seenPackages = new HashSet<>();
+                    for (int attempt = 0; attempt < 4; attempt++) {
+                        List<String> cmd = new ArrayList<>();
+                        cmd.add("/system/bin/app_process");
+                        cmd.add("/");
+                        cmd.add("com.androfuse.dexhelper.Main");
+                        cmd.add("apps");
+                        if (!cleanSkip.isEmpty()) {
+                            cmd.add("--skip-icons");
+                            cmd.add(cleanSkip);
+                        }
+                        if (!resume.isEmpty()) {
+                            cmd.add("--resume");
+                            cmd.add(resume);
+                        }
+                        ProcessBuilder pb = new ProcessBuilder(cmd);
+                        pb.environment().put("CLASSPATH", DEX_HELPER_PATH);
+                        java.lang.Process p = pb.start();
+                        String lastIconPkg = "";
+                        boolean sawDone = false;
+                        try (BufferedReader br = new BufferedReader(new InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
+                            String line;
+                            while ((line = br.readLine()) != null) {
+                                String trimmed = line.trim();
+                                if (trimmed.startsWith("AFDEX1|APPS_DONE|")) {
+                                    sawDone = true;
+                                } else if (trimmed.startsWith("AFDEX1|ICON|")) {
+                                    lastIconPkg = trimmed.substring("AFDEX1|ICON|".length()).trim();
+                                } else if (trimmed.startsWith("AFDEX1|APP|")) {
+                                    String item = trimmed.substring("AFDEX1|APP|".length()).trim();
+                                    String pkg = extractJsonPackage(item);
+                                    if (!pkg.isEmpty() && !seenPackages.add(pkg)) {
+                                        continue;
+                                    }
+                                    if (!first) {
+                                        out.write(',');
+                                    }
+                                    out.write(item.getBytes(StandardCharsets.UTF_8));
+                                    first = false;
+                                }
+                            }
+                        }
+                        boolean finished = p.waitFor(25L, TimeUnit.SECONDS);
+                        if (!finished) {
+                            p.destroyForcibly();
+                        }
+                        int code = finished ? p.exitValue() : -1;
+                        if (sawDone || (finished && code == 0)) {
+                            break;
+                        }
+                        if (lastIconPkg.isEmpty()
+                            || !lastIconPkg.matches("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+")
+                            || lastIconPkg.equals(resume)) {
+                            break;
+                        }
+                        resume = lastIconPkg;
+                    }
+                    out.write(']');
+                    out.flush();
+                } catch (Throwable ignored) {}
+            }, "AndroFuse-Daemon-ListApps");
+            t.setDaemon(true);
+            t.start();
+        }
+
+        private static String sanitizeSkipIconsCsv(String csv) {
+            if (csv == null || csv.trim().isEmpty()) {
+                return "";
+            }
+            StringBuilder sb = new StringBuilder();
+            for (String part : csv.split(",")) {
+                String tok = part.trim();
+                if (tok.matches("[A-Za-z0-9_.-]{2,160}")) {
+                    if (sb.length() > 0) {
+                        sb.append(',');
+                    }
+                    sb.append(tok);
+                }
+            }
+            return sb.toString();
+        }
+
+        private static String extractJsonPackage(String item) {
+            if (item == null) {
+                return "";
+            }
+            String key = "\"package\":\"";
+            int idx = item.indexOf(key);
+            if (idx < 0) {
+                return "";
+            }
+            int start = idx + key.length();
+            int end = item.indexOf('"', start);
+            if (end <= start) {
+                return "";
+            }
+            return item.substring(start, end);
         }
 
         private String listAppsJson() {

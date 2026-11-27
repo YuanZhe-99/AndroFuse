@@ -28,16 +28,19 @@ type addWizardState struct {
 	cancel       context.CancelFunc
 }
 
-// activateState holds the state of the guided one-time "Activate Enhanced mode" modal dialog.
+// activateState holds the state of the guided one-time "Activate Enhanced mode" or manual
+// "Pair Wireless debugging (ADB)" modal dialog.
 type activateState struct {
-	Open     bool
-	Hash     string
-	PairCode string
-	Busy     bool
-	Notice   string
-	Done     bool
-	ThenOpen int
-	cancel   context.CancelFunc
+	Open        bool
+	Hash        string
+	PairADBOnly bool
+	AdvOpen     bool
+	PairCode    string
+	Busy        bool
+	Notice      string
+	Done        bool
+	ThenOpen    int
+	cancel      context.CancelFunc
 }
 
 // OpenAddWizard opens the guided "+ Add a phone" modal at tab (0 USB, 1 Same Wi-Fi, 2 Cross-network).
@@ -222,19 +225,49 @@ func (a *App) PairWifiMDNS(svc adb.MDNSService, rawCode string) {
 // remembering thenOpen (`openAsDeX`, `openAsApp`, `openAsScreen`) to continue once ready.
 // Side effects: starts background 2s polling of Companion status and USB/Wi-Fi ADB availability.
 func (a *App) OpenActivateModal(hash string, thenOpen int) {
+	a.openActivateFlow(hash, thenOpen, false)
+}
+
+// OpenPairADBModal opens the guided Wireless debugging (ADB) pairing modal for a remembered
+// phone (typically one already paired via Enhanced mode over cross-network mesh).
+func (a *App) OpenPairADBModal(hash string) {
+	a.openActivateFlow(hash, 0, true)
+}
+
+func (a *App) openActivateFlow(hash string, thenOpen int, adbOnly bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	a.update(func() {
 		if a.activate.cancel != nil {
 			a.activate.cancel()
 		}
 		a.activate = activateState{
-			Open:     true,
-			Hash:     hash,
-			ThenOpen: thenOpen,
-			cancel:   cancel,
+			Open:        true,
+			Hash:        hash,
+			PairADBOnly: adbOnly,
+			ThenOpen:    thenOpen,
+			cancel:      cancel,
 		}
 	})
 	go a.startActivatePoll(ctx, hash)
+}
+
+func (a *App) hasOnlineWirelessADB(hash string) bool {
+	if hash == "" || a.isADBAuthNeeded(hash) {
+		return false
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, d := range a.devices {
+		if d.HardwareHash != hash && d.Target.DeviceHash != hash {
+			continue
+		}
+		for _, tr := range d.Transports {
+			if tr.State == "device" && (tr.Transport == adb.TransportTLSWiFi || tr.Transport == adb.TransportTCP) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // CloseActivateModal closes the Enhanced mode activation modal and stops its background poll.
@@ -242,6 +275,8 @@ func (a *App) CloseActivateModal() {
 	a.mu.Lock()
 	cancel := a.activate.cancel
 	a.activate.Open = false
+	a.activate.PairADBOnly = false
+	a.activate.AdvOpen = false
 	a.activate.Busy = false
 	a.activate.Notice = ""
 	a.activate.cancel = nil
@@ -253,12 +288,15 @@ func (a *App) CloseActivateModal() {
 }
 
 // startActivatePoll polls Companion status and ADB availability every 2 seconds while the
-// Activation modal is open, automatically bootstrapping the daemon as soon as USB or trusted
-// Wi-Fi Debugging becomes reachable (`INV-07`).
+// Activation or Wireless debugging modal is open, automatically bootstrapping or marking paired
+// as soon as USB or trusted Wi-Fi Debugging becomes reachable (`INV-07`).
 func (a *App) startActivatePoll(ctx context.Context, hash string) {
 	tick := time.NewTicker(2 * time.Second)
 	defer tick.Stop()
 	poll := func() bool {
+		a.mu.Lock()
+		adbOnly := a.activate.PairADBOnly
+		a.mu.Unlock()
 		a.RefreshDevices()
 		r, ok := a.RememberedFor(hash)
 		if !ok {
@@ -289,7 +327,28 @@ func (a *App) startActivatePoll(ctx context.Context, hash string) {
 				}
 			}
 		}
-		if st.DaemonReady && st.DaemonTrustedDisplay {
+		if !adbOnly && st.DaemonReady && st.DaemonTrustedDisplay {
+			a.update(func() {
+				a.activate.Done = true
+				a.activate.Busy = false
+				a.activate.Notice = ""
+			})
+			return true
+		}
+		if adbOnly && a.hasOnlineWirelessADB(hash) {
+			if r.Companion != nil && !st.DaemonReady {
+				bctx, bcancel := context.WithTimeout(ctx, 12*time.Second)
+				if cand, found := a.discoverAndConnectADB(bctx, hash, false); found {
+					if client, _, err := a.ensureADBAndLeases(); err == nil {
+						apkPath, localHash := a.localCompanionAPK()
+						needsAPK := apkPath != "" && localHash != "" && st.AppBuildHash != "" && !strings.EqualFold(st.AppBuildHash, localHash)
+						_ = a.bootstrapDaemonOverSerial(bctx, client, r, cand.Serial, apkPath, needsAPK, true)
+					}
+				}
+				bcancel()
+			}
+			a.setADBAuthNeeded(hash, false)
+			a.RefreshDevices()
 			a.update(func() {
 				a.activate.Done = true
 				a.activate.Busy = false
@@ -298,14 +357,22 @@ func (a *App) startActivatePoll(ctx context.Context, hash string) {
 			return true
 		}
 		onlineADB := a.hasOnlineADB(hash)
-		if onlineADB || (st.NetworkType == "wifi" && st.WirelessADBPort > 0 && !a.isADBAuthNeeded(hash)) {
+		if (!adbOnly && onlineADB) || (st.NetworkType == "wifi" && st.WirelessADBPort > 0 && !a.isADBAuthNeeded(hash)) {
 			bctx, bcancel := context.WithTimeout(ctx, 18*time.Second)
 			cand, found := a.discoverAndConnectADB(bctx, hash, false)
 			if found {
+				if adbOnly && !strings.Contains(cand.Serial, ":") {
+					bcancel()
+					return false
+				}
 				if client, _, err := a.ensureADBAndLeases(); err == nil {
 					apkPath, localHash := a.localCompanionAPK()
 					needsAPK := apkPath != "" && localHash != "" && st.AppBuildHash != "" && !strings.EqualFold(st.AppBuildHash, localHash)
-					if a.bootstrapDaemonOverSerial(bctx, client, r, cand.Serial, apkPath, needsAPK, true) {
+					bootOK := adbOnly && r.Companion == nil
+					if r.Companion != nil {
+						bootOK = a.bootstrapDaemonOverSerial(bctx, client, r, cand.Serial, apkPath, needsAPK, !st.DaemonReady)
+					}
+					if bootOK || adbOnly {
 						bcancel()
 						a.setADBAuthNeeded(hash, false)
 						a.RefreshDevices()
@@ -339,10 +406,12 @@ func (a *App) startActivatePoll(ctx context.Context, hash string) {
 
 // ActivatePairAndBootstrap pairs desktop ADB to the phone using the 6-digit Wireless debugging
 // pairing code (either directly via LAN mDNS/Wi-Fi IP or tunneled through Companion when
-// WirelessADBPairPort is reported), then starts the Enhanced mode daemon once (`dex.StartDaemon`).
+// WirelessADBPairPort is reported), then starts the Enhanced mode daemon once (`dex.StartDaemon`)
+// unless PairADBOnly is requested and Enhanced mode is already ready or absent.
 func (a *App) ActivatePairAndBootstrap() {
 	a.mu.Lock()
 	hash := a.activate.Hash
+	adbOnly := a.activate.PairADBOnly
 	code := strings.ReplaceAll(strings.TrimSpace(a.activate.PairCode), " ", "")
 	svcs := append([]adb.MDNSService(nil), a.mdnsServices...)
 	a.mu.Unlock()
@@ -382,6 +451,11 @@ func (a *App) ActivatePairAndBootstrap() {
 				break
 			}
 		}
+		if pairAddr == "" {
+			if unpaired := a.unpairedPairMDNSServices(); len(unpaired) == 1 {
+				pairAddr = unpaired[0].Addr
+			}
+		}
 		var pairErr error
 		paired := false
 		if pairAddr != "" {
@@ -395,7 +469,10 @@ func (a *App) ActivatePairAndBootstrap() {
 			pctx, pcancel := context.WithTimeout(ctx, 8*time.Second)
 			_, pairErr = client.PairTLS(pctx, directPair, code)
 			pcancel()
-			paired = pairErr == nil
+			if pairErr == nil {
+				paired = true
+				pairAddr = directPair
+			}
 		}
 		// Fall back to tunneling the pairing port through Companion if direct LAN is blocked/unavailable.
 		if !paired && st.WirelessADBPairPort > 0 && r.Companion != nil {
@@ -429,6 +506,35 @@ func (a *App) ActivatePairAndBootstrap() {
 		}
 		a.setADBAuthNeeded(hash, false)
 		cand, found := a.discoverAndConnectADB(ctx, hash, true)
+		if !found && pairAddr != "" {
+			host := hostFromAddr(pairAddr)
+			for i := 0; i < 3 && ctx.Err() == nil && !found; i++ {
+				curSvcs, _ := client.MDNSServices(ctx)
+				for _, cs := range curSvcs {
+					if cs.CanConnect && cs.Addr != "" && ((cs.HardwareHash != "" && cs.HardwareHash == hash) || sameIPHost(cs.Addr, pairAddr)) {
+						cctx, ccancel := context.WithTimeout(ctx, 8*time.Second)
+						_, cerr := client.ConnectTLS(cctx, cs.Addr, false)
+						ccancel()
+						if cerr == nil {
+							a.noteWirelessEndpoint(hash, cs.Addr)
+							cand = adb.Device{Serial: cs.Addr, State: "device", Transport: adb.TransportTLSWiFi, DeviceHash: hash}
+							found = true
+							break
+						}
+					}
+				}
+				if !found {
+					time.Sleep(700 * time.Millisecond)
+				}
+			}
+			if !found && host != "" && !strings.HasPrefix(host, "127.") {
+				if ser, _, cerr := a.findAndConnect(ctx, host, 0); cerr == nil && ser != "" {
+					a.noteWirelessEndpoint(hash, ser)
+					cand = adb.Device{Serial: ser, State: "device", Transport: adb.TransportTLSWiFi, DeviceHash: hash}
+					found = true
+				}
+			}
+		}
 		if !found {
 			a.update(func() {
 				a.activate.Busy = false
@@ -436,9 +542,18 @@ func (a *App) ActivatePairAndBootstrap() {
 			})
 			return
 		}
+		if adbOnly && (r.Companion == nil || (st.DaemonReady && st.DaemonTrustedDisplay)) {
+			a.RefreshDevices()
+			a.update(func() {
+				a.activate.Done = true
+				a.activate.Busy = false
+				a.activate.Notice = ""
+			})
+			return
+		}
 		apkPath, localHash := a.localCompanionAPK()
 		needsAPK := apkPath != "" && localHash != "" && st.AppBuildHash != "" && !strings.EqualFold(st.AppBuildHash, localHash)
-		if !a.bootstrapDaemonOverSerial(ctx, client, r, cand.Serial, apkPath, needsAPK, true) {
+		if r.Companion != nil && !a.bootstrapDaemonOverSerial(ctx, client, r, cand.Serial, apkPath, needsAPK, !st.DaemonReady) && !adbOnly {
 			a.update(func() {
 				a.activate.Busy = false
 				a.activate.Notice = L.FailDeX()
@@ -630,7 +745,8 @@ func (a *App) wizardMeshTab(c *ui.Context, k tokens) {
 	}
 }
 
-// activateModal renders the guided one-time "Activate Enhanced mode" dialog with live status chips.
+// activateModal renders the guided one-time "Activate Enhanced mode" or manual
+// "Pair Wireless debugging (ADB)" dialog with live status chips.
 func (a *App) activateModal(c *ui.Context, k tokens) {
 	a.mu.Lock()
 	act := a.activate
@@ -646,6 +762,11 @@ func (a *App) activateModal(c *ui.Context, k tokens) {
 	st, hasSt := a.peerStatusFor(act.Hash)
 	t := c.Theme()
 	name := r.displayName()
+	adbOnly := act.PairADBOnly
+	title, sub := L.ActivateTitle(name), L.ActivateSub()
+	if adbOnly {
+		title, sub = L.PairADBModalTitle(name), L.PairADBModalSub()
+	}
 
 	ui.DialogBase(c.Key("activate-modal"), &a.activate.Open, func(backdrop, panel ui.Element) {
 		backdrop.Background(ui.RGBA(0, 0, 0, 0.28)).Center()
@@ -653,8 +774,8 @@ func (a *App) activateModal(c *ui.Context, k tokens) {
 
 		ui.Row(c.Key("act-head")).FillWidth().Padding(18, 22, 14, 22).Gap(12).AlignItems(ui.Center).Children(func() {
 			ui.Column(c).Grow(1).MinWidth(0).Gap(2).Children(func() {
-				ui.Text(c, L.ActivateTitle(name)).Bold().FontSize(sizeTitle)
-				ui.Text(c, L.ActivateSub()).FontSize(sizeSmall).TextColor(k.text2)
+				ui.Text(c, title).Bold().FontSize(sizeTitle)
+				ui.Text(c, sub).FontSize(sizeSmall).TextColor(k.text2)
 			})
 			if iconBtn(c, "act-close", winClose, L.PaneClose(), false).Clicked() {
 				a.CloseActivateModal()
@@ -665,18 +786,24 @@ func (a *App) activateModal(c *ui.Context, k tokens) {
 		ui.Scroll(c.Key("act-scroll")).Grow(1).FillWidth().Padding(18, 22).Children(func() {
 			ui.Column(c.Key("act-body")).FillWidth().Gap(14).Children(func() {
 				if act.Done {
+					doneTitle, doneSub, btnLabel := L.ActivateDoneTitle(), L.ActivateDoneSub(), L.ActivateOpenNow()
+					if adbOnly {
+						doneTitle, doneSub, btnLabel = L.PairADBDoneTitle(), L.PairADBDoneSub(), L.ActionDone()
+					}
 					ui.Column(c.Key("act-done")).FillWidth().Padding(16).Gap(10).Radius(radiusMD).Background(k.good.Alpha(0.12)).Border(1, k.good).Children(func() {
 						ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 							ui.Icon(c, iconCheck).Size(18, 18).TextColor(k.goodText)
-							ui.Text(c, L.ActivateDoneTitle()).Bold().FontSize(sizeHeading).TextColor(k.goodText)
+							ui.Text(c, doneTitle).Bold().FontSize(sizeHeading).TextColor(k.goodText)
 						})
-						ui.Text(c, L.ActivateDoneSub()).FontSize(sizeSmall).TextColor(k.text2)
+						ui.Text(c, doneSub).FontSize(sizeSmall).TextColor(k.text2)
 						ui.Row(c).Padding(4, 0, 0, 0).Gap(8).Children(func() {
-							if ui.PrimaryButton(c.Key("act-cont"), L.ActivateOpenNow()).Clicked() {
+							if ui.PrimaryButton(c.Key("act-cont"), btnLabel).Clicked() {
 								thenOpen := act.ThenOpen
 								hash := act.Hash
 								a.CloseActivateModal()
-								a.runAfterEnhanced(hash, thenOpen)
+								if !adbOnly {
+									a.runAfterEnhanced(hash, thenOpen)
+								}
 							}
 						})
 					})
@@ -685,15 +812,17 @@ func (a *App) activateModal(c *ui.Context, k tokens) {
 
 				// Live phone state chips
 				ui.Row(c.Key("act-chips")).FillWidth().Gap(8).Wrap().Children(func() {
-					if hasSt && st.NetworkType == "wifi" {
-						pill(c, "act-net-chip", L.ChipWifiOn(), k.good.Alpha(0.14), k.goodText)
-					} else {
-						pill(c, "act-net-chip", L.ChipCellularOn(), k.warn.Alpha(0.16), k.warnText)
-					}
-					if hasSt && (st.WirelessDebugOn || st.WirelessADBPort > 0) {
-						pill(c, "act-adb-chip", L.ChipWirelessADBOn(), k.good.Alpha(0.14), k.goodText)
-					} else if hasSt {
-						pill(c, "act-adb-chip", L.ChipWirelessADBOff(), k.sunk, k.text2)
+					if hasSt {
+						if st.NetworkType == "wifi" {
+							pill(c, "act-net-chip", L.ChipWifiOn(), k.good.Alpha(0.14), k.goodText)
+						} else {
+							pill(c, "act-net-chip", L.ChipCellularOn(), k.warn.Alpha(0.16), k.warnText)
+						}
+						if st.WirelessDebugOn || st.WirelessADBPort > 0 {
+							pill(c, "act-adb-chip", L.ChipWirelessADBOn(), k.good.Alpha(0.14), k.goodText)
+						} else {
+							pill(c, "act-adb-chip", L.ChipWirelessADBOff(), k.sunk, k.text2)
+						}
 					}
 					hasPairWin := hasSt && st.WirelessADBPairPort > 0
 					if !hasPairWin {
@@ -709,19 +838,26 @@ func (a *App) activateModal(c *ui.Context, k tokens) {
 					}
 				})
 
-				onWifi := !hasSt || st.NetworkType == "wifi"
 				wirelessOn := hasSt && (st.WirelessDebugOn || st.WirelessADBPort > 0 || st.WirelessADBPairPort > 0)
 
 				switch {
-				case !onWifi:
+				case hasSt && st.NetworkType != "wifi":
 					ui.Column(c.Key("act-cell")).FillWidth().Padding(14).Gap(6).Radius(radiusMD).Background(t.Background).Border(1, t.Border).Children(func() {
 						ui.Text(c, L.ActivateCellularTitle()).Bold().FontSize(sizeBody)
 						ui.Text(c, L.ActivateCellularBody()).FontSize(sizeSmall).TextColor(k.text2)
 					})
-					a.wizardStepRow(c, k, "act-cell-usb", 1, L.WizardUSBStep1Title(), L.ActivateUSBSub())
-					a.wizardStepRow(c, k, "act-cell-wifi", 2, L.ActivateWifiOffOptionA(), L.ActivateWifiOffOptionASub())
-				case wirelessOn:
-					a.wizardStepRow(c, k, "act-w-1", 1, L.ActivateWifiPairStep1(), L.ActivateWifiPairStep1Sub())
+					if !adbOnly {
+						a.wizardStepRow(c, k, "act-cell-usb", 1, L.WizardUSBStep1Title(), L.ActivateUSBSub())
+						a.wizardStepRow(c, k, "act-cell-wifi", 2, L.ActivateWifiOffOptionA(), L.ActivateWifiOffOptionASub())
+					} else {
+						a.wizardStepRow(c, k, "act-cell-wifi", 1, L.ActivateWifiOffOptionA(), L.ActivateWifiOffOptionASub())
+					}
+				case adbOnly || !hasSt || wirelessOn:
+					stepTitle, stepSub, btnText := L.ActivateWifiPairStep1(), L.ActivateWifiPairStep1Sub(), L.ActivateWifiPairBtn()
+					if adbOnly {
+						stepTitle, stepSub, btnText = L.WizardWifiStep1Title(), L.WizardWifiStep1Sub(), L.PairADBModalBtn()
+					}
+					a.wizardStepRow(c, k, "act-w-1", 1, stepTitle, stepSub)
 					ui.Column(c.Key("act-w-pair")).FillWidth().Padding(14).Gap(8).Radius(radiusMD).Background(t.Background).Border(1, t.Border).Children(func() {
 						ui.Text(c, L.ActivateWifiPairStep2()).Bold().FontSize(sizeBody)
 						ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
@@ -730,15 +866,24 @@ func (a *App) activateModal(c *ui.Context, k tokens) {
 							if in.Submitted() && validPairCode(code) && !act.Busy {
 								a.ActivatePairAndBootstrap()
 							}
-							if ui.PrimaryButton(c.Key("act-go"), L.ActivateWifiPairBtn()).Disabled(act.Busy || !validPairCode(code)).Clicked() {
+							if ui.PrimaryButton(c.Key("act-go"), btnText).Disabled(act.Busy || !validPairCode(code)).Clicked() {
 								a.ActivatePairAndBootstrap()
 							}
 						})
 					})
-					a.wizardStepRow(c, k, "act-w-usb", 2, L.ActivateOptionUSBBrief(), L.ActivateUSBSub())
+					if !adbOnly {
+						a.wizardStepRow(c, k, "act-w-usb", 2, L.ActivateOptionUSBBrief(), L.ActivateUSBSub())
+					}
 				default:
 					a.wizardStepRow(c, k, "act-off-1", 1, L.ActivateWifiOffOptionA(), L.ActivateWifiOffOptionASub())
 					a.wizardStepRow(c, k, "act-off-2", 2, L.ActivateOptionUSBBrief(), L.ActivateUSBSub())
+				}
+
+				if adbOnly {
+					ui.Box(c).FillWidth().Height(1).Background(t.Border)
+					ui.Collapsible(c.Key("act-adv"), L.WizardAdvancedTitle(), &a.activate.AdvOpen, func() {
+						a.connectAdvancedBody(c, k)
+					})
 				}
 
 				if act.Notice != "" {

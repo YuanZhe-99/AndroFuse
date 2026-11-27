@@ -150,7 +150,8 @@ class AndroFusePowerPlugin : MyGoPlugin {
             ))
             "daemonCloseSession" -> reply.success(AndroFuseDaemon.closeSession(args.optString("sessionId", "")))
             "daemonListApps" -> {
-                Thread { reply.success(AndroFuseDaemon.listApps()) }.apply {
+                val known = args.optString("knownIcons", "")
+                Thread { reply.success(AndroFuseDaemon.listApps(known)) }.apply {
                     isDaemon = true
                     start()
                 }

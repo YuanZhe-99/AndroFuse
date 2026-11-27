@@ -1,5 +1,18 @@
 # Version History
 
+## v0.2.3 (2026-11-27)
+
+- **Physical Screen-Off Support & Two-Layer Bounded Back for Independent App Windows (`AppGuard.java`, `internal/dex/appguard.go`)**:
+  - Added UID 2000 `AppGuard` supervising every `SessionModeApp` virtual display (`display_id > 0`): holds a `PARTIAL_WAKE_LOCK` plus display-scoped `SCREEN_BRIGHT_WAKE_LOCK | ACQUIRE_CAUSES_WAKEUP` (`PowerManager.newWakeLock(int, String, int)`) + `IPowerManager.userActivity(displayId, ...)`, and wakes that virtual display (`cmd power wakeup --display-id <id> --restore-wakelocks`) via `DisplayManager.DisplayListener` whenever the phone's physical screen (`Display 0`) turns off or dozes—keeping `Display 0` off when isolated in its own `DisplayGroup` (`> 0`) or falling back to `SurfaceControl.setDisplayPowerMode(POWER_MODE_OFF)` with clean close-time restore when placed in shared `DisplayGroup 0`—so Independent App Windows stay responsive with the phone screen off without Root.
+  - Added Two-Layer **Bounded Back** (preventing root-screen Back presses from finishing the last activity into a black display) and **app-only header controls**: removes Home, Recents, and Rotate from `SessionModeApp` windows (`internal/gui/panes.go`) while keeping the Bounded Back button visible at every window width, intercepts `KeycodeHome` / `KeycodeAppSwitch` / `pumpCtrlForAppSession`, evaluates predictive-back / window-stack depth before dispatching Back (flashing `"Already on the app's main screen"` at root), and auto-recovers via `ITaskStackListener` if a legacy app closes its root task.
+- **Streamed App Icons in Enhanced Mode & Dedicated App Avatars (`Daemon.java`, `Daemon.kt`)**:
+  - `TX_LIST_APPS` now streams full UTF-8 app metadata + `96x96` PNG icons incrementally (`known_icons` / `--skip-icons` filter and `--resume` live-icon crash recovery) over an `Os.socketpair` `ParcelFileDescriptor`, bypassing Android's 1 MB Binder parcel transaction limit and auto-refreshing icon-less caches on desktop.
+  - Sanitized `mesh:<devID>` cache keys (`sanitizeCacheKey`) to prevent Windows NTFS colon issues and migrated cached PNG icons in `mergeMeshRememberedLocked`.
+  - `SessionModeApp` sidebar and header avatars (`sessionIcon`) always display the app's real icon (updating automatically if icons finish loading asynchronously) or an app monogram/glyph—never falling back to the phone brand avatar.
+- **Cleaner Sidebar & Mutual Assisted Pairing UX**:
+  - Removed the duplicate `+ Add a phone` navigation row from the sidebar (`internal/gui/shell.go`), keeping one `+` picker button with direct `+ Add a phone…` actions inside the picker.
+  - Added inline mutual pairing hints on phone cards when only Enhanced mode or Wireless debugging is paired yet, plus manual `Pair/Re-pair Enhanced mode…` and `Pair/Re-pair Wireless debugging (ADB)…` actions in every phone's `⋯` menu backed by `OpenPairADBModal` and `RepairMeshCompanion`.
+
 ## v0.2.2 (2026-11-27)
 
 - **Companion Pairing & Session Security Hardening (`INV-07`, `INV-09`)**:

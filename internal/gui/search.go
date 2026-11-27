@@ -91,7 +91,11 @@ func (a *App) pickerPopover(c *ui.Context, anchor ui.Element) {
 				}
 			}
 			if r, ok := a.RememberedFor(p.Device); ok && r.Companion != nil {
-				if apps := a.appsForDevice(r.HardwareHash); len(apps) > 0 {
+				apps := a.appsForDevice(r.HardwareHash)
+				if len(apps) > 0 {
+					if a.needsCompanionAppFetch(r.HardwareHash) {
+						go a.fetchCompanionApps(r.HardwareHash)
+					}
 					a.appPickerFor(c, k, r.displayName(), apps, func(ap adb.AppEntry) {
 						a.LaunchDaemonAppWindow(r.HardwareHash, ap, a.pickerOpenIn())
 					})
@@ -147,6 +151,13 @@ func (a *App) pickerPopover(c *ui.Context, anchor ui.Element) {
 		ui.Scroll(c.Key("picker-list")).FillWidth().MaxHeight(380).Children(func() {
 			ui.Column(c).FillWidth().Gap(1).Children(func() {
 				label("picker-phones", L.HomePhones())
+				offline := a.offlineRemembered(devs)
+				if len(devs) == 0 && len(offline) == 0 && query == "" {
+					row("pk-add-empty", func() { iconTile(c, k, iconPlus) }, L.NavAddPhone(), L.HomeMyPhonesSub(), true, func() {
+						a.closePicker()
+						a.OpenAddWizard(0)
+					})
+				}
 				for _, d := range devs {
 					name := a.phoneName(d)
 					if d.Target.State != "device" || !match(name, deviceModel(d), d.Target.Serial) {
@@ -185,7 +196,7 @@ func (a *App) pickerPopover(c *ui.Context, anchor ui.Element) {
 							row("pk-off-"+r.HardwareHash, func() {
 								phoneAvatar(c, 32, phoneLogo(r.Maker, r.Brand, r.Model, r.Name), nil, r.displayName())
 							}, r.displayName(), L.KindApp(), true, func() {
-								if len(apps) == 0 {
+								if len(apps) == 0 || a.needsCompanionAppFetch(r.HardwareHash) {
 									go a.fetchCompanionApps(r.HardwareHash)
 								}
 								a.update(func() { a.picker.Device = r.HardwareHash; a.picker.Query = "" })
@@ -232,7 +243,8 @@ func (a *App) pickerPopover(c *ui.Context, anchor ui.Element) {
 	})
 }
 
-// pickerFoot chooses where the choice opens: on its own, or beside the pane in focus.
+// pickerFoot chooses where the choice opens: on its own, or beside the pane in focus, and offers
+// a 1-click "+ Add a phone" button.
 func (a *App) pickerFoot(c *ui.Context, k tokens) {
 	t := c.Theme()
 	ui.Box(c).FillWidth().Height(1).Background(t.Border)
@@ -246,6 +258,11 @@ func (a *App) pickerFoot(c *ui.Context, k tokens) {
 			a.mu.Lock()
 			a.picker.Beside = idx == 1
 			a.mu.Unlock()
+		}
+		ui.Box(c).Grow(1)
+		if ui.Button(c.Key("picker-add-phone"), "+ "+L.NavAddPhone()).Clicked() {
+			a.closePicker()
+			a.OpenAddWizard(0)
 		}
 	})
 }

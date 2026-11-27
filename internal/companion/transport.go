@@ -60,7 +60,7 @@ type Handler struct {
 	// persistent UID 2000 daemon for a `daemon.open` request (`PLAN` §9.2).
 	OnDaemonStream func(DaemonStreamRequest) (sessionID string, video net.Conn, ctrl net.Conn, closeFn func(), err error)
 	// OnListApps returns launchable applications on the phone for an `apps.list` request.
-	OnListApps func() ([]DaemonAppEntry, error)
+	OnListApps func(AppListRequest) ([]DaemonAppEntry, error)
 	// OnPairRequest asks the phone's user to allow an adb-connected desktop; it blocks until
 	// they answer (or the host gives up) and reports whether they allowed it.
 	OnPairRequest func(PairRequest) bool
@@ -601,7 +601,11 @@ func (s *Server) dispatch(env Envelope) Envelope {
 		if s.handler.OnListApps == nil {
 			return Envelope{ID: env.ID, Type: "apps.list.res", Error: "app list unavailable"}
 		}
-		apps, err := s.handler.OnListApps()
+		var req AppListRequest
+		if len(env.Payload) > 0 {
+			_ = json.Unmarshal(env.Payload, &req)
+		}
+		apps, err := s.handler.OnListApps(req)
 		if err != nil {
 			return Envelope{ID: env.ID, Type: "apps.list.res", Error: err.Error()}
 		}
@@ -853,13 +857,19 @@ func (c *Client) GetStatus(ctx context.Context) (DeviceStatus, error) {
 	return st, err
 }
 
-// ListApps queries launchable applications on the phone through the attached Enhanced mode daemon.
-func (c *Client) ListApps(ctx context.Context) ([]DaemonAppEntry, error) {
+// ListAppsWithKnown queries launchable applications through Enhanced mode, omitting PNG icon
+// payloads for any packages already cached on the desktop.
+func (c *Client) ListAppsWithKnown(ctx context.Context, knownIcons []string) ([]DaemonAppEntry, error) {
 	var res AppListResponse
-	if err := c.call(ctx, "apps.list", struct{}{}, &res); err != nil {
+	if err := c.call(ctx, "apps.list", AppListRequest{KnownIcons: knownIcons}, &res); err != nil {
 		return nil, err
 	}
 	return res.Apps, nil
+}
+
+// ListApps queries launchable applications on the phone through the attached Enhanced mode daemon.
+func (c *Client) ListApps(ctx context.Context) ([]DaemonAppEntry, error) {
+	return c.ListAppsWithKnown(ctx, nil)
 }
 
 // SendClipboard pushes clipboard text to the Companion host.

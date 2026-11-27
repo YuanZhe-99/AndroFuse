@@ -180,7 +180,11 @@ func (a *App) ContinueCompanionApp() {
 		}
 		a.mu.Unlock()
 		if target != nil {
-			a.LaunchAppWindow(*target, adb.AppEntry{Package: res.Package, Label: res.Package, Resizeable: true}, OpenDefault)
+			ap := adb.AppEntry{Package: res.Package, Label: res.Package, Resizeable: true}
+			if cached, ok := a.findCachedApp(target.HardwareHash, res.Package); ok {
+				ap = cached
+			}
+			a.LaunchAppWindow(*target, ap, OpenDefault)
 		}
 	}()
 }
@@ -1029,11 +1033,24 @@ func (a *App) LaunchAppWindow(d DiscoveredDevice, app adb.AppEntry, open OpenIn)
 			return
 		}
 	}
+	if app.Label == "" || app.Label == pkg || app.IconPath == "" {
+		if cached, ok := a.findCachedApp(devKey, pkg); ok {
+			if app.Label == "" || app.Label == pkg {
+				app.Label = cached.Label
+			}
+			if app.IconPath == "" {
+				app.IconPath = cached.IconPath
+			}
+		}
+	}
 	label := strings.TrimSpace(app.Label)
 	if label == "" {
 		label = pkg
 	}
 	icon := a.appIconFor(app.IconPath)
+	if icon == nil {
+		icon = a.appIconByPackage(devKey, pkg)
+	}
 	startArg := pkg
 	if !strings.HasPrefix(startArg, "+") {
 		startArg = "+" + startArg
@@ -1070,6 +1087,7 @@ func (a *App) LaunchAppWindow(d DiscoveredDevice, app adb.AppEntry, open OpenIn)
 			BackendLabel: label,
 			TargetSpec:   fmt.Sprintf("%d×%d flex · 60 fps", appWinInitW, appWinInitH),
 			AllowResize:  true,
+			ScreenOffCap: true,
 			AppIcon:      icon,
 			AppPackage:   pkg,
 		})
@@ -1113,6 +1131,7 @@ func (a *App) LaunchAppWindow(d DiscoveredDevice, app adb.AppEntry, open OpenIn)
 		}
 		a.addSession(sw)
 		a.runOnMain(func() { sw.attachScrcpy(vSess, nil, appWinPortraitW, appWinPortraitH) })
+		sw.startADBAppGuardAsync(d.Target.Serial, vSess, pkg)
 	}()
 }
 
@@ -2280,11 +2299,24 @@ func (a *App) LaunchDaemonAppWindow(hash string, app adb.AppEntry, open OpenIn) 
 		a.notify(L.CompanionNotPaired())
 		return
 	}
+	if app.Label == "" || app.Label == pkg || app.IconPath == "" {
+		if cached, ok := a.findCachedApp(hash, pkg); ok {
+			if app.Label == "" || app.Label == pkg {
+				app.Label = cached.Label
+			}
+			if app.IconPath == "" {
+				app.IconPath = cached.IconPath
+			}
+		}
+	}
 	label := strings.TrimSpace(app.Label)
 	if label == "" {
 		label = pkg
 	}
 	icon := a.appIconFor(app.IconPath)
+	if icon == nil {
+		icon = a.appIconByPackage(hash, pkg)
+	}
 	startArg := pkg
 	if !strings.HasPrefix(startArg, "+") {
 		startArg = "+" + startArg
@@ -2357,6 +2389,7 @@ func (a *App) LaunchDaemonAppWindow(hash string, app adb.AppEntry, open OpenIn) 
 			BackendLabel: label,
 			TargetSpec:   fmt.Sprintf("%d×%d flex · %d fps", appWinInitW, appWinInitH, maxFPS),
 			AllowResize:  true,
+			ScreenOffCap: true,
 			AppIcon:      icon,
 			AppPackage:   pkg,
 		})

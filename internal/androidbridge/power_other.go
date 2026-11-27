@@ -83,7 +83,7 @@ func CloseDaemonSession(string) bool { return false }
 func APKHash() string { return "" }
 
 // ListDaemonApps returns an empty JSON array outside Android.
-func ListDaemonApps() (string, error) { return "[]", nil }
+func ListDaemonApps(string) (string, error) { return "[]", nil }
 
 // ShowPairNotification is a no-op outside Android.
 func ShowPairNotification(string, string) {}

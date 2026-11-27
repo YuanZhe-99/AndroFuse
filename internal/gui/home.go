@@ -549,12 +549,63 @@ func (a *App) phoneCard(c *ui.Context, k tokens, d DiscoveredDevice) {
 			statusDot(c, col)
 			ui.Text(c, route).FontSize(sizeSmall).TextColor(k.text2).SingleLine().MinWidth(0)
 		})
-		a.cardWorkLine(c, k, key, hash)
+		busy := a.cardWorkLine(c, k, key, hash)
 		if !online {
 			return
 		}
 		a.phoneFigures(c, k, key, hash)
+		if r, ok := a.RememberedFor(hash); ok && !isEmulator(d) {
+			if r.Companion == nil && !a.firstConnectShowingFor(hash) {
+				pairAssistBanner(c, k, key+"-pair-enh", iconSpark, L.CardSuggestCompanion(), L.ActionPairEnhancedShort(), busy, func() {
+					a.PairCompanionOverADB(d.Target.Serial, a.phoneName(d), a.pairNetworkName() != "")
+				})
+			} else if r.Companion != nil && a.allowsWirelessADB() && !a.hasWirelessADBPaired(hash, &d) {
+				pairAssistBanner(c, k, key+"-pair-adb", iconWifi, L.CardSuggestWirelessADB(), L.ActionPairWirelessADBShort(), busy, func() {
+					a.OpenPairADBModal(hash)
+				})
+			}
+		}
 		a.phoneActions(c, k, key, d)
+	})
+}
+
+func (a *App) firstConnectShowingFor(hash string) bool {
+	if hash == "" {
+		return false
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.firstConnect != nil && a.firstConnect.Hash == hash
+}
+
+// hasWirelessADBPaired reports whether hash currently has an active wireless ADB transport or a
+// saved non-stale wireless endpoint.
+func (a *App) hasWirelessADBPaired(hash string, d *DiscoveredDevice) bool {
+	if hash == "" || a.isADBAuthNeeded(hash) {
+		return false
+	}
+	if r, ok := a.RememberedFor(hash); ok && r.Endpoint != "" {
+		return true
+	}
+	if d != nil {
+		for _, tr := range d.Transports {
+			if tr.State == "device" && (tr.Transport == adb.TransportTLSWiFi || tr.Transport == adb.TransportTCP) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// pairAssistBanner renders a subtle inline reminder inside a phone card when only one of Enhanced
+// mode or Wireless debugging (ADB) is paired yet.
+func pairAssistBanner(c *ui.Context, k tokens, key string, icon *ui.SVG, text, btnLabel string, disabled bool, onClick func()) {
+	ui.Row(c.Key(key)).FillWidth().Padding(8, 10).Gap(8).Radius(radiusMD).Background(k.brandSoft).AlignItems(ui.Center).Children(func() {
+		ui.Icon(c, icon).Size(15, 15).TextColor(k.brandSoftText).Shrink(0)
+		ui.Text(c, text).FontSize(sizeSmall).TextColor(k.text2).Grow(1).MinWidth(0)
+		if ui.Button(c.Key(key+"-btn"), btnLabel).Disabled(disabled).Clicked() {
+			onClick()
+		}
 	})
 }
 
@@ -676,23 +727,31 @@ func (a *App) phoneMenu(c *ui.Context, key string, d DiscoveredDevice) {
 				a.SendFileToPhone()
 			}
 		}
-		if remembered && !isEmulator(d) {
+		if !isEmulator(d) {
 			a.mu.Lock()
 			inst := a.compInstalled[hash]
 			a.mu.Unlock()
 			r, _ := a.RememberedFor(hash)
-			pair := L.ActionPairCompanion() // install and pair
-			switch {
-			case inst.Installed && r.Companion != nil:
-				pair = L.ActionRepairCompanion()
-			case inst.Installed:
-				pair = L.ActionPairOnlyCompanion()
-			}
 			if inst.Installed && !inst.Current && m.Item(L.ActionUpdateCompanion()).Chosen() {
 				a.UpdateCompanion(d)
 			}
-			if m.Item(pair).Chosen() {
+			enhLabel := L.ActionMenuPairEnhanced()
+			if r.Companion != nil {
+				enhLabel = L.ActionMenuRepairEnhanced()
+			}
+			if m.Item(enhLabel).Chosen() {
 				a.PairCompanionOverADB(d.Target.Serial, a.phoneName(d), a.pairNetworkName() != "")
+			}
+			adbLabel := L.ActionMenuPairADB()
+			if a.hasWirelessADBPaired(hash, &d) {
+				adbLabel = L.ActionMenuRepairADB()
+			}
+			if m.Item(adbLabel).Chosen() {
+				if remembered {
+					a.OpenPairADBModal(hash)
+				} else {
+					a.OpenAddWizard(1)
+				}
 			}
 		}
 		m.Separator()
@@ -795,6 +854,36 @@ func (a *App) offlineCard(c *ui.Context, k tokens, r RememberedDevice) {
 					}
 					m.Separator()
 				}
+				if r.Companion == nil {
+					if m.Item(L.ActionMenuPairEnhanced()).Chosen() {
+						if p, ok := a.unpairedMeshPhoneByQuery(r.Name); ok {
+							a.PairMeshPhone(p)
+						} else if len(a.networks()) > 0 {
+							a.OpenAddWizard(2)
+						} else {
+							a.OpenAddWizard(0)
+						}
+					}
+				} else {
+					if !daemonAppsOK && m.Item(L.ActionActivateEnhanced()).Chosen() {
+						a.OpenActivateModal(r.HardwareHash, 0)
+					}
+					if m.Item(L.ActionMenuRepairEnhanced()).Chosen() {
+						a.RepairMeshCompanion(r)
+					}
+				}
+				adbLabel := L.ActionMenuPairADB()
+				if a.hasWirelessADBPaired(r.HardwareHash, nil) {
+					adbLabel = L.ActionMenuRepairADB()
+				}
+				if m.Item(adbLabel).Chosen() {
+					if r.Companion != nil {
+						a.OpenPairADBModal(r.HardwareHash)
+					} else {
+						a.OpenAddWizard(1)
+					}
+				}
+				m.Separator()
 				if m.Item(L.ActionRename()).Chosen() {
 					a.startRename(r.HardwareHash)
 				}
@@ -834,6 +923,19 @@ func (a *App) offlineCard(c *ui.Context, k tokens, r RememberedDevice) {
 			ui.Text(c, L.OfflineAutoHint()).FontSize(sizeSmall).TextColor(k.text3)
 		}
 		busy := a.cardWorkLine(c, k, key, r.HardwareHash)
+		if r.Companion != nil && inNet && a.allowsWirelessADB() && !a.hasWirelessADBPaired(r.HardwareHash, nil) {
+			pairAssistBanner(c, k, key+"-pair-adb", iconWifi, L.CardSuggestWirelessADB(), L.ActionPairWirelessADBShort(), busy, func() {
+				a.OpenPairADBModal(r.HardwareHash)
+			})
+		} else if r.Companion == nil {
+			pairAssistBanner(c, k, key+"-pair-enh", iconSpark, L.CardOfflineSuggestCompanion(), L.ActionPairEnhancedShort(), busy, func() {
+				if p, ok := a.unpairedMeshPhoneByQuery(r.Name); ok {
+					a.PairMeshPhone(p)
+				} else {
+					a.OpenAddWizard(0)
+				}
+			})
+		}
 		ui.Box(c).Grow(1)
 		ui.Row(c.Key(key + "-acts")).Gap(6).AlignItems(ui.Center).Wrap().Children(func() {
 			// In a network without adb, expose actions tailored to Enhanced mode readiness:

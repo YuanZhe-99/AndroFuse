@@ -78,8 +78,11 @@ func TestTLSCompanionAuthAndP1Roundtrip(t *testing.T) {
 		OnDisplayGuard: func(_ DisplayGuardRequest) (DisplayGuardResponse, error) {
 			return DisplayGuardResponse{CleanedCount: 1, Message: "cleaned residual overlay"}, nil
 		},
-		OnListApps: func() ([]DaemonAppEntry, error) {
-			return []DaemonAppEntry{{Package: "com.whatsapp", Label: "WhatsApp", Resizeable: true}}, nil
+		OnListApps: func(req AppListRequest) ([]DaemonAppEntry, error) {
+			if len(req.KnownIcons) > 0 && req.KnownIcons[0] == "com.whatsapp" {
+				return []DaemonAppEntry{{Package: "com.whatsapp", Label: "WhatsApp", Resizeable: true}}, nil
+			}
+			return []DaemonAppEntry{{Package: "com.whatsapp", Label: "WhatsApp", Resizeable: true, IconB64: "iVBORw0KGgo="}}, nil
 		},
 	})
 	if err != nil {
@@ -130,8 +133,12 @@ func TestTLSCompanionAuthAndP1Roundtrip(t *testing.T) {
 		t.Fatalf("RequestContinuity: %+v err=%v", cont, err)
 	}
 	apps, err := c.ListApps(callCtx)
-	if err != nil || len(apps) != 1 || apps[0].Package != "com.whatsapp" {
+	if err != nil || len(apps) != 1 || apps[0].Package != "com.whatsapp" || apps[0].IconB64 == "" {
 		t.Fatalf("ListApps: %+v err=%v", apps, err)
+	}
+	cachedApps, err := c.ListAppsWithKnown(callCtx, []string{"com.whatsapp"})
+	if err != nil || len(cachedApps) != 1 || cachedApps[0].IconB64 != "" {
+		t.Fatalf("ListAppsWithKnown: %+v err=%v", cachedApps, err)
 	}
 	payload := []byte("androfuse-p1-file-transfer")
 	fRes, err := c.PushFile(callCtx, "sample.txt", payload)
@@ -453,7 +460,7 @@ func TestScreenShareGatesDaemonAndAppsAndCtrlOwnership(t *testing.T) {
 		CheckToken: func(req AuthRequest) bool {
 			return req.Token == tokA || req.Token == tokB
 		},
-		OnListApps: func() ([]DaemonAppEntry, error) {
+		OnListApps: func(_ AppListRequest) ([]DaemonAppEntry, error) {
 			return []DaemonAppEntry{{Package: "com.example.app", Label: "App"}}, nil
 		},
 		OnDaemonStream: func(_ DaemonStreamRequest) (string, net.Conn, net.Conn, func(), error) {

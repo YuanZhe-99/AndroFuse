@@ -106,6 +106,7 @@ type SessionWindow struct {
 	services      ui.Services
 	scrcpySess    *scrcpy.Session
 	dexSess       *dex.LoopbackSession
+	appGuard      *dex.AppGuardSession
 	miracastSess  *dex.MiracastSession
 	audioPlayer   *core.AudioPlayer
 	audioMuted    bool
@@ -550,8 +551,10 @@ func (sw *SessionWindow) replaceSession(oldSess, newSess *scrcpy.Session, newDex
 		return
 	}
 	prevDex := sw.dexSess
+	prevGuard := sw.appGuard
 	sw.switching = true
 	sw.dexSess = newDex
+	sw.appGuard = nil
 	sw.reconnecting = false
 	sw.reconnectMsg = ""
 	sw.canReconnect = false
@@ -564,6 +567,9 @@ func (sw *SessionWindow) replaceSession(oldSess, newSess *scrcpy.Session, newDex
 	sw.mu.Unlock()
 
 	go func() {
+		if prevGuard != nil {
+			prevGuard.Stop()
+		}
 		if oldSess != nil && oldSess != newSess {
 			oldSess.Close()
 		}
@@ -571,9 +577,86 @@ func (sw *SessionWindow) replaceSession(oldSess, newSess *scrcpy.Session, newDex
 			prevDex.Stop()
 		}
 	}()
+	if sw.spec.Mode == SessionModeApp && serial != "" {
+		sw.startADBAppGuardAsync(serial, newSess, sw.spec.AppPackage)
+	}
 	if banner != "" {
 		sw.flashNote(banner)
 	}
+}
+
+func (sw *SessionWindow) attachAppGuard(g *dex.AppGuardSession) {
+	sw.mu.Lock()
+	if sw.closing {
+		sw.mu.Unlock()
+		if g != nil {
+			g.Stop()
+		}
+		return
+	}
+	prev := sw.appGuard
+	sw.appGuard = g
+	sw.mu.Unlock()
+	if prev != nil && prev != g {
+		go prev.Stop()
+	}
+}
+
+// appIcon returns the app icon bitmap for a SessionModeApp session, dynamically resolving it from
+// the desktop icon cache if icons arrived asynchronously after the session launched.
+func (sw *SessionWindow) appIcon() *ui.Bitmap {
+	sw.mu.Lock()
+	icon := sw.spec.AppIcon
+	pkg := sw.spec.AppPackage
+	devKey := sw.spec.DeviceKey
+	sw.mu.Unlock()
+	if icon != nil {
+		return icon
+	}
+	if sw.app == nil || pkg == "" {
+		return nil
+	}
+	if bmp := sw.app.appIconByPackage(devKey, pkg); bmp != nil {
+		sw.mu.Lock()
+		if sw.spec.AppIcon == nil {
+			sw.spec.AppIcon = bmp
+		}
+		sw.mu.Unlock()
+		return bmp
+	}
+	return nil
+}
+
+func (sw *SessionWindow) startADBAppGuardAsync(serial string, vSess *scrcpy.Session, pkg string) {
+	go func() {
+		if vSess == nil || serial == "" || sw.app == nil {
+			return
+		}
+		vdID, ok := vSess.WaitVirtualDisplayID(4 * time.Second)
+		if !ok || vdID <= 0 {
+			return
+		}
+		adbClient, _, err := sw.app.ensureADBAndLeases()
+		if err != nil {
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		guard, err := dex.StartAppGuard(ctx, adbClient, serial, vdID, pkg, func() {
+			sw.flashNote(L.AppAtMainScreen())
+		})
+		if err != nil {
+			return
+		}
+		sw.mu.Lock()
+		stillSame := !sw.closing && sw.scrcpySess == vSess
+		sw.mu.Unlock()
+		if !stillSame {
+			guard.Stop()
+			return
+		}
+		sw.attachAppGuard(guard)
+	}()
 }
 
 func (sw *SessionWindow) openADBReplacement(ctx context.Context, allowPortScan bool) (*scrcpy.Session, *dex.LoopbackSession, string, string, error) {
@@ -1246,8 +1329,10 @@ func (sw *SessionWindow) Close() {
 	}
 	s := sw.scrcpySess
 	d := sw.dexSess
+	guard := sw.appGuard
 	m := sw.miracastSess
 	ap := sw.audioPlayer
+	sw.appGuard = nil
 	sw.audioPlayer = nil
 	win := sw.win
 	sw.mu.Unlock()
@@ -1260,6 +1345,9 @@ func (sw *SessionWindow) Close() {
 	}
 
 	go func() {
+		if guard != nil {
+			guard.Stop()
+		}
 		if s != nil {
 			if sw.spec.ScreenOffCap && sw.screenOff {
 				_ = s.SetDisplayPower(true)
@@ -1530,6 +1618,12 @@ func (sw *SessionWindow) handleInput(ev ui.InputEvent) bool {
 		if s == nil {
 			return false
 		}
+		if sw.spec.Mode == SessionModeApp && act.Button == scrcpy.ButtonSecondary {
+			if act.TouchAction == scrcpy.ActionDown {
+				go sw.pressKey("back")
+			}
+			return true
+		}
 		pointerID := scrcpy.PointerIDMouse
 		if touchMode {
 			if act.TouchAction == scrcpy.ActionHoverMove {
@@ -1583,6 +1677,17 @@ func (sw *SessionWindow) handleInput(ev ui.InputEvent) bool {
 	case ActionKey:
 		if s == nil {
 			return false
+		}
+		if sw.spec.Mode == SessionModeApp {
+			switch act.Keycode {
+			case scrcpy.KeycodeHome, scrcpy.KeycodeAppSwitch:
+				return true
+			case scrcpy.KeycodeBack:
+				if act.KeyAction == scrcpy.KeyActionDown {
+					go sw.pressKey("back")
+				}
+				return true
+			}
 		}
 		if act.KeyAction == scrcpy.KeyActionDown &&
 			ev.Key == ui.KeyV &&
