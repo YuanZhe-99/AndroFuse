@@ -77,6 +77,8 @@ func settingsIndex() []settingEntry {
 		{"fps", setPhones, L.SetMaxFPS(), "frame rate"},
 		{"codec", setPhones, L.SetCodec(), "h.264 h.265 hevc"},
 		{"sound", setPhones, L.SetPlaySound(), "audio"},
+		{"connmode", setPhones, L.SetConnMode(), "connection adb companion priority"},
+		{"autoswitch", setPhones, L.SetAutoSwitch(), "auto switch upgrade fallback 5g wifi"},
 		{"handoff", setPhones, L.SetHandoff(), "usb wi-fi"},
 		{"offer", setPhones, L.SetOfferCompanion(), "companion"},
 		{"cam", setCamera, L.SetDefaultCamera(), "front back"},
@@ -402,7 +404,29 @@ func (a *App) phonesSettings(c *ui.Context, k tokens) {
 		})
 	})
 	section(c, k, "ph-conn", L.SetConnection(), nil, func() {
-		srow(c, k, "ph-handoff", true, iconUsb, L.SetHandoff(), L.SetHandoffSub(), func() {
+		connIdx := 0
+		switch p.ConnectionMode {
+		case ConnBothCompanion:
+			connIdx = 1
+		case ConnCompanionOnly:
+			connIdx = 2
+		}
+		srow(c, k, "ph-conn-mode", true, iconLink, L.SetConnMode(), L.SetConnModeSub(), nil)
+		subRow(c, k, "ph-conn-mode-pick", func() {
+			a.prefChoice(c, "conn-mode-seg", connIdx, func(p *Prefs, i int) {
+				p.ConnectionMode = []string{ConnBothADB, ConnBothCompanion, ConnCompanionOnly}[i]
+			}, L.ConnModeBothADB(), L.ConnModeBothComp(), L.ConnModeCompOnly())
+		})
+		srow(c, k, "ph-auto-switch", false, iconRefresh, L.SetAutoSwitch(), L.SetAutoSwitchSub(), func() {
+			v := p.ConnectionMode != ConnCompanionOnly && !p.NoAutoSwitch
+			if ui.Switch(c.Key("auto-switch-sw"), &v).Label(L.SetAutoSwitch()).Disabled(p.ConnectionMode == ConnCompanionOnly).Changed() {
+				a.mu.Lock()
+				a.prefs.NoAutoSwitch = !v
+				a.savePrefs()
+				a.mu.Unlock()
+			}
+		})
+		srow(c, k, "ph-handoff", false, iconUsb, L.SetHandoff(), L.SetHandoffSub(), func() {
 			a.prefSwitch(c, "handoff-sw", !p.NoUSBHandoff, L.SetHandoff(), func(p *Prefs, on bool) { p.NoUSBHandoff = !on })
 		})
 		srow(c, k, "ph-offer", false, iconDevices, L.SetOfferCompanion(), L.SetOfferCompanionSub(), func() {

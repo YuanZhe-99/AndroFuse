@@ -51,6 +51,11 @@ type Handler struct {
 	OnShare func() (net.Conn, error)
 	// OnKey runs "back", "home" or "recents" on the phone while it shares its screen.
 	OnKey func(action string) error
+	// OnDaemonStream opens a scrcpy-server video (and optional control) stream through the
+	// persistent UID 2000 daemon for a `daemon.open` request (`PLAN` §9.2).
+	OnDaemonStream func(DaemonStreamRequest) (sessionID string, video net.Conn, ctrl net.Conn, closeFn func(), err error)
+	// OnListApps returns launchable applications on the phone for an `apps.list` request.
+	OnListApps func() ([]DaemonAppEntry, error)
 	// OnPairRequest asks the phone's user to allow an adb-connected desktop; it blocks until
 	// they answer (or the host gives up) and reports whether they allowed it.
 	OnPairRequest func(PairRequest) bool
@@ -70,11 +75,17 @@ type Server struct {
 	sdkInt      int
 	handler     Handler
 
-	mu        sync.Mutex
-	token     string
-	listeners []net.Listener
-	closed    bool
-	wg        sync.WaitGroup
+	mu          sync.Mutex
+	token       string
+	listeners   []net.Listener
+	pendingCtrl map[string]pendingCtrlEntry
+	closed      bool
+	wg          sync.WaitGroup
+}
+
+type pendingCtrlEntry struct {
+	conn net.Conn
+	stop func()
 }
 
 // ErrFingerprint means the Companion answered with another certificate than the one pinned at
@@ -363,11 +374,23 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 			continue
 		}
 		if env.Type == "tunnel.open" {
+			tuneStreamConn(conn)
 			s.serveTunnel(conn, enc, env)
 			return
 		}
 		if env.Type == "share.open" {
+			tuneStreamConn(conn)
 			s.serveShare(conn, enc, env)
+			return
+		}
+		if env.Type == "daemon.open" {
+			tuneStreamConn(conn)
+			s.serveDaemonOpen(conn, enc, env)
+			return
+		}
+		if env.Type == "daemon.ctrl" {
+			tuneStreamConn(conn)
+			s.serveDaemonCtrl(conn, enc, env)
 			return
 		}
 		resp := s.dispatch(env)
@@ -402,6 +425,16 @@ func (s *Server) dispatch(env Envelope) Envelope {
 			st.WirelessADBPort = 0
 		}
 		return mustEnvelope(env.ID, "status.res", st)
+
+	case "apps.list":
+		if s.handler.OnListApps == nil {
+			return Envelope{ID: env.ID, Type: "apps.list.res", Error: "app list unavailable"}
+		}
+		apps, err := s.handler.OnListApps()
+		if err != nil {
+			return Envelope{ID: env.ID, Type: "apps.list.res", Error: err.Error()}
+		}
+		return mustEnvelope(env.ID, "apps.list.res", AppListResponse{Apps: apps})
 
 	case "clipboard.set":
 		if !perms.Clipboard {
@@ -624,6 +657,7 @@ func Dial(ctx context.Context, addr, token, expectedFingerprint string) (*Client
 		}
 		return nil, errors.New(msg)
 	}
+	tuneStreamConn(tlsConn)
 	c.peer = authRes
 	return c, nil
 }
@@ -646,6 +680,15 @@ func (c *Client) GetStatus(ctx context.Context) (DeviceStatus, error) {
 	var st DeviceStatus
 	err := c.call(ctx, "status.get", struct{}{}, &st)
 	return st, err
+}
+
+// ListApps queries launchable applications on the phone through the attached Enhanced mode daemon.
+func (c *Client) ListApps(ctx context.Context) ([]DaemonAppEntry, error) {
+	var res AppListResponse
+	if err := c.call(ctx, "apps.list", struct{}{}, &res); err != nil {
+		return nil, err
+	}
+	return res.Apps, nil
 }
 
 // SendClipboard pushes clipboard text to the Companion host.
@@ -862,11 +905,44 @@ func (s *Server) serveTunnel(conn net.Conn, enc *json.Encoder, env Envelope) {
 	pipe(conn, target)
 }
 
+// tuneStreamConn disables Nagle's algorithm and enables fast TCP keepalive on TCP/TLS stream
+// sockets so small packets flow immediately and half-open cellular/Wi-Fi switches fail fast.
+func tuneStreamConn(c net.Conn) {
+	if tc, ok := c.(*tls.Conn); ok {
+		c = tc.NetConn()
+	}
+	if tcp, ok := c.(*net.TCPConn); ok {
+		_ = tcp.SetNoDelay(true)
+		_ = tcp.SetKeepAlive(true)
+		_ = tcp.SetKeepAlivePeriod(3 * time.Second)
+	}
+}
+
+// tuneVideoConn applies low-latency stream socket options and caps kernel send buffering on video
+// streams so slow 5G or relay paths exert backpressure instead of queuing seconds of frames.
+func tuneVideoConn(c net.Conn) {
+	tuneStreamConn(c)
+	if tc, ok := c.(*tls.Conn); ok {
+		c = tc.NetConn()
+	}
+	if tcp, ok := c.(*net.TCPConn); ok {
+		_ = tcp.SetWriteBuffer(64 * 1024)
+	}
+}
+
 // pipe copies both ways between a and b until one side ends, then closes both.
 func pipe(a, b net.Conn) {
 	done := make(chan struct{}, 2)
-	go func() { _, _ = io.Copy(a, b); done <- struct{}{} }()
-	go func() { _, _ = io.Copy(b, a); done <- struct{}{} }()
+	go func() {
+		buf := make([]byte, 32*1024)
+		_, _ = io.CopyBuffer(a, b, buf)
+		done <- struct{}{}
+	}()
+	go func() {
+		buf := make([]byte, 32*1024)
+		_, _ = io.CopyBuffer(b, a, buf)
+		done <- struct{}{}
+	}()
 	<-done
 	_ = a.Close()
 	_ = b.Close()
@@ -943,6 +1019,7 @@ func (s *Server) serveShare(conn net.Conn, enc *json.Encoder, env Envelope) {
 	if err := enc.Encode(Envelope{ID: env.ID, Type: "share.res"}); err != nil {
 		return
 	}
+	tuneVideoConn(conn)
 	pipe(conn, stream)
 }
 
@@ -966,6 +1043,109 @@ func DialShare(ctx context.Context, addr, token, fingerprint string) (net.Conn, 
 // Key runs Back, Home or Recents on a phone sharing its screen.
 func (c *Client) Key(ctx context.Context, action string) error {
 	return c.call(ctx, "input.key", KeyRequest{Action: action}, nil)
+}
+
+func (s *Server) serveDaemonOpen(conn net.Conn, enc *json.Encoder, env Envelope) {
+	if s.handler.OnDaemonStream == nil {
+		_ = enc.Encode(Envelope{ID: env.ID, Type: "daemon.open.res", Error: "uid=2000 daemon streaming is unavailable"})
+		return
+	}
+	var req DaemonStreamRequest
+	_ = json.Unmarshal(env.Payload, &req)
+	_ = conn.SetDeadline(time.Time{})
+	sid, video, ctrl, closeFn, err := s.handler.OnDaemonStream(req)
+	if err != nil {
+		_ = enc.Encode(Envelope{ID: env.ID, Type: "daemon.open.res", Error: err.Error()})
+		return
+	}
+	defer func() {
+		_ = video.Close()
+		if closeFn != nil {
+			closeFn()
+		}
+	}()
+	if ctrl != nil {
+		s.mu.Lock()
+		if s.pendingCtrl == nil {
+			s.pendingCtrl = make(map[string]pendingCtrlEntry)
+		}
+		s.pendingCtrl[sid] = pendingCtrlEntry{conn: ctrl, stop: closeFn}
+		s.mu.Unlock()
+		time.AfterFunc(15*time.Second, func() {
+			s.mu.Lock()
+			if e, ok := s.pendingCtrl[sid]; ok {
+				delete(s.pendingCtrl, sid)
+				s.mu.Unlock()
+				_ = e.conn.Close()
+				return
+			}
+			s.mu.Unlock()
+		})
+	}
+	if err := writeEnvelope(enc, env.ID, "daemon.open.res", DaemonStreamResponse{SessionID: sid}, ""); err != nil {
+		if ctrl != nil {
+			s.mu.Lock()
+			delete(s.pendingCtrl, sid)
+			s.mu.Unlock()
+			_ = ctrl.Close()
+		}
+		return
+	}
+	tuneVideoConn(conn)
+	pipe(conn, video)
+}
+
+func (s *Server) serveDaemonCtrl(conn net.Conn, enc *json.Encoder, env Envelope) {
+	var req DaemonCtrlRequest
+	_ = json.Unmarshal(env.Payload, &req)
+	s.mu.Lock()
+	e, ok := s.pendingCtrl[req.SessionID]
+	if ok {
+		delete(s.pendingCtrl, req.SessionID)
+	}
+	s.mu.Unlock()
+	if !ok {
+		_ = enc.Encode(Envelope{ID: env.ID, Type: "daemon.ctrl.res", Error: "daemon control session not found or timed out"})
+		return
+	}
+	defer e.conn.Close()
+	_ = conn.SetDeadline(time.Time{})
+	if err := enc.Encode(Envelope{ID: env.ID, Type: "daemon.ctrl.res"}); err != nil {
+		return
+	}
+	pipe(conn, e.conn)
+}
+
+// DialDaemonStream opens a scrcpy-server video (and optional control) stream through the phone's
+// persistent UID 2000 daemon over Companion TLS 1.3 (`PLAN` §9.2 Phase 2).
+func DialDaemonStream(ctx context.Context, addr, token, fingerprint string, req DaemonStreamRequest) (videoConn, ctrlConn net.Conn, err error) {
+	vc, err := Dial(ctx, addr, token, fingerprint)
+	if err != nil {
+		return nil, nil, err
+	}
+	wait, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	var res DaemonStreamResponse
+	if err := vc.call(wait, "daemon.open", req, &res); err != nil {
+		_ = vc.Close()
+		return nil, nil, err
+	}
+	if !req.Control {
+		return vc.conn, nil, nil
+	}
+	cc, err := Dial(ctx, addr, token, fingerprint)
+	if err != nil {
+		_ = vc.Close()
+		return nil, nil, err
+	}
+	cWait, cCancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cCancel()
+	if err := cc.call(cWait, "daemon.ctrl", DaemonCtrlRequest{SessionID: res.SessionID}, nil); err != nil {
+		_ = cc.Close()
+		_ = vc.Close()
+		return nil, nil, err
+	}
+	return vc.conn, cc.conn, nil
 }
 
 // MarshalIdentity encodes cert (certificate and private key) as PEM, for the phone to keep sealed.

@@ -2,6 +2,7 @@ package gui
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"image"
 	"image/color"
@@ -24,7 +25,7 @@ import (
 	"github.com/YuanZhe-99/AndroFuse/internal/mesh"
 	"github.com/YuanZhe-99/AndroFuse/internal/scrcpy"
 	"github.com/YuanZhe-99/AndroFuse/internal/vm"
-	_ "github.com/YuanZhe-99/AndroFuse/locales"
+	L "github.com/YuanZhe-99/AndroFuse/locales"
 )
 
 func testApp(t *testing.T) *App {
@@ -527,5 +528,221 @@ func TestCameraSessionLetsGoBeforeSwitching(t *testing.T) {
 	}
 	if cameraWord("front") == cameraWord("back") || cameraWord("front") == "front" {
 		t.Fatal("cameraWord does not name the cameras")
+	}
+}
+
+func TestConnectionModeAndDeviceAppsCache(t *testing.T) {
+	dir := t.TempDir()
+	a := New("test", dir)
+	if a.connectionMode() != ConnBothADB || !a.autoSwitchOn() || a.prefersCompanion() || !a.allowsWirelessADB() {
+		t.Fatalf("unexpected defaults: mode=%q auto=%v prefComp=%v allowADB=%v", a.connectionMode(), a.autoSwitchOn(), a.prefersCompanion(), a.allowsWirelessADB())
+	}
+
+	a.mu.Lock()
+	a.prefs.ConnectionMode = ConnBothCompanion
+	a.savePrefs()
+	a.mu.Unlock()
+	b := New("test", dir)
+	if b.connectionMode() != ConnBothCompanion || !b.autoSwitchOn() || !b.prefersCompanion() || !b.allowsWirelessADB() {
+		t.Fatalf("unexpected both_companion state: mode=%q auto=%v prefComp=%v allowADB=%v", b.connectionMode(), b.autoSwitchOn(), b.prefersCompanion(), b.allowsWirelessADB())
+	}
+
+	b.mu.Lock()
+	b.prefs.ConnectionMode = ConnCompanionOnly
+	b.savePrefs()
+	b.mu.Unlock()
+	if b.autoSwitchOn() || !b.prefersCompanion() || b.allowsWirelessADB() {
+		t.Fatalf("companion_only must disable wireless ADB and auto-switch")
+	}
+
+	apps := []adb.AppEntry{
+		{Package: "com.whatsapp", Label: "WhatsApp", Resizeable: true},
+		{Package: "com.android.settings", Label: "Settings", System: true, Resizeable: true},
+	}
+	b.saveDeviceApps("hw-cached", apps)
+	c := New("test", dir)
+	got := c.appsForDevice("hw-cached")
+	if len(got) != 2 || got[0].Package != "com.whatsapp" {
+		t.Fatalf("cached apps after reload = %+v", got)
+	}
+}
+
+func TestOfflineAppsPickerAndStatusStripRender(t *testing.T) {
+	a := testApp(t)
+	a.devices = nil // force offlineCard with paired Companion + cached apps
+	a.saveDeviceApps("0123456789abcdef", []adb.AppEntry{
+		{Package: "com.android.settings", Label: "Settings", Resizeable: true},
+		{Package: "com.android.calculator2", Label: "Calculator", Resizeable: true},
+	})
+	a.picker = pickerState{Open: true, Kind: openAsApp, Device: "0123456789abcdef"}
+
+	sw := newSessionWindow(a, SessionSpec{
+		ID:           "dapp-test",
+		DeviceKey:    "0123456789abcdef",
+		Title:        "Calculator",
+		Mode:         SessionModeApp,
+		Transport:    "Companion",
+		BackendLabel: "Calculator",
+		AllowResize:  true,
+		AppPackage:   "com.android.calculator2",
+	})
+	sw.reconnecting = true
+	sw.reconnectMsg = L.SessionReconnecting()
+
+	for _, lang := range []string{"en", "zh-Hans"} {
+		i18n.SetLocaleFunc(func() string { return lang })
+		for _, dark := range []bool{false, true} {
+			ttHome := ui.NewTester(a.view, mainDefW, mainDefH)
+			ttHome.SetDark(dark)
+			ttHome.Frame()
+			if ttHome.Image().Bounds().Dx() != mainDefW {
+				t.Fatalf("unexpected offline apps view bounds: %v", ttHome.Image().Bounds())
+			}
+			ttSess := ui.NewTester(sw.view, appWinPortraitW, appWinPortraitH)
+			ttSess.SetDark(dark)
+			ttSess.Frame()
+			if ttSess.Image().Bounds().Dx() != appWinPortraitW {
+				t.Fatalf("unexpected statusStrip session bounds: %v", ttSess.Image().Bounds())
+			}
+		}
+	}
+}
+
+func TestWirelessEndpointAndPortScanCooldown(t *testing.T) {
+	dir := t.TempDir()
+	a := New("test", dir)
+	a.remembered = []RememberedDevice{
+		{HardwareHash: "hw-fold8", Name: "Fold8", Endpoint: "192.168.156.54:43139", AutoReconnect: true},
+	}
+	a.saveDevicesLocked()
+
+	a.noteWirelessEndpoint("hw-fold8", "192.168.156.54:39543")
+	reloaded := New("test", dir)
+	r, ok := reloaded.RememberedFor("hw-fold8")
+	if !ok || r.Endpoint != "192.168.156.54:39543" {
+		t.Fatalf("persisted endpoint = %q, want 192.168.156.54:39543", r.Endpoint)
+	}
+	// Loopback tunnel endpoints must never overwrite the phone's Wi-Fi endpoint.
+	reloaded.noteWirelessEndpoint("hw-fold8", "127.0.0.1:50001")
+	if r2, _ := reloaded.RememberedFor("hw-fold8"); r2.Endpoint != "192.168.156.54:39543" {
+		t.Fatalf("loopback endpoint overwrote Wi-Fi endpoint: %q", r2.Endpoint)
+	}
+
+	if !reloaded.portScanDue("hw-fold8") {
+		t.Fatal("first portScanDue should allow scan")
+	}
+	if reloaded.portScanDue("hw-fold8") {
+		t.Fatal("immediate second portScanDue must respect cooldown")
+	}
+}
+
+func TestPhoneNeedsActionAndOfflineAppsLoadingRender(t *testing.T) {
+	// companion_only still pulls up ADB once if APK hash mismatches or Enhanced mode daemon is down.
+	nAPK, nDaemon, wADB := phoneNeedsAction(
+		companion.DeviceStatus{AppBuildHash: "old", DaemonReady: false},
+		"new", false, false,
+	)
+	if !nAPK || !nDaemon || wADB {
+		t.Fatalf("companion_only with outdated APK+down daemon = (%v, %v, %v), want (true, true, false)", nAPK, nDaemon, wADB)
+	}
+	// both_adb wants ADB when onlineADB is false even if APK & daemon match.
+	nAPK, nDaemon, wADB = phoneNeedsAction(
+		companion.DeviceStatus{AppBuildHash: "new", DaemonReady: true},
+		"new", false, true,
+	)
+	if nAPK || nDaemon || !wADB {
+		t.Fatalf("both_adb without ADB = (%v, %v, %v), want (false, false, true)", nAPK, nDaemon, wADB)
+	}
+
+	// Render offlineCard when DaemonReady && DaemonTrustedDisplay is true even before apps cache exists,
+	// plus the appPickerLoading state.
+	a := testApp(t)
+	a.devices = nil
+	a.peerStatus["0123456789abcdef"] = companion.DeviceStatus{
+		BatteryPct:           92,
+		NetworkType:          "wifi",
+		DaemonReady:          true,
+		DaemonTrustedDisplay: true,
+	}
+	a.picker = pickerState{Open: true, Kind: openAsApp, Device: "0123456789abcdef"}
+	for _, lang := range []string{"en", "zh-Hans"} {
+		i18n.SetLocaleFunc(func() string { return lang })
+		for _, dark := range []bool{false, true} {
+			tt := ui.NewTester(a.view, mainDefW, mainDefH)
+			tt.SetDark(dark)
+			tt.Frame()
+			if tt.Image().Bounds().Dx() != mainDefW {
+				t.Fatalf("unexpected frame bounds: %v", tt.Image().Bounds())
+			}
+		}
+	}
+}
+
+func TestDirectLANRoutesAndAdaptiveStreamProfile(t *testing.T) {
+	a := testApp(t)
+	hash := "hw-route-test"
+	a.remembered = []RememberedDevice{
+		{
+			HardwareHash: hash,
+			Name:         "Fold8",
+			Endpoint:     "192.168.156.55:39543",
+			Companion: &CompanionBinding{
+				Port:     43856,
+				MeshHost: "AF-p-01234567 Fold8",
+			},
+		},
+	}
+	a.peerStatus[hash] = companion.DeviceStatus{WifiIPv4: "192.168.156.54"}
+	a.rt.meshCfgs = map[string]mesh.Config{
+		"net1": {
+			PortForwards: []mesh.PortForward{
+				{LocalPort: 51234, RemoteHost: "10.126.126.2", RemotePort: 43856},
+			},
+		},
+	}
+	a.netViews = map[string]netView{
+		"net1": {
+			Info: mesh.Info{
+				Peers: []mesh.Peer{
+					{Hostname: "AF-p-01234567 Fold8", Direct: false, Latency: 95},
+				},
+			},
+		},
+	}
+	a.diag.SelfCheck.HEVCHWDecoder = true
+
+	routes, err := a.companionRoutes(context.Background(), hash, *a.remembered[0].Companion)
+	if err != nil {
+		t.Fatalf("companionRoutes returned error: %v", err)
+	}
+	if len(routes) < 2 || !routes[0].directLAN || routes[0].addr != "192.168.156.54:43856" {
+		t.Fatalf("expected WifiIPv4 direct LAN route first, got %+v", routes)
+	}
+	if a.isMeshRoute(routes[0].addr) || !a.isMeshRoute("127.0.0.1:51234") {
+		t.Fatalf("isMeshRoute misclassified directLAN=%v mesh=%v", a.isMeshRoute(routes[0].addr), a.isMeshRoute("127.0.0.1:51234"))
+	}
+
+	// Direct LAN / ADB stays full-speed regardless of relayed mesh peer state.
+	br, fps, sz, codec, _, relayed := a.companionStreamProfile("AF-p-01234567 Fold8", "192.168.156.54:43856", false)
+	if relayed || br != 6_000_000 || fps != 60 || sz != 0 || codec != "h264" {
+		t.Fatalf("direct LAN mirror profile = (%d, %d, %d, %s, relayed=%v)", br, fps, sz, codec, relayed)
+	}
+
+	// Relayed 5G mesh path tightens bitrate/resolution and enables H.265.
+	br, fps, sz, codec, _, relayed = a.companionStreamProfile("AF-p-01234567 Fold8", "127.0.0.1:51234", false)
+	if !relayed || br != 1_000_000 || fps != 30 || sz != 960 || codec != "h265" {
+		t.Fatalf("relayed 5G mirror profile = (%d, %d, %d, %s, relayed=%v)", br, fps, sz, codec, relayed)
+	}
+	brD, fpsD, _, codecD, _, relayedD := a.companionStreamProfile("AF-p-01234567 Fold8", "127.0.0.1:51234", true)
+	if !relayedD || brD != 1_500_000 || fpsD != 30 || codecD != "h265" {
+		t.Fatalf("relayed 5G desktop profile = (%d, %d, %s, relayed=%v)", brD, fpsD, codecD, relayedD)
+	}
+
+	// WAN P2P mesh path uses balanced 2.5/2.0 Mbps @ 30 fps.
+	a.netViews["net1"].Info.Peers[0].Direct = true
+	a.netViews["net1"].Info.Peers[0].Latency = 55
+	brP, fpsP, szP, codecP, _, relayedP := a.companionStreamProfile("AF-p-01234567 Fold8", "127.0.0.1:51234", false)
+	if relayedP || brP != 2_000_000 || fpsP != 30 || szP != 1080 || codecP != "h265" {
+		t.Fatalf("WAN P2P mirror profile = (%d, %d, %d, %s, relayed=%v)", brP, fpsP, szP, codecP, relayedP)
 	}
 }

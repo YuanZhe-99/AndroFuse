@@ -311,10 +311,27 @@ flowchart TB
 - Fold 8 真机的摄像头切换、新版手机端界面与展开态双栏已部分实测通过（记入 `platform-notes.md`）。
 
 仍延后至 `0.1.0+` 后续迭代的事项：
-1. **5G 免线持久化方案（Deep Research 调研后决策）**：在 Wi-Fi/USB 时拉起脱离 `adbd` 的常驻 `uid=2000` 守护进程或集成 Shizuku，以解决纯 5G 无法连无线调试的问题，同时注意 Phantom Process Killer 与省电控制（`PLAN.md` §9.1-2）。
+1. **5G 免线持久化方案（见下方 §9.2）**：在 Wi-Fi/USB 时拉起脱离 `adbd` 的自建轻量 `uid=2000` 常驻守护进程（`PLAN.md` §9.2）。
 2. **真机补充联调**：物理 USB 拔线热切换复测；5G 下「通过伴侣共享屏幕」完整画面流与约 10 秒状态切换；经 OpenWRT 路由先直连后退回隧道的实测；Fold 8 上 `AF-p-` 新格式主机名与安全页局部回环探测复测。
 3. **纯在网手机实时状态**：为仅通过组网可达（尚未建立即时伴侣会话）的手机维持按需低功耗状态查询，以显示实时电量与温度。
 4. **手机端开机自启**：确认 MyGo 插件清单是否支持 `BOOT_COMPLETED` 接收器。
+
+---
+
+### §9.2 v0.2.0 架构路线：自建轻量 `uid=2000` 常驻守护进程与三层状态机（Deep Research 结论落地）
+
+基于对 Android 14–17（API 34–37）与三星 One UI 7–9 的底层调研与源码核实，`v0.2.0` 采用**「自建权限收敛轻量 `uid=2000` 守护进程 + 零端口 Binder/Socketpair 本机 IPC + 三层无感降级状态机」**：
+
+1. **三层运行态状态机**：
+   - **Tier 1（激活引导态 — 支持仅 USB 调试、免开无线调试）**：用户保持「USB 调试」开启与「默认 USB 配置 = 仅充电/不传输数据」，插一次 USB 线（2 秒）即可拉起脱离 `adb shell` 会话的 `uid=2000` 常驻守护进程（`server/dexhelper daemon`），**无需开启无线调试，也绝不启用明文 `adb tcpip 5555`**；若用户在 Wi-Fi 下想免线重激活，无线调试作为可选入口。
+   - **Tier 2（纯 5G / 跨网常驻高权态）**：离开 Wi-Fi 切入纯 5G 后，只要「USB 调试」仍开，`AdbService.stopAdbd()` 不会重启 `adbd`，守护进程在同 cgroup 内以零主动唤醒状态常驻。PC 经内置 EasyTier → Companion TLS 1.3 → 本地 `Binder + socketpair FD` 驱动 Native DeX、独立应用窗口、`scrcpy` 与 UHID 输入，免疫未来可能封堵 `127.0.0.1` ADB 的策略风险；Companion 异常退出时通过 `IBinder.linkToDeath()` 立即销毁残留虚拟显示。
+   - **Tier 3（纯 5G 重启冷启动降级态）**：手机在纯 5G 下重启后 `adbd` 无合法 STA Wi-Fi（`AdbDebuggingManager` 硬校验 `WifiInfo.getNetworkId() != -1`），通过 `binderDied` 诚实降级为已落地的 `MediaProjection` + `AccessibilityService`（`share.open` / `input.key`），待重连 Wi-Fi 或 USB 后自动恢复 Tier 1。
+2. **本机跨沙箱 IPC（SELinux Enforcing 合规）**：
+   - `untrusted_app` 主动 `connectto` `shell` 抽象套接字受 SELinux 拦截，因此由 `uid=2000` 守护进程经 `IActivityManager.getContentProviderExternal` + `IContentProvider.call("sendBinder")` 向 Companion 的 `AndroFuseDaemonProvider` 推送受限 `IBinder`。
+   - 守护进程对所有 Binder 调用强制执行内核级 `Binder.getCallingUid() == expectedAppUid` 校验（不暴露通用 Shell 执行接口），并通过 `Os.socketpair` + `ParcelFileDescriptor` 传递零拷贝流通道；若遇特定 OEM Knox 拦截 FD 传递，保留「经已认证 Binder 通道交换一次性令牌 + 随机回环端口」回退方案。
+3. **版本断层与 One UI 体检**：
+   - 运行时探测 `ADD_TRUSTED_DISPLAY`（规避 Android 15 / API 35 回归，兼容 Android 14 / 16 / 17 与 One UI 8–9 原生 DeX）。
+   - 分阶段推进：**Phase 1–3 与真实机体验闭环优化已落地，并在 `Pixel_9a_API_36`（Android 16）与 Galaxy Z Fold 8（`SM-F971U1`，Android 17 / One UI 9）端到端实测通过**：`dexhelper daemon`、`ContentProvider` + `Binder` + `Os.socketpair` FD 零拷贝桥接（Fold 8 `pid=31485`、`trusted_display=true`、`fd_verified=true`、零 `avc: denied`）、`daemon.open` / `daemon.ctrl` 经 Companion TLS 串流主屏交互镜像、**真 Samsung Native DeX**（`dex:1920x1080/160`，12 帧、`1920x1080`、DXVA `hw=true`）与 `1920x1080/200` `FlexDisplay` 虚拟桌面（11 帧、DXVA `hw=true`）及模拟器 `544x960/200` 无边框独立应用窗口；随后补齐 Companion 端 `start_app` 独立应用窗口与本地 `apps.json` 缓存对称能力、桌面端无线连接策略选择（`仅 Companion` / `双通道 ADB 优先` / `双通道 Companion 优先` + `自动快速切换并升回 ADB`）、Android `WatchNetwork` 网络切换组网防抖重绑、TCP Keepalive `3s`、5G ⇄ Wi-Fi 会话顶部状态反馈与一键重连及自动升回 ADB 逻辑；仅充电 USB 拔线与 Doze 息屏唤醒存活待补测。
 
 ---
 

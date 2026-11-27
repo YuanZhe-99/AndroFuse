@@ -1,5 +1,13 @@
 # Version History
 
+## v0.2.0 (2026-11-27)
+
+- **Persistent UID 2000 Enhanced Mode Daemon (`INV-01`, `INV-03`)**: Added `server/dexhelper` `Daemon.java`, `Daemon.kt`, and `AndroFuseDaemonProvider` with kernel-UID-checked scoped `IBinder` handoff (`getContentProviderExternal`), `ADD_TRUSTED_DISPLAY` probe, zero-copy `Os.socketpair` `ParcelFileDescriptor` IPC (`TX_ECHO_FD`), and `linkToDeath` auto-reattach. Unlocks full interactive phone mirroring, Samsung Native DeX (`dex:1920x1080/160` / `FlexDisplay`), and chromeless Independent App Windows (`start_app` + `apps.list` / `TX_LIST_APPS` + per-device `icon-cache/<hwHash>/apps.json`) over Companion TLS 1.3 without Wireless debugging.
+- **Desktop Connection Strategies & Seamless Failover**: Added `ConnectionMode` (`both_adb`, `both_companion`, `companion_only`) and `AutoSwitch` under `Settings › Phones and picture`, providing instant Companion failover on 5G drops, automatic upgrade back to healthy Wi-Fi/USB ADB in `both_adb`, and in-session status strip + manual Reconnect controls.
+- **Complete Phone Telemetry & Self-Healing Bootstrap**: `status.get` now reports `wifi_ipv4`, `wireless_adb_port`, `app_version`, `app_build_hash`, `companion_port`, `standby_running`, `accessibility_on`, and `daemon_*`; `Power.kt` restarts `_adb-tls-connect._tcp` NSD discovery on Wi-Fi transitions; and the desktop discovers changed ADB ports (with rate-limited `adb.FindWirelessPort` fallback) and proactively pulls up ADB at least once on Wi-Fi when APK hashes mismatch or Enhanced mode is down.
+- **Low-Latency Direct LAN Routing & 5G Relay Bufferbloat Control**: `companionRoutes` now prioritizes direct Wi-Fi/LAN TCP (`WifiIPv4` / `Endpoint`) ahead of EasyTier mesh forwards (`isMeshRoute`), `companionStreamProfile` adapts bitrate/resolution/codec per path (`1.0–1.5 Mbps` / `960`px or `1280×720` with H.265 when HW decoder is available over 5G relays), and `tuneVideoConn` / `Daemon.java` / `Daemon.kt` cap video socket (`64 KB`) and pipe (`32 KB`) buffers.
+- **Known Scope Boundaries & Checked Upstreams**: Brief frame-rate dips during full-screen animations over bandwidth-constrained 5G relays remain; dynamic congestion-controlled bitrate adaptation is deferred to a future release. Checked upstreams: Go `1.27.4` / MyGo `v0.10.0` / Rust `1.99.1` / scrcpy `v5.0.1` / EasyTier `v2.7.1` / Kyokai `v0.8.1` (`2026-11-27`).
+
 ## v0.1.0 (2026-11-26)
 
 - **Native Desktop & Core (`windows/arm64` & `windows/amd64`)**: Unified Go (`1.27`), MyGo (`v0.10.0`), and Rust 2024 (`core/androfuse-core`, C ABI v6) application under `GPL-3.0-only`, with Ed25519 helper bundle signing (`tools/sign`), MyGo signed updater configuration, and native PE verification (`tools/checkpe`).

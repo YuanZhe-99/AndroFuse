@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"image"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -15,6 +17,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/YuanZhe-99/AndroFuse/internal/avbridge"
+	"github.com/YuanZhe-99/AndroFuse/internal/companion"
 	"github.com/YuanZhe-99/AndroFuse/internal/core"
 	"github.com/YuanZhe-99/AndroFuse/internal/dex"
 	"github.com/YuanZhe-99/AndroFuse/internal/scrcpy"
@@ -117,7 +120,10 @@ type SessionWindow struct {
 	shareKey      func(action string)   // Back, Home, Recents for a Companion screen-sharing session
 	closed        chan struct{}         // closed once Close released the stream, its leases and audio
 	camBridge     *avbridge.MJPEGServer // a camera session's loopback MJPEG bridge (set before streaming)
-	switching     bool                  // Switch camera is restarting the stream
+	switching     bool                  // Switch camera or auto-upgrade is replacing the stream
+	reconnecting  bool
+	reconnectMsg  string
+	canReconnect  bool
 	statusNote    string
 	negotiatedW   int
 	negotiatedH   int
@@ -273,6 +279,9 @@ func (sw *SessionWindow) attachScrcpy(s *scrcpy.Session, d *dex.LoopbackSession,
 	sw.show(w, h)
 	if s != nil {
 		go sw.watchScrcpyEnd(s)
+		if sw.spec.Transport == "Companion" && sw.canAutoReconnectMode() {
+			go sw.watchAutoUpgrade(s)
+		}
 	}
 }
 
@@ -316,7 +325,23 @@ func (sw *SessionWindow) swapScrcpy(newSess *scrcpy.Session, newTransport, newSe
 	sw.redraw()
 	if newSess != nil {
 		go sw.watchScrcpyEnd(newSess)
+		if newTransport == "Companion" && sw.canAutoReconnectMode() {
+			go sw.watchAutoUpgrade(newSess)
+		}
 	}
+}
+
+func (sw *SessionWindow) canAutoReconnectMode() bool {
+	return sw.spec.Mode == SessionModeDeX ||
+		sw.spec.Mode == SessionModeDeXFallback ||
+		sw.spec.Mode == SessionModeMirror ||
+		sw.spec.Mode == SessionModeApp
+}
+
+func (sw *SessionWindow) reconnectingNow() bool {
+	sw.mu.Lock()
+	defer sw.mu.Unlock()
+	return sw.reconnecting
 }
 
 func (sw *SessionWindow) watchScrcpyEnd(s *scrcpy.Session) {
@@ -328,6 +353,8 @@ func (sw *SessionWindow) watchScrcpyEnd(s *scrcpy.Session) {
 		sw.dexSess != nil &&
 		sw.dexSess.Ready().CtrlPort > 0 &&
 		sw.app != nil
+	canReconn := sw.app != nil && sw.spec.DeviceKey != "" && sw.canAutoReconnectMode()
+	wasCompanion := sw.spec.Transport == "Companion"
 	sw.mu.Unlock()
 	if closing || !isCurrent || sw.switchingNow() {
 		return
@@ -335,6 +362,15 @@ func (sw *SessionWindow) watchScrcpyEnd(s *scrcpy.Session) {
 	if canHandoff && sw.app.handoffOn() {
 		sw.attemptDeXGraceHandoff(s)
 		return
+	}
+	if canReconn && (sw.app.autoSwitchOn() || wasCompanion) {
+		sw.attemptFastReconnect(s)
+		return
+	}
+	if canReconn {
+		sw.mu.Lock()
+		sw.canReconnect = true
+		sw.mu.Unlock()
 	}
 	if err := s.Err(); err != nil {
 		if sw.app != nil {
@@ -345,6 +381,504 @@ func (sw *SessionWindow) watchScrcpyEnd(s *scrcpy.Session) {
 		return
 	}
 	sw.setStatusNote(L.SessionEnded())
+}
+
+// ReconnectNow manually re-establishes an interrupted DeX, mirror, or app session according to
+// the active ConnectionMode preference.
+func (sw *SessionWindow) ReconnectNow() {
+	sw.mu.Lock()
+	cur := sw.scrcpySess
+	already := sw.reconnecting || sw.closing
+	sw.mu.Unlock()
+	if already {
+		return
+	}
+	sw.attemptFastReconnect(cur)
+}
+
+func (sw *SessionWindow) attemptFastReconnect(failedSess *scrcpy.Session) {
+	app := sw.app
+	if app == nil || sw.spec.DeviceKey == "" || !sw.canAutoReconnectMode() {
+		sw.setStatusNote(L.SessionEnded())
+		return
+	}
+	sw.mu.Lock()
+	if sw.closing || sw.scrcpySess != failedSess {
+		sw.mu.Unlock()
+		return
+	}
+	sw.reconnecting = true
+	sw.canReconnect = false
+	sw.reconnectMsg = L.SessionReconnecting()
+	sw.mu.Unlock()
+	sw.redraw()
+
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		sw.mu.Lock()
+		stillSame := !sw.closing && sw.scrcpySess == failedSess
+		sw.mu.Unlock()
+		if !stillSame {
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		mode := app.connectionMode()
+		switch mode {
+		case ConnBothCompanion:
+			if newSess, err := sw.openCompanionReplacement(ctx); err == nil {
+				cancel()
+				sw.replaceSession(failedSess, newSess, nil, "Companion", "", L.SessionReconnectedCompanion())
+				return
+			}
+			if newSess, newDex, tLbl, ser, err := sw.openADBReplacement(ctx, false); err == nil {
+				cancel()
+				sw.replaceSession(failedSess, newSess, newDex, tLbl, ser, L.SessionSwitchedADB(tLbl))
+				app.RefreshDevices()
+				return
+			}
+		case ConnCompanionOnly:
+			if newSess, err := sw.openCompanionReplacement(ctx); err == nil {
+				cancel()
+				sw.replaceSession(failedSess, newSess, nil, "Companion", "", L.SessionReconnectedCompanion())
+				return
+			}
+		default:
+			if newSess, newDex, tLbl, ser, err := sw.openADBReplacement(ctx, true); err == nil {
+				cancel()
+				sw.replaceSession(failedSess, newSess, newDex, tLbl, ser, L.SessionSwitchedADB(tLbl))
+				app.RefreshDevices()
+				return
+			}
+			if newSess, err := sw.openCompanionReplacement(ctx); err == nil {
+				cancel()
+				sw.replaceSession(failedSess, newSess, nil, "Companion", "", L.SessionReconnectedCompanion())
+				return
+			}
+		}
+		cancel()
+		time.Sleep(1500 * time.Millisecond)
+	}
+
+	sw.mu.Lock()
+	if sw.scrcpySess == failedSess {
+		sw.reconnecting = false
+		sw.reconnectMsg = ""
+		sw.canReconnect = true
+	}
+	sw.mu.Unlock()
+	sw.setStatusNote(L.SessionEnded())
+}
+
+// watchAutoUpgrade monitors a Companion session and automatically upgrades it back to Wi-Fi or USB
+// ADB when ConnectionMode is Both (ADB first) and AutoSwitch is enabled.
+func (sw *SessionWindow) watchAutoUpgrade(compSess *scrcpy.Session) {
+	tick := time.NewTicker(5 * time.Second)
+	defer tick.Stop()
+	for {
+		select {
+		case <-compSess.Done():
+			return
+		case <-tick.C:
+		}
+		sw.mu.Lock()
+		closing := sw.closing
+		current := sw.scrcpySess == compSess
+		reconn := sw.reconnecting
+		sw.mu.Unlock()
+		if closing || !current {
+			return
+		}
+		app := sw.app
+		if app == nil || app.connectionMode() != ConnBothADB || !app.autoSwitchOn() || reconn {
+			continue
+		}
+		pCtx, pCancel := context.WithTimeout(context.Background(), 15*time.Second)
+		ok := sw.adbHealthyForUpgrade(pCtx)
+		pCancel()
+		if !ok {
+			continue
+		}
+
+		sw.mu.Lock()
+		if sw.closing || sw.scrcpySess != compSess || sw.reconnecting {
+			sw.mu.Unlock()
+			return
+		}
+		sw.reconnecting = true
+		sw.reconnectMsg = L.SessionUpgradingADB()
+		sw.mu.Unlock()
+		sw.redraw()
+
+		uCtx, uCancel := context.WithTimeout(context.Background(), 15*time.Second)
+		newSess, newDex, tLbl, ser, err := sw.openADBReplacement(uCtx, false)
+		uCancel()
+		if err == nil {
+			sw.replaceSession(compSess, newSess, newDex, tLbl, ser, L.SessionUpgradedADB(tLbl))
+			app.RefreshDevices()
+			return
+		}
+
+		sw.mu.Lock()
+		if sw.scrcpySess == compSess {
+			sw.reconnecting = false
+			sw.reconnectMsg = ""
+		}
+		sw.mu.Unlock()
+		sw.redraw()
+	}
+}
+
+func (sw *SessionWindow) adbHealthyForUpgrade(ctx context.Context) bool {
+	app := sw.app
+	if app == nil || sw.spec.DeviceKey == "" {
+		return false
+	}
+	_, ok := app.discoverAndConnectADB(ctx, sw.spec.DeviceKey, true)
+	return ok
+}
+
+func (sw *SessionWindow) replaceSession(oldSess, newSess *scrcpy.Session, newDex *dex.LoopbackSession, transport, serial, banner string) {
+	sw.mu.Lock()
+	if sw.closing || (oldSess != nil && sw.scrcpySess != oldSess) {
+		sw.mu.Unlock()
+		if newSess != nil {
+			newSess.Close()
+		}
+		if newDex != nil {
+			newDex.Stop()
+		}
+		return
+	}
+	prevDex := sw.dexSess
+	sw.switching = true
+	sw.dexSess = newDex
+	sw.reconnecting = false
+	sw.reconnectMsg = ""
+	sw.canReconnect = false
+	sw.mu.Unlock()
+
+	sw.swapScrcpy(newSess, transport, serial)
+
+	sw.mu.Lock()
+	sw.switching = false
+	sw.mu.Unlock()
+
+	go func() {
+		if oldSess != nil && oldSess != newSess {
+			oldSess.Close()
+		}
+		if prevDex != nil && prevDex != newDex {
+			prevDex.Stop()
+		}
+	}()
+	if banner != "" {
+		sw.flashNote(banner)
+	}
+}
+
+func (sw *SessionWindow) openADBReplacement(ctx context.Context, allowPortScan bool) (*scrcpy.Session, *dex.LoopbackSession, string, string, error) {
+	app := sw.app
+	client, store, err := app.ensureADBAndLeases()
+	if err != nil {
+		return nil, nil, "", "", err
+	}
+	app.rt.coreMu.Lock()
+	lib, err := app.ensureCoreLocked()
+	app.rt.coreMu.Unlock()
+	if err != nil {
+		return nil, nil, "", "", err
+	}
+	cand, ok := app.discoverAndConnectADB(ctx, sw.spec.DeviceKey, allowPortScan)
+	if !ok {
+		return nil, nil, "", "", fmt.Errorf("no healthy ADB transport")
+	}
+
+	sw.mu.Lock()
+	hasAudio := sw.audioPlayer != nil
+	sw.mu.Unlock()
+	if !hasAudio {
+		if ap, aErr := lib.OpenAudioPlayer(48000, 2); aErr == nil && ap != nil {
+			sw.attachAudio(ap)
+		}
+	}
+
+	sp := app.streamPrefs()
+	tLabel := transportLabel(cand.Transport)
+	switch sw.spec.Mode {
+	case SessionModeDeX:
+		var vSess *scrcpy.Session
+		dSess, dErr := dex.StartNativeLoopback(ctx, client, store, cand.Serial, 1920, 1080, 160, 30)
+		if dErr == nil {
+			ready := dSess.Ready()
+			vSess, err = scrcpy.StartADB(ctx, client, lib, store, scrcpy.LaunchConfig{
+				SessionID:     sw.spec.ID + "-vid",
+				Serial:        cand.Serial,
+				DisplayID:     ready.DisplayID,
+				MaxFPS:        sp.fps,
+				CodecID:       sp.codec,
+				VideoBitRate:  12_000_000,
+				EnableControl: true,
+				Audio:         sp.audio,
+				InitialWidth:  uint32(ready.Width),
+				InitialHeight: uint32(ready.Height),
+				OnFrame: func(f core.NV12Frame) {
+					if vSess != nil {
+						st := vSess.Stats()
+						sw.PushNV12(f, st.MeasuredFPS, st.AvgDecodeUs)
+					} else {
+						sw.PushNV12(f, 0, int64(f.DecodeUs))
+					}
+				},
+				OnClipboard: sw.OnDeviceClipboard,
+				OnAudioPCM:  sw.PushAudioPCM,
+			})
+			if err == nil {
+				return vSess, dSess, tLabel, cand.Serial, nil
+			}
+			dSess.Stop()
+		}
+		return nil, nil, "", "", dErr
+	case SessionModeDeXFallback:
+		var vSess *scrcpy.Session
+		vSess, err = scrcpy.StartADB(ctx, client, lib, store, scrcpy.LaunchConfig{
+			SessionID:     sw.spec.ID,
+			Serial:        cand.Serial,
+			NewDisplay:    "1600x900/160",
+			FlexDisplay:   true,
+			MaxFPS:        sp.fps,
+			CodecID:       sp.codec,
+			VideoBitRate:  8_000_000,
+			EnableControl: true,
+			Audio:         sp.audio,
+			InitialWidth:  1600,
+			InitialHeight: 900,
+			OnFrame: func(f core.NV12Frame) {
+				if vSess != nil {
+					st := vSess.Stats()
+					sw.PushNV12(f, st.MeasuredFPS, st.AvgDecodeUs)
+				} else {
+					sw.PushNV12(f, 0, int64(f.DecodeUs))
+				}
+			},
+			OnClipboard: sw.OnDeviceClipboard,
+			OnAudioPCM:  sw.PushAudioPCM,
+		})
+		return vSess, nil, tLabel, cand.Serial, err
+	case SessionModeApp:
+		startArg := strings.TrimSpace(sw.spec.AppPackage)
+		if startArg != "" && !strings.HasPrefix(startArg, "+") {
+			startArg = "+" + startArg
+		}
+		var vSess *scrcpy.Session
+		vSess, err = scrcpy.StartADB(ctx, client, lib, store, scrcpy.LaunchConfig{
+			SessionID:             sw.spec.ID,
+			Serial:                cand.Serial,
+			NewDisplay:            fmt.Sprintf("%dx%d/%d", appWinInitW, appWinInitH, appWinInitDPI),
+			FlexDisplay:           true,
+			HideSystemDecorations: true,
+			StartAppPackage:       startArg,
+			MaxFPS:                sp.fps,
+			CodecID:               sp.codec,
+			VideoBitRate:          8_000_000,
+			EnableControl:         true,
+			Audio:                 sp.audio,
+			InitialWidth:          uint32(appWinInitW),
+			InitialHeight:         uint32(appWinInitH),
+			OnFrame: func(f core.NV12Frame) {
+				if vSess != nil {
+					st := vSess.Stats()
+					sw.PushNV12(f, st.MeasuredFPS, st.AvgDecodeUs)
+				} else {
+					sw.PushNV12(f, 0, int64(f.DecodeUs))
+				}
+			},
+			OnClipboard: sw.OnDeviceClipboard,
+			OnAudioPCM:  sw.PushAudioPCM,
+		})
+		return vSess, nil, tLabel, cand.Serial, err
+	default:
+		var vSess *scrcpy.Session
+		vSess, err = scrcpy.StartADB(ctx, client, lib, store, scrcpy.LaunchConfig{
+			SessionID:     sw.spec.ID,
+			Serial:        cand.Serial,
+			DisplayID:     0,
+			MaxSize:       sp.size,
+			MaxFPS:        sp.fps,
+			CodecID:       sp.codec,
+			VideoBitRate:  8_000_000,
+			EnableControl: true,
+			Audio:         sp.audio,
+			InitialWidth:  1080,
+			InitialHeight: 1920,
+			OnFrame: func(f core.NV12Frame) {
+				if vSess != nil {
+					st := vSess.Stats()
+					sw.PushNV12(f, st.MeasuredFPS, st.AvgDecodeUs)
+				} else {
+					sw.PushNV12(f, 0, int64(f.DecodeUs))
+				}
+			},
+			OnClipboard: sw.OnDeviceClipboard,
+			OnAudioPCM:  sw.PushAudioPCM,
+		})
+		return vSess, nil, tLabel, cand.Serial, err
+	}
+}
+
+func (sw *SessionWindow) openCompanionReplacement(ctx context.Context) (*scrcpy.Session, error) {
+	app := sw.app
+	devKey := sw.spec.DeviceKey
+	r, ok := app.RememberedFor(devKey)
+	if !ok || r.Companion == nil {
+		return nil, fmt.Errorf("companion not paired")
+	}
+	b := *r.Companion
+	tok, err := openSecret(b.SealedToken)
+	if err != nil {
+		return nil, err
+	}
+	keys, addr, err := app.findCompanion(ctx, devKey, b, string(tok))
+	if err != nil {
+		return nil, err
+	}
+	st, stErr := keys.GetStatus(ctx)
+	_ = keys.Close()
+	if stErr != nil {
+		return nil, stErr
+	}
+	if !st.DaemonReady {
+		return nil, fmt.Errorf("daemon not ready")
+	}
+	app.rt.coreMu.Lock()
+	lib, err := app.ensureCoreLocked()
+	app.rt.coreMu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+
+	desktop := sw.spec.Mode == SessionModeDeX || sw.spec.Mode == SessionModeDeXFallback
+	bitRate, maxFPS, maxSize, codecStr, codecID, relayed := app.companionStreamProfile(b.MeshHost, addr, desktop)
+	var (
+		vidConn, ctrlConn net.Conn
+		cfg               scrcpy.LaunchConfig
+	)
+	switch sw.spec.Mode {
+	case SessionModeDeX, SessionModeDeXFallback:
+		if !st.DaemonTrustedDisplay {
+			return nil, fmt.Errorf("daemon trusted display unavailable")
+		}
+		dexSpec, fallbackDisp := "dex:1920x1080/160", "1920x1080/200"
+		initW, initH := uint32(1920), uint32(1080)
+		if relayed {
+			dexSpec, fallbackDisp = "dex:1280x720/140", "1280x720/160"
+			initW, initH = 1280, 720
+		}
+		newDisplay, flexDisplay := fallbackDisp, true
+		if sw.spec.Mode == SessionModeDeX && isSamsungRemembered(r) {
+			vidConn, ctrlConn, err = companion.DialDaemonStream(ctx, addr, string(tok), b.Fingerprint, companion.DaemonStreamRequest{
+				BitRate:    bitRate,
+				MaxFPS:     maxFPS,
+				Codec:      codecStr,
+				NewDisplay: dexSpec,
+				Control:    true,
+			})
+			if err == nil {
+				newDisplay, flexDisplay = "", false
+			}
+		}
+		if vidConn == nil {
+			vidConn, ctrlConn, err = companion.DialDaemonStream(ctx, addr, string(tok), b.Fingerprint, companion.DaemonStreamRequest{
+				BitRate:     bitRate,
+				MaxFPS:      maxFPS,
+				Codec:       codecStr,
+				NewDisplay:  fallbackDisp,
+				FlexDisplay: true,
+				Control:     true,
+			})
+		}
+		cfg = scrcpy.LaunchConfig{
+			SessionID:     sw.spec.ID,
+			NewDisplay:    newDisplay,
+			FlexDisplay:   flexDisplay,
+			EnableControl: true,
+			MaxFPS:        float64(maxFPS),
+			CodecID:       codecID,
+			VideoBitRate:  bitRate,
+			InitialWidth:  initW,
+			InitialHeight: initH,
+		}
+	case SessionModeApp:
+		if !st.DaemonTrustedDisplay {
+			return nil, fmt.Errorf("daemon trusted display unavailable")
+		}
+		startArg := strings.TrimSpace(sw.spec.AppPackage)
+		if startArg != "" && !strings.HasPrefix(startArg, "+") {
+			startArg = "+" + startArg
+		}
+		newDisp := fmt.Sprintf("%dx%d/%d", appWinInitW, appWinInitH, appWinInitDPI)
+		vidConn, ctrlConn, err = companion.DialDaemonStream(ctx, addr, string(tok), b.Fingerprint, companion.DaemonStreamRequest{
+			BitRate:               bitRate,
+			MaxFPS:                maxFPS,
+			Codec:                 codecStr,
+			NewDisplay:            newDisp,
+			HideSystemDecorations: true,
+			FlexDisplay:           true,
+			StartApp:              startArg,
+			Control:               true,
+		})
+		cfg = scrcpy.LaunchConfig{
+			SessionID:             sw.spec.ID,
+			NewDisplay:            newDisp,
+			FlexDisplay:           true,
+			HideSystemDecorations: true,
+			StartAppPackage:       startArg,
+			EnableControl:         true,
+			MaxFPS:                float64(maxFPS),
+			CodecID:               codecID,
+			VideoBitRate:          bitRate,
+			InitialWidth:          uint32(appWinInitW),
+			InitialHeight:         uint32(appWinInitH),
+		}
+	default:
+		vidConn, ctrlConn, err = companion.DialDaemonStream(ctx, addr, string(tok), b.Fingerprint, companion.DaemonStreamRequest{
+			MaxSize: maxSize,
+			BitRate: bitRate,
+			MaxFPS:  maxFPS,
+			Codec:   codecStr,
+			Control: true,
+		})
+		cfg = scrcpy.LaunchConfig{
+			SessionID:     sw.spec.ID,
+			EnableControl: true,
+			MaxSize:       maxSize,
+			MaxFPS:        float64(maxFPS),
+			CodecID:       codecID,
+			InitialWidth:  1080,
+			InitialHeight: 1920,
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+	var vSess *scrcpy.Session
+	cfg.OnFrame = func(f core.NV12Frame) {
+		if vSess != nil {
+			st := vSess.Stats()
+			sw.PushNV12(f, st.MeasuredFPS, st.AvgDecodeUs)
+		} else {
+			sw.PushNV12(f, 0, int64(f.DecodeUs))
+		}
+	}
+	cfg.OnClipboard = sw.OnDeviceClipboard
+	vSess, err = scrcpy.StartFromConns(lib, nil, nil, 0, 0, nil, vidConn, ctrlConn, true, cfg)
+	if err != nil {
+		_ = vidConn.Close()
+		if ctrlConn != nil {
+			_ = ctrlConn.Close()
+		}
+		return nil, err
+	}
+	return vSess, nil
 }
 
 func (sw *SessionWindow) attemptDeXGraceHandoff(failedSess *scrcpy.Session) {
@@ -777,10 +1311,45 @@ func (sw *SessionWindow) view(c *ui.Context) {
 	t := c.Theme()
 	ui.Column(c.Key("sess-own")).Fill().Background(t.Background).Children(func() {
 		sw.app.sessionHeader(c, sw, nil, false, runtime.GOOS == "windows")
+		sw.statusStrip(c)
 		sw.shareStrip(c)
 		ui.Column(c.Key("sess-own-body")).Grow(1).FillWidth().MinHeight(0).Background(ui.Hex(stageBgHex)).Children(func() {
 			sw.content(c, false)
 		})
+	})
+}
+
+func (sw *SessionWindow) statusStrip(c *ui.Context) {
+	sw.mu.Lock()
+	reconn := sw.reconnecting
+	msg := sw.reconnectMsg
+	canRec := sw.canReconnect
+	note := sw.statusNote
+	closing := sw.closing
+	sw.mu.Unlock()
+	if closing || (!reconn && !canRec) {
+		return
+	}
+	k := tok(c)
+	ui.Row(c.Key("sess-status-strip")).FillWidth().Shrink(0).Padding(8, 12).Gap(8).AlignItems(ui.Center).Background(k.sunk).Children(func() {
+		if reconn {
+			ui.Spinner(c).Size(14, 14)
+			txt := msg
+			if txt == "" {
+				txt = L.SessionReconnecting()
+			}
+			ui.Text(c, txt).FontSize(sizeSmall).TextColor(k.text2).SingleLine().Grow(1).MinWidth(0)
+			return
+		}
+		ui.Icon(c, iconWarn).Size(14, 14).TextColor(k.warnText)
+		txt := note
+		if txt == "" {
+			txt = L.SessionEnded()
+		}
+		ui.Text(c, txt).FontSize(sizeSmall).TextColor(k.text2).SingleLine().Grow(1).MinWidth(0)
+		if ui.Button(c.Key("sess-reconn-btn"), L.ActionReconnectNow()).Clicked() {
+			go sw.ReconnectNow()
+		}
 	})
 }
 

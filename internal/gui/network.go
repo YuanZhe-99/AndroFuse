@@ -395,7 +395,8 @@ func (a *App) resumeNetworks() {
 func (a *App) pollNetworks(ctx context.Context) {
 	t := time.NewTicker(3 * time.Second)
 	defer t.Stop()
-	present := map[string]bool{} // paired phones seen in a network at the last poll
+	present := map[string]bool{}      // paired phones seen in a network at the last poll
+	lastRoutes := map[string]string{} // per-phone mesh route key to detect 5G <-> Wi-Fi shifts promptly
 	for {
 		select {
 		case <-ctx.Done():
@@ -427,21 +428,52 @@ func (a *App) pollNetworks(ctx context.Context) {
 				a.netViews[id] = v
 			}
 		})
-		// A paired phone that just appeared in a network (it came online, or left Wi-Fi for mobile
-		// data) gets adb back at once (RefreshDevices reconnects through the Companion).
+		// A paired phone that just appeared in a network or switched routes (e.g. 5G <-> Wi-Fi)
+		// triggers an immediate device scan & reconnect check.
 		now := map[string]bool{}
-		arrived := false
+		routesNow := map[string]string{}
+		var nudge []RememberedDevice
+		changed := false
 		for _, r := range a.rememberedList() {
-			if _, in := a.networkWay(r); in {
+			if way, in := a.networkWay(r); in {
 				now[r.HardwareHash] = true
-				arrived = arrived || !present[r.HardwareHash]
+				direct, _, _ := a.meshPeerRoute(r.Companion.MeshHost)
+				sig := fmt.Sprintf("%v|%s", direct, way)
+				routesNow[r.HardwareHash] = sig
+				if !present[r.HardwareHash] || lastRoutes[r.HardwareHash] != sig {
+					changed = true
+					nudge = append(nudge, r)
+				}
 			}
 		}
 		present = now
-		if arrived {
+		lastRoutes = routesNow
+		if changed {
 			a.RefreshDevices()
+			for _, r := range nudge {
+				r := r
+				go a.checkCompanionHealthOnce(ctx, r)
+			}
 		}
 	}
+}
+
+// meshPeerRoute reports whether hostname is in a running network along with whether its route is
+// direct (P2P vs relayed) and its measured latency in milliseconds.
+func (a *App) meshPeerRoute(hostname string) (direct bool, latencyMs float64, ok bool) {
+	if hostname == "" {
+		return false, 0, false
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, v := range a.netViews {
+		for _, p := range v.Info.Peers {
+			if p.Hostname == hostname || mesh.SameDevice(p.Hostname, hostname) {
+				return p.Direct, p.Latency, true
+			}
+		}
+	}
+	return false, 0, false
 }
 
 // meshPeerIPv4 finds hostname in the running networks.

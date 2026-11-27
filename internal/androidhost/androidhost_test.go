@@ -6,7 +6,10 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/i18n"
 	"github.com/egoist/mygo/ui"
@@ -167,5 +170,117 @@ func TestAutoStart(t *testing.T) {
 	defer func() { _ = third.StopServer() }()
 	if !third.Running() {
 		t.Fatal("starting by hand did not clear the stop")
+	}
+}
+
+func TestDaemonStatusAndView(t *testing.T) {
+	h := New(t.TempDir(), nil)
+	h.mu.Lock()
+	h.daemonReady = true
+	h.daemonPID = 4321
+	h.daemonTrustedDisplay = true
+	h.daemonFDVerified = true
+	h.mu.Unlock()
+
+	st := h.Status()
+	if !st.DaemonReady || st.DaemonPID != 4321 || !st.DaemonTrustedDisplay || !st.DaemonFDVerified {
+		t.Fatalf("unexpected daemon status fields: %+v", st)
+	}
+	for _, lang := range []string{"en", "zh-Hans"} {
+		i18n.SetLocaleFunc(func() string { return lang })
+		for _, dark := range []bool{false, true} {
+			for _, sz := range [][2]int{{360, 780}, {760, 780}} {
+				tt := ui.NewTester(func(c *ui.Context) {
+					RenderCompanionView(c, h)
+				}, sz[0], sz[1])
+				tt.SetDark(dark)
+				tt.Frame()
+				if tt.Image().Bounds().Dx() != sz[0] {
+					t.Fatalf("unexpected Companion frame bounds: %v", tt.Image().Bounds())
+				}
+			}
+		}
+	}
+}
+
+func TestStartServerConcurrentNoBindConflict(t *testing.T) {
+	h := New(t.TempDir(), nil)
+	defer func() { _ = h.StopServer() }()
+
+	const callers = 8
+	var wg sync.WaitGroup
+	errs := make(chan error, callers)
+	for range callers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- h.StartServer()
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent StartServer returned error: %v", err)
+		}
+	}
+	if got := h.LastError(); got != "" {
+		t.Fatalf("expected empty LastError, got %q", got)
+	}
+	if !h.Running() || h.ListenPort() <= 0 {
+		t.Fatalf("expected running server with bound port, running=%v port=%d", h.Running(), h.ListenPort())
+	}
+	if err := h.StopServer(); err != nil {
+		t.Fatalf("StopServer: %v", err)
+	}
+}
+
+func TestOnNetworkChangedDebounce(t *testing.T) {
+	h := New(t.TempDir(), nil)
+	var rebinds atomic.Int32
+	h.mu.Lock()
+	h.cfg.Mesh = &MeshSettings{NetworkName: "test-mesh"}
+	h.meshRebindDelay = 40 * time.Millisecond
+	h.onMeshRebind = func() { rebinds.Add(1) }
+	h.mu.Unlock()
+
+	// Initial network discovery should not trigger a rebind.
+	h.onNetworkChanged("cellular")
+	time.Sleep(80 * time.Millisecond)
+	if got := rebinds.Load(); got != 0 {
+		t.Fatalf("initial network callback triggered %d rebinds, want 0", got)
+	}
+
+	// Dropping to "none" should not trigger a rebind either.
+	h.onNetworkChanged("none")
+	time.Sleep(80 * time.Millisecond)
+	if got := rebinds.Load(); got != 0 {
+		t.Fatalf("none callback triggered %d rebinds, want 0", got)
+	}
+
+	// Rapid flutter -> wifi should debounce to 1 rebind after meshRebindDelay.
+	h.onNetworkChanged("cellular")
+	h.onNetworkChanged("wifi")
+	time.Sleep(120 * time.Millisecond)
+	if got := rebinds.Load(); got != 1 {
+		t.Fatalf("transition triggered %d rebinds, want 1", got)
+	}
+}
+
+func TestStatusReportsWirelessPortWithoutADBBeacon(t *testing.T) {
+	h := New(t.TempDir(), nil)
+	h.SetWirelessADBPort(39543)
+	h.mu.Lock()
+	h.cfg.ListenPort = 43856
+	h.cfg.Standby = true
+	h.a11yOn = true
+	h.apkHash = "deadbeef"
+	h.mu.Unlock()
+	if h.Config().Permissions.ADBBeacon {
+		t.Fatal("ADBBeacon should be disabled by default")
+	}
+	st := h.Status()
+	if st.WirelessADBPort != 39543 || st.AppVersion == "" || st.CompanionPort != 43856 || !st.StandbyRunning || !st.AccessibilityOn || st.AppBuildHash != "deadbeef" {
+		t.Fatalf("Status() missing full phone state: %+v", st)
 	}
 }

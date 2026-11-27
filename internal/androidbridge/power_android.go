@@ -5,6 +5,7 @@ package androidbridge
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -135,3 +136,99 @@ func Battery() (pct int, charging bool, tempC float64, ok bool) {
 
 // OpenNotificationSettings opens Android's notification settings for AndroFuse.
 func OpenNotificationSettings() { _ = callPower("openNotificationSettings", nil) }
+
+// GetDaemonStatus queries the current state of the persistent UID 2000 daemon (`PLAN` §9.2).
+func GetDaemonStatus() DaemonStatus {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var st DaemonStatus
+	_ = power.Call(ctx, "daemonStatus", nil, &st)
+	return st
+}
+
+// WatchDaemon calls fn whenever the UID 2000 daemon attaches or detaches, and invokes fn once
+// immediately if a daemon is already attached.
+func WatchDaemon(fn func(DaemonStatus)) (stop func()) {
+	off := power.On("daemon", func(data []byte) {
+		var st DaemonStatus
+		if json.Unmarshal(data, &st) == nil {
+			fn(st)
+		}
+	})
+	if cur := GetDaemonStatus(); cur.Ready {
+		fn(cur)
+	}
+	return off
+}
+
+// TestDaemonFD verifies that an `Os.socketpair` FD transferred over Binder is readable and
+// writable by the UID 2000 daemon (`TX_ECHO_FD`).
+func TestDaemonFD() (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var res struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error"`
+	}
+	if err := power.Call(ctx, "daemonTestFD", nil, &res); err != nil {
+		return false, err
+	}
+	return res.OK, nil
+}
+
+// StopDaemon asks the attached UID 2000 daemon to shut down cleanly (`TX_STOP`).
+func StopDaemon() bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var ok bool
+	_ = power.Call(ctx, "daemonStop", nil, &ok)
+	return ok
+}
+
+// OpenDaemonSession launches a `scrcpy-server` stream inside the UID 2000 daemon and bridges
+// its video and optional control `Os.socketpair` FDs onto local abstract sockets (`PLAN` §9.2).
+func OpenDaemonSession(cfg DaemonSessionConfig) (DaemonSessionHandles, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	var h DaemonSessionHandles
+	if err := power.Call(ctx, "daemonOpenSession", cfg, &h); err != nil {
+		return DaemonSessionHandles{}, err
+	}
+	if !h.OK {
+		msg := h.Error
+		if msg == "" {
+			msg = "daemon failed to open session"
+		}
+		return DaemonSessionHandles{}, errors.New(msg)
+	}
+	return h, nil
+}
+
+// CloseDaemonSession stops a running daemon scrcpy-server session cleanly (`INV-03`).
+func CloseDaemonSession(sessionID string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var ok bool
+	_ = power.Call(ctx, "daemonCloseSession", map[string]string{"sessionId": sessionID}, &ok)
+	return ok
+}
+
+// APKHash returns the SHA-256 hex digest of the installed Companion APK binary.
+func APKHash() string {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	var sum string
+	_ = power.Call(ctx, "apkHash", nil, &sum)
+	return sum
+}
+
+// ListDaemonApps queries the JSON array of launchable apps from the attached UID 2000 daemon.
+func ListDaemonApps() (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 18*time.Second)
+	defer cancel()
+	var raw string
+	if err := power.Call(ctx, "daemonListApps", nil, &raw); err != nil {
+		return "", err
+	}
+	return raw, nil
+}

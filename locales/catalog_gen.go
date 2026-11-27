@@ -5103,3 +5103,211 @@ func FailAssistant() string { return In(i18n.Locale()).FailAssistant() }
 func (msgs Messages) FailAssistant() string {
 	return Catalog.Format(msgs.locale, "FailAssistant", nil)
 }
+
+// PhoneDaemonReady says "Enhanced mode ready"
+// in the language the app shows.
+func PhoneDaemonReady() string { return In(i18n.Locale()).PhoneDaemonReady() }
+
+// PhoneDaemonReady says "Enhanced mode ready"
+// in the language of msgs.
+func (msgs Messages) PhoneDaemonReady() string {
+	return Catalog.Format(msgs.locale, "PhoneDaemonReady", nil)
+}
+
+// PhoneDaemonReadySub says "Full mirroring, DeX, and app windows work over Wi-Fi and 5G until the phone restarts"
+// in the language the app shows.
+func PhoneDaemonReadySub() string { return In(i18n.Locale()).PhoneDaemonReadySub() }
+
+// PhoneDaemonReadySub says "Full mirroring, DeX, and app windows work over Wi-Fi and 5G until the phone restarts"
+// in the language of msgs.
+func (msgs Messages) PhoneDaemonReadySub() string {
+	return Catalog.Format(msgs.locale, "PhoneDaemonReadySub", nil)
+}
+
+// PhoneDaemonOff says "Enhanced mode inactive"
+// in the language the app shows.
+func PhoneDaemonOff() string { return In(i18n.Locale()).PhoneDaemonOff() }
+
+// PhoneDaemonOff says "Enhanced mode inactive"
+// in the language of msgs.
+func (msgs Messages) PhoneDaemonOff() string {
+	return Catalog.Format(msgs.locale, "PhoneDaemonOff", nil)
+}
+
+// PhoneDaemonOffSub says "Connect to your PC once over USB or Wi-Fi to activate; full control then works on 5G"
+// in the language the app shows.
+func PhoneDaemonOffSub() string { return In(i18n.Locale()).PhoneDaemonOffSub() }
+
+// PhoneDaemonOffSub says "Connect to your PC once over USB or Wi-Fi to activate; full control then works on 5G"
+// in the language of msgs.
+func (msgs Messages) PhoneDaemonOffSub() string {
+	return Catalog.Format(msgs.locale, "PhoneDaemonOffSub", nil)
+}
+
+// SetConnMode says "Wireless connection priority"
+// in the language the app shows.
+func SetConnMode() string { return In(i18n.Locale()).SetConnMode() }
+
+// SetConnMode says "Wireless connection priority"
+// in the language of msgs.
+func (msgs Messages) SetConnMode() string {
+	return Catalog.Format(msgs.locale, "SetConnMode", nil)
+}
+
+// SetConnModeSub says "Choose between Wireless debugging and the Companion service, or use Companion only"
+// in the language the app shows.
+func SetConnModeSub() string { return In(i18n.Locale()).SetConnModeSub() }
+
+// SetConnModeSub says "Choose between Wireless debugging and the Companion service, or use Companion only"
+// in the language of msgs.
+func (msgs Messages) SetConnModeSub() string {
+	return Catalog.Format(msgs.locale, "SetConnModeSub", nil)
+}
+
+// ConnModeBothADB says "ADB first"
+// in the language the app shows.
+func ConnModeBothADB() string { return In(i18n.Locale()).ConnModeBothADB() }
+
+// ConnModeBothADB says "ADB first"
+// in the language of msgs.
+func (msgs Messages) ConnModeBothADB() string {
+	return Catalog.Format(msgs.locale, "ConnModeBothADB", nil)
+}
+
+// ConnModeBothComp says "Companion first"
+// in the language the app shows.
+func ConnModeBothComp() string { return In(i18n.Locale()).ConnModeBothComp() }
+
+// ConnModeBothComp says "Companion first"
+// in the language of msgs.
+func (msgs Messages) ConnModeBothComp() string {
+	return Catalog.Format(msgs.locale, "ConnModeBothComp", nil)
+}
+
+// ConnModeCompOnly says "Companion only"
+// in the language the app shows.
+func ConnModeCompOnly() string { return In(i18n.Locale()).ConnModeCompOnly() }
+
+// ConnModeCompOnly says "Companion only"
+// in the language of msgs.
+func (msgs Messages) ConnModeCompOnly() string {
+	return Catalog.Format(msgs.locale, "ConnModeCompOnly", nil)
+}
+
+// SetAutoSwitch says "Auto fast-switch and upgrade back to ADB"
+// in the language the app shows.
+func SetAutoSwitch() string { return In(i18n.Locale()).SetAutoSwitch() }
+
+// SetAutoSwitch says "Auto fast-switch and upgrade back to ADB"
+// in the language of msgs.
+func (msgs Messages) SetAutoSwitch() string {
+	return Catalog.Format(msgs.locale, "SetAutoSwitch", nil)
+}
+
+// SetAutoSwitchSub says "Automatically fall back to Companion during 5G switches and upgrade back when Wi-Fi ADB returns"
+// in the language the app shows.
+func SetAutoSwitchSub() string { return In(i18n.Locale()).SetAutoSwitchSub() }
+
+// SetAutoSwitchSub says "Automatically fall back to Companion during 5G switches and upgrade back when Wi-Fi ADB returns"
+// in the language of msgs.
+func (msgs Messages) SetAutoSwitchSub() string {
+	return Catalog.Format(msgs.locale, "SetAutoSwitchSub", nil)
+}
+
+// CardSwitchingCompanion says "Switching {name} to Companion…"
+// in the language the app shows.
+func CardSwitchingCompanion(name string) string {
+	return In(i18n.Locale()).CardSwitchingCompanion(name)
+}
+
+// CardSwitchingCompanion says "Switching {name} to Companion…"
+// in the language of msgs.
+func (msgs Messages) CardSwitchingCompanion(name string) string {
+	return Catalog.Format(msgs.locale, "CardSwitchingCompanion", map[string]any{"name": name})
+}
+
+// SessionReconnecting says "Switching network… Reconnecting"
+// in the language the app shows.
+func SessionReconnecting() string { return In(i18n.Locale()).SessionReconnecting() }
+
+// SessionReconnecting says "Switching network… Reconnecting"
+// in the language of msgs.
+func (msgs Messages) SessionReconnecting() string {
+	return Catalog.Format(msgs.locale, "SessionReconnecting", nil)
+}
+
+// SessionUpgradingADB says "Wi-Fi ADB returned · Upgrading stream…"
+// in the language the app shows.
+func SessionUpgradingADB() string { return In(i18n.Locale()).SessionUpgradingADB() }
+
+// SessionUpgradingADB says "Wi-Fi ADB returned · Upgrading stream…"
+// in the language of msgs.
+func (msgs Messages) SessionUpgradingADB() string {
+	return Catalog.Format(msgs.locale, "SessionUpgradingADB", nil)
+}
+
+// SessionUpgradedADB says "Upgraded to {transport}"
+// in the language the app shows.
+func SessionUpgradedADB(transport string) string {
+	return In(i18n.Locale()).SessionUpgradedADB(transport)
+}
+
+// SessionUpgradedADB says "Upgraded to {transport}"
+// in the language of msgs.
+func (msgs Messages) SessionUpgradedADB(transport string) string {
+	return Catalog.Format(msgs.locale, "SessionUpgradedADB", map[string]any{"transport": transport})
+}
+
+// SessionSwitchedADB says "Switched to {transport}"
+// in the language the app shows.
+func SessionSwitchedADB(transport string) string {
+	return In(i18n.Locale()).SessionSwitchedADB(transport)
+}
+
+// SessionSwitchedADB says "Switched to {transport}"
+// in the language of msgs.
+func (msgs Messages) SessionSwitchedADB(transport string) string {
+	return Catalog.Format(msgs.locale, "SessionSwitchedADB", map[string]any{"transport": transport})
+}
+
+// SessionReconnectedCompanion says "Reconnected over Companion"
+// in the language the app shows.
+func SessionReconnectedCompanion() string { return In(i18n.Locale()).SessionReconnectedCompanion() }
+
+// SessionReconnectedCompanion says "Reconnected over Companion"
+// in the language of msgs.
+func (msgs Messages) SessionReconnectedCompanion() string {
+	return Catalog.Format(msgs.locale, "SessionReconnectedCompanion", nil)
+}
+
+// ActionReconnectNow says "Reconnect"
+// in the language the app shows.
+func ActionReconnectNow() string { return In(i18n.Locale()).ActionReconnectNow() }
+
+// ActionReconnectNow says "Reconnect"
+// in the language of msgs.
+func (msgs Messages) ActionReconnectNow() string {
+	return Catalog.Format(msgs.locale, "ActionReconnectNow", nil)
+}
+
+// CardActivatingEnhanced says "Activating Enhanced mode on {name}…"
+// in the language the app shows.
+func CardActivatingEnhanced(name string) string {
+	return In(i18n.Locale()).CardActivatingEnhanced(name)
+}
+
+// CardActivatingEnhanced says "Activating Enhanced mode on {name}…"
+// in the language of msgs.
+func (msgs Messages) CardActivatingEnhanced(name string) string {
+	return Catalog.Format(msgs.locale, "CardActivatingEnhanced", map[string]any{"name": name})
+}
+
+// PickerLoadingApps says "Loading apps from phone…"
+// in the language the app shows.
+func PickerLoadingApps() string { return In(i18n.Locale()).PickerLoadingApps() }
+
+// PickerLoadingApps says "Loading apps from phone…"
+// in the language of msgs.
+func (msgs Messages) PickerLoadingApps() string {
+	return Catalog.Format(msgs.locale, "PickerLoadingApps", nil)
+}

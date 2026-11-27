@@ -256,6 +256,9 @@ func (a *App) noteMeshHost(hash, host string) {
 // endpoint (`INV-07`: TLS only).
 // Returns: true when one of them connected, so the caller scans again.
 func (a *App) reconnectRemembered(ctx context.Context, client *adb.Client, online map[string]bool, svcs []adb.MDNSService) bool {
+	if !a.allowsWirelessADB() {
+		return false
+	}
 	a.mu.Lock()
 	var want []RememberedDevice
 	for _, r := range a.remembered {
@@ -279,10 +282,9 @@ func (a *App) reconnectRemembered(ctx context.Context, client *adb.Client, onlin
 			_, err := client.ConnectTLS(ctx, r.Endpoint, false)
 			done = err == nil
 		}
-		// Last, through its Companion (on the LAN or across a network), at most every two minutes.
+		// Last, dynamically discover any changed port via Companion (wifi_ipv4 + port or port scan / tunnel).
 		if !done && r.Companion != nil && a.tunnelDue(r.HardwareHash) {
-			_, err := a.adbOverCompanion(ctx, r.HardwareHash)
-			done = err == nil
+			_, done = a.discoverAndConnectADB(ctx, r.HardwareHash, true)
 		}
 		connected = connected || done
 	}
@@ -454,4 +456,124 @@ func (a *App) noteCompanionPort(hash string, port int) {
 			a.saveDevicesLocked()
 		}
 	})
+}
+
+// noteWirelessEndpoint saves the latest verified TLS Wireless debugging `host:port` for hash.
+// Side effects: saves devices.json when the endpoint changed.
+func (a *App) noteWirelessEndpoint(hash, endpoint string) {
+	if hash == "" || endpoint == "" || strings.HasPrefix(endpoint, "127.0.0.1:") {
+		return
+	}
+	a.update(func() {
+		if i := a.rememberedIndexLocked(hash); i >= 0 && a.remembered[i].Endpoint != endpoint {
+			a.remembered[i].Endpoint = endpoint
+			a.saveDevicesLocked()
+		}
+	})
+}
+
+// portScanDue rate-limits full Wireless debugging port-range scans to at most once every 25 s per phone.
+func (a *App) portScanDue(hash string) bool {
+	if hash == "" {
+		return false
+	}
+	a.rt.coreMu.Lock()
+	defer a.rt.coreMu.Unlock()
+	if a.rt.portScanTried == nil {
+		a.rt.portScanTried = map[string]time.Time{}
+	}
+	if time.Since(a.rt.portScanTried[hash]) < 25*time.Second {
+		return false
+	}
+	a.rt.portScanTried[hash] = time.Now()
+	return true
+}
+
+func (a *App) deviceIconDir(hash string) string {
+	if a.stateDir == "" {
+		return filepath.Join(os.TempDir(), "androfuse-icon-cache", hash)
+	}
+	return filepath.Join(a.stateDir, "icon-cache", hash)
+}
+
+// saveDeviceApps persists a probed phone's launchable apps to `<iconDir>/apps.json` and updates
+// the in-memory cache so Companion sessions can open Independent App Windows without ADB.
+func (a *App) saveDeviceApps(hash string, apps []adb.AppEntry) {
+	if hash == "" || len(apps) == 0 {
+		return
+	}
+	cp := append([]adb.AppEntry(nil), apps...)
+	a.mu.Lock()
+	if a.cachedApps == nil {
+		a.cachedApps = make(map[string][]adb.AppEntry)
+	}
+	a.cachedApps[hash] = cp
+	a.mu.Unlock()
+	if a.stateDir == "" {
+		return
+	}
+	dir := a.deviceIconDir(hash)
+	_ = os.MkdirAll(dir, 0o755)
+	if raw, err := json.Marshal(cp); err == nil {
+		tmp := filepath.Join(dir, "apps.json.tmp")
+		if os.WriteFile(tmp, raw, 0o600) == nil {
+			_ = os.Rename(tmp, filepath.Join(dir, "apps.json"))
+		}
+	}
+}
+
+func (a *App) loadDeviceAppsLocked(hash string) []adb.AppEntry {
+	if hash == "" {
+		return nil
+	}
+	if a.cachedApps != nil {
+		if cached, ok := a.cachedApps[hash]; ok && len(cached) > 0 {
+			return cached
+		}
+	}
+	if a.stateDir == "" {
+		return nil
+	}
+	raw, err := os.ReadFile(filepath.Join(a.deviceIconDir(hash), "apps.json"))
+	if err != nil {
+		return nil
+	}
+	var apps []adb.AppEntry
+	if json.Unmarshal(raw, &apps) != nil || len(apps) == 0 {
+		return nil
+	}
+	if a.cachedApps == nil {
+		a.cachedApps = make(map[string][]adb.AppEntry)
+	}
+	a.cachedApps[hash] = apps
+	if a.appIcons == nil {
+		a.appIcons = make(map[string]*ui.Bitmap)
+	}
+	for _, ap := range apps {
+		if ap.IconPath == "" || a.appIcons[ap.IconPath] != nil {
+			continue
+		}
+		if imgRaw, rErr := os.ReadFile(ap.IconPath); rErr == nil {
+			if bmp, bErr := ui.DecodeBitmap(imgRaw); bErr == nil {
+				a.appIcons[ap.IconPath] = bmp
+			}
+		}
+	}
+	return apps
+}
+
+// appsForDevice returns the launchable app list for hash, preferring live probed apps and falling
+// back to the on-disk/memory cache for Companion sessions when ADB is offline.
+func (a *App) appsForDevice(hash string) []adb.AppEntry {
+	if hash == "" {
+		return nil
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, d := range a.devices {
+		if (d.HardwareHash == hash || d.Target.DeviceHash == hash) && len(d.Apps) > 0 {
+			return d.Apps
+		}
+	}
+	return a.loadDeviceAppsLocked(hash)
 }

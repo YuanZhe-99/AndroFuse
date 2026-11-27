@@ -88,13 +88,62 @@ type DeviceStatus struct {
 	TempC             float64 `json:"temp_c"`
 	ThermalWarning    bool    `json:"thermal_warning"`
 	NetworkType       string  `json:"network_type"`
+	WifiIPv4          string  `json:"wifi_ipv4,omitempty"`
 	ForegroundPackage string  `json:"foreground_package,omitempty"`
 	WirelessADBPort   int     `json:"wireless_adb_port,omitempty"`
 	// MeshNetwork is the EasyTier network name the phone joined ("" for none) and MeshRunning
 	// whether it runs, so a desktop sees when the phone is not in its network (never the secret).
 	MeshNetwork string `json:"mesh_network,omitempty"`
 	MeshRunning bool   `json:"mesh_running,omitempty"`
-	Timestamp   int64  `json:"timestamp"`
+	// Daemon fields report the persistent UID 2000 daemon (`PLAN` §9.2) attached to the Companion.
+	DaemonReady          bool   `json:"daemon_ready,omitempty"`
+	DaemonPID            int    `json:"daemon_pid,omitempty"`
+	DaemonTrustedDisplay bool   `json:"daemon_trusted_display,omitempty"`
+	DaemonFDVerified     bool   `json:"daemon_fd_verified,omitempty"`
+	AppVersion           string `json:"app_version,omitempty"`
+	AppBuildHash         string `json:"app_build_hash,omitempty"`
+	CompanionPort        int    `json:"companion_port,omitempty"`
+	StandbyRunning       bool   `json:"standby_running,omitempty"`
+	AccessibilityOn      bool   `json:"accessibility_on,omitempty"`
+	Timestamp            int64  `json:"timestamp"`
+}
+
+// DaemonAppEntry describes one launchable application reported by Companion Enhanced mode.
+type DaemonAppEntry struct {
+	Package    string `json:"package"`
+	Label      string `json:"label"`
+	System     bool   `json:"system,omitempty"`
+	Resizeable bool   `json:"resizeable"`
+}
+
+// AppListResponse returns the launchable app list queried over Companion (`apps.list`).
+type AppListResponse struct {
+	Apps []DaemonAppEntry `json:"apps"`
+}
+
+// TunnelRequest asks Companion to bridge Wireless debugging; defined alongside DaemonStreamRequest (`PLAN` §9.2).
+// DaemonStreamRequest opens a full scrcpy-server video+control stream through the attached UID 2000 daemon (`PLAN` §9.2 Phase 2).
+type DaemonStreamRequest struct {
+	MaxSize               int    `json:"max_size,omitempty"`
+	BitRate               int    `json:"bit_rate,omitempty"`
+	MaxFPS                int    `json:"max_fps,omitempty"`
+	Codec                 string `json:"codec,omitempty"` // "h264" | "h265"
+	NewDisplay            string `json:"new_display,omitempty"`
+	HideSystemDecorations bool   `json:"hide_system_decorations,omitempty"`
+	FlexDisplay           bool   `json:"flex_display,omitempty"`
+	DisplayID             int    `json:"display_id,omitempty"`
+	StartApp              string `json:"start_app,omitempty"`
+	Control               bool   `json:"control,omitempty"`
+}
+
+// DaemonStreamResponse returns the session ID whose control channel can be attached via `daemon.ctrl`.
+type DaemonStreamResponse struct {
+	SessionID string `json:"session_id"`
+}
+
+// DaemonCtrlRequest attaches the secondary control TLS stream to a pending daemon session.
+type DaemonCtrlRequest struct {
+	SessionID string `json:"session_id"`
 }
 
 // NotificationEvent represents one synced Android notification.

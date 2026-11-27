@@ -5,6 +5,37 @@ import (
 	"time"
 )
 
+// DaemonStatus summarizes the attached persistent UID 2000 daemon (`PLAN` §9.2).
+type DaemonStatus struct {
+	Ready             bool `json:"ready"`
+	PID               int  `json:"pid"`
+	HasTrustedDisplay bool `json:"has_trusted_display"`
+	FDVerified        bool `json:"fd_verified"`
+}
+
+// DaemonSessionConfig configures a UID 2000 daemon scrcpy-server stream (`PLAN` §9.2 Phase 2).
+type DaemonSessionConfig struct {
+	MaxSize               int    `json:"maxSize"`
+	BitRate               int    `json:"bitRate"`
+	MaxFPS                int    `json:"maxFps"`
+	Codec                 string `json:"codec"`
+	NewDisplay            string `json:"newDisplay"`
+	HideSystemDecorations bool   `json:"hideDecorations"`
+	FlexDisplay           bool   `json:"flexDisplay"`
+	DisplayID             int    `json:"displayId"`
+	StartApp              string `json:"startApp"`
+	Control               bool   `json:"control"`
+}
+
+// DaemonSessionHandles holds the local abstract sockets bridging a daemon session.
+type DaemonSessionHandles struct {
+	OK          bool   `json:"ok"`
+	SessionID   string `json:"session_id"`
+	VideoSocket string `json:"video_socket"`
+	CtrlSocket  string `json:"ctrl_socket"`
+	Error       string `json:"error"`
+}
+
 // Power policy (PLAN §9.1-3).
 // activeIdle releases the wake/Wi-Fi lock this long after the last transfer activity
 // (a variable so tests can shorten it).

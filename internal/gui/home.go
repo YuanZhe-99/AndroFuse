@@ -508,9 +508,7 @@ func (a *App) phoneCard(c *ui.Context, k tokens, d DiscoveredDevice) {
 // phoneFigures shows the Companion's live status for hash when it is the connected Companion:
 // battery, temperature, network and the app in front.
 func (a *App) phoneFigures(c *ui.Context, k tokens, key, hash string) {
-	a.mu.Lock()
-	st, ok := a.compStatus, a.compConnected && a.compHash == hash
-	a.mu.Unlock()
+	st, ok := a.peerStatusFor(hash)
 	if !ok {
 		return
 	}
@@ -685,11 +683,27 @@ func (a *App) phoneMenu(c *ui.Context, key string, d DiscoveredDevice) {
 	})
 }
 
+// isSamsungRemembered reports whether a remembered phone is a Samsung / Galaxy device.
+func isSamsungRemembered(r RememberedDevice) bool {
+	for _, s := range []string{r.Maker, r.Brand, r.Model, r.Name} {
+		low := strings.ToLower(s)
+		if strings.Contains(low, "samsung") || strings.Contains(low, "galaxy") {
+			return true
+		}
+	}
+	return false
+}
+
 // offlineCard is a remembered phone that is not connected: when it was last seen, Connect, and ⋯.
 func (a *App) offlineCard(c *ui.Context, k tokens, r RememberedDevice) {
 	key := "off-" + r.HardwareHash
 	name := r.displayName()
 	way, inNet := a.networkWay(r)
+	isSamsung := isSamsungRemembered(r)
+	cachedApps := a.appsForDevice(r.HardwareHash)
+	st, hasSt := a.peerStatusFor(r.HardwareHash)
+	daemonAppsOK := hasSt && st.DaemonReady && st.DaemonTrustedDisplay
+	hasApps := r.Companion != nil && (len(cachedApps) > 0 || daemonAppsOK)
 	phoneShell(c, key, false).Children(func() {
 		phoneHeader(c, k, key+"-h", func() {
 			phoneAvatar(c, avatarSize, phoneLogo(r.Maker, r.Brand, r.Model, r.Name), nil, name)
@@ -701,6 +715,25 @@ func (a *App) offlineCard(c *ui.Context, k tokens, r RememberedDevice) {
 			}
 		}, func() {
 			iconBtn(c, key+"-more", iconMore, L.PaneMore(), false).PopoverMenuButton(func(m *ui.Menu) {
+				if r.Companion != nil {
+					dexLabel := L.KindDeXFallback()
+					if isSamsung {
+						dexLabel = L.KindDeX()
+					}
+					if m.Item(dexLabel).Chosen() {
+						a.LaunchDaemonDesktop(r.HardwareHash, OpenDefault)
+					}
+					if m.Item(L.KindScreen()).Chosen() {
+						a.LaunchShare(r.HardwareHash, OpenDefault)
+					}
+					if hasApps && m.Item(L.KindAppMenu()).Chosen() {
+						if len(cachedApps) == 0 {
+							go a.fetchCompanionApps(r.HardwareHash)
+						}
+						a.openPicker(openAsApp, r.HardwareHash)
+					}
+					m.Separator()
+				}
 				if m.Item(L.ActionRename()).Chosen() {
 					a.startRename(r.HardwareHash)
 				}
@@ -731,10 +764,42 @@ func (a *App) offlineCard(c *ui.Context, k tokens, r RememberedDevice) {
 		}
 		busy := a.cardWorkLine(c, k, key, r.HardwareHash)
 		ui.Box(c).Grow(1)
-		ui.Row(c.Key(key + "-acts")).Gap(8).Wrap().Children(func() {
-			// In a network without adb (mobile data), sharing the screen is what works.
-			if inNet && r.Companion != nil && ui.PrimaryButton(c.Key(key+"-share-main"), L.ShareScreen()).Disabled(busy).Clicked() {
-				a.LaunchShare(r.HardwareHash, OpenDefault)
+		ui.Row(c.Key(key + "-acts")).Gap(6).AlignItems(ui.Center).Wrap().Children(func() {
+			// In a network without adb (mobile data), launch DeX/virtual desktop or screen share via Companion.
+			if inNet && r.Companion != nil {
+				if isSamsung {
+					sb := ui.PrimarySplitButton(c.Key(key+"-ddex-main"), L.KindDeX())
+					sb.Arrow.PopoverMenuButton(func(m *ui.Menu) {
+						if m.Item(L.OpenInPane()).Chosen() {
+							a.LaunchDaemonDesktop(r.HardwareHash, OpenPane)
+						}
+						if m.Item(L.OpenBeside()).Chosen() {
+							a.LaunchDaemonDesktop(r.HardwareHash, OpenSplit)
+						}
+						if m.Item(L.OpenInWindow()).Chosen() {
+							a.LaunchDaemonDesktop(r.HardwareHash, OpenWindow)
+						}
+					}, ui.PopoverMenuButtonOptions{At: ui.AnchorBottomStart, Self: ui.AnchorTopStart})
+					if sb.Button.Disabled(busy).Clicked() {
+						a.LaunchDaemonDesktop(r.HardwareHash, OpenDefault)
+					}
+					if iconBtn(c, key+"-share-icon", iconMirror, L.KindScreen(), false).Disabled(busy).Clicked() {
+						a.LaunchShare(r.HardwareHash, OpenDefault)
+					}
+				} else {
+					if ui.PrimaryButton(c.Key(key+"-share-main"), L.ShareScreen()).Disabled(busy).Clicked() {
+						a.LaunchShare(r.HardwareHash, OpenDefault)
+					}
+					if iconBtn(c, key+"-ddex", iconDex, L.KindDeXFallback(), false).Disabled(busy).Clicked() {
+						a.LaunchDaemonDesktop(r.HardwareHash, OpenDefault)
+					}
+				}
+				if hasApps && iconBtn(c, key+"-apps", iconApps, L.KindApp(), false).Disabled(busy).Clicked() {
+					if len(cachedApps) == 0 {
+						go a.fetchCompanionApps(r.HardwareHash)
+					}
+					a.openPicker(openAsApp, r.HardwareHash)
+				}
 			}
 			if ui.Button(c.Key(key+"-connect"), L.ConnectGo()).Disabled(busy).Clicked() {
 				a.mu.Lock()

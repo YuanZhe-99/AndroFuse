@@ -19,6 +19,7 @@ import (
 	"github.com/YuanZhe-99/AndroFuse/internal/adb"
 	"github.com/YuanZhe-99/AndroFuse/internal/androidbridge"
 	"github.com/YuanZhe-99/AndroFuse/internal/companion"
+	"github.com/YuanZhe-99/AndroFuse/internal/version"
 	L "github.com/YuanZhe-99/AndroFuse/locales"
 )
 
@@ -52,22 +53,28 @@ type Host struct {
 	stateDir string
 	onChange func()
 
-	mu           sync.Mutex
-	cfg          Config
-	srv          *companion.Server
-	cancelSrv    context.CancelFunc
-	running      bool
-	lastErr      string
-	audit        []string
-	beaconInput  string
-	receiveBytes int64
-	network      string // default network kind from the Android NetworkCallback
-	stopNetWatch func()
-	pair         *pairPrompt
-	tab          string // Companion tab shown on phones (tabHome when "")
-	beaconCheck  string // outcome of the last wireless debugging port check
-	a11yOn       bool   // the Companion's accessibility service is on (checked in the background)
-	a11yChecked  time.Time
+	srvOpMu              sync.Mutex
+	mu                   sync.Mutex
+	cfg                  Config
+	srv                  *companion.Server
+	cancelSrv            context.CancelFunc
+	running              bool
+	lastErr              string
+	audit                []string
+	beaconInput          string
+	receiveBytes         int64
+	network              string // default network kind from the Android NetworkCallback
+	stopNetWatch         func()
+	pair                 *pairPrompt
+	tab                  string // Companion tab shown on phones (tabHome when "")
+	beaconCheck          string // outcome of the last wireless debugging port check
+	a11yOn               bool   // the Companion's accessibility service is on (checked in the background)
+	a11yChecked          time.Time
+	daemonReady          bool
+	daemonPID            int
+	daemonTrustedDisplay bool
+	daemonFDVerified     bool
+	apkHash              string
 	// meshForm is the network editor on the phone's network card while it is open; the pointer is
 	// swapped under mu, its fields are edited by the view.
 	meshForm *meshForm
@@ -80,6 +87,10 @@ type Host struct {
 	getLang   func() string
 	setLang   func(string)
 	mesh      meshRuntime
+	// Debounce timer for rebinding EasyTier mesh when the active Android network switches (e.g. 5G <-> Wi-Fi).
+	meshRebindTimer *time.Timer
+	meshRebindDelay time.Duration
+	onMeshRebind    func()
 }
 
 // New constructs an Android Companion Host rooted at stateDir and loads saved config.
@@ -159,6 +170,8 @@ func (h *Host) notify() {
 // companion.LocalSocket that `adb forward` reaches.
 // Side effects: saves a newly drawn ListenPort.
 func (h *Host) StartServer() error {
+	h.srvOpMu.Lock()
+	defer h.srvOpMu.Unlock()
 	h.mu.Lock()
 	if h.running && h.srv != nil {
 		h.mu.Unlock()
@@ -179,6 +192,17 @@ func (h *Host) StartServer() error {
 		},
 		GetStatus: func() companion.DeviceStatus {
 			return h.Status()
+		},
+		OnListApps: func() ([]companion.DaemonAppEntry, error) {
+			raw, err := androidbridge.ListDaemonApps()
+			if err != nil {
+				return nil, err
+			}
+			var apps []companion.DaemonAppEntry
+			if err := json.Unmarshal([]byte(raw), &apps); err != nil {
+				return nil, err
+			}
+			return apps, nil
 		},
 		OnShare: func() (net.Conn, error) {
 			if err := androidbridge.StartShare(1280, 4_000_000, L.ShareNotifTitle(), L.ShareNotifText(), L.ShareNotifStop()); err != nil {
@@ -204,6 +228,60 @@ func (h *Host) StartServer() error {
 				return errors.New(L.ShareNeedsAccessibility())
 			}
 			return nil
+		},
+		OnDaemonStream: func(req companion.DaemonStreamRequest) (string, net.Conn, net.Conn, func(), error) {
+			androidbridge.TouchActive()
+			handles, err := androidbridge.OpenDaemonSession(androidbridge.DaemonSessionConfig{
+				MaxSize:               req.MaxSize,
+				BitRate:               req.BitRate,
+				MaxFPS:                req.MaxFPS,
+				Codec:                 req.Codec,
+				NewDisplay:            req.NewDisplay,
+				HideSystemDecorations: req.HideSystemDecorations,
+				FlexDisplay:           req.FlexDisplay,
+				DisplayID:             req.DisplayID,
+				StartApp:              req.StartApp,
+				Control:               req.Control,
+			})
+			if err != nil {
+				return "", nil, nil, nil, err
+			}
+			videoConn, err := net.Dial("unix", "@"+handles.VideoSocket)
+			if err != nil {
+				androidbridge.CloseDaemonSession(handles.SessionID)
+				return "", nil, nil, nil, err
+			}
+			var ctrlConn net.Conn
+			if req.Control && handles.CtrlSocket != "" {
+				ctrlConn, err = net.Dial("unix", "@"+handles.CtrlSocket)
+				if err != nil {
+					_ = videoConn.Close()
+					androidbridge.CloseDaemonSession(handles.SessionID)
+					return "", nil, nil, nil, err
+				}
+			}
+			stopTouch := make(chan struct{})
+			var closeOnce sync.Once
+			go func() {
+				tick := time.NewTicker(20 * time.Second)
+				defer tick.Stop()
+				for {
+					select {
+					case <-stopTouch:
+						return
+					case <-tick.C:
+						androidbridge.TouchActive()
+					}
+				}
+			}()
+			h.mu.Lock()
+			h.appendAuditLocked("uid=2000 daemon opened session " + handles.SessionID)
+			h.mu.Unlock()
+			h.notify()
+			return handles.SessionID, videoConn, ctrlConn, func() {
+				closeOnce.Do(func() { close(stopTouch) })
+				androidbridge.CloseDaemonSession(handles.SessionID)
+			}, nil
 		},
 		OnTunnel: func(port int) (net.Conn, error) {
 			h.mu.Lock()
@@ -340,12 +418,7 @@ func (h *Host) StartServer() error {
 	h.appendAuditLocked("TLS 1.3 companion listening on " + srv.Addr())
 	h.mu.Unlock()
 	h.applyStandby(standby)
-	stopNet := androidbridge.WatchNetwork(func(kind string) {
-		h.mu.Lock()
-		h.network = kind
-		h.mu.Unlock()
-		h.notify()
-	})
+	stopNet := androidbridge.WatchNetwork(h.onNetworkChanged)
 	// The Wireless debugging port is found automatically (NsdManager); the phone's user no longer
 	// types it. A port is kept only once it answers as Wireless debugging (SaveWirelessADBPort).
 	stopADB := androidbridge.WatchWirelessDebugging(func(port int) {
@@ -356,9 +429,19 @@ func (h *Host) StartServer() error {
 		h.SetWirelessADBPort(0)
 		h.notify()
 	})
-	stopBoth := func() { stopNet(); stopADB() }
+	stopDaemon := androidbridge.WatchDaemon(func(st androidbridge.DaemonStatus) {
+		h.updateDaemonStatus(st)
+	})
+	go func() {
+		if sum := androidbridge.APKHash(); sum != "" {
+			h.mu.Lock()
+			h.apkHash = sum
+			h.mu.Unlock()
+		}
+	}()
+	stopAll := func() { stopNet(); stopADB(); stopDaemon() }
 	h.mu.Lock()
-	h.stopNetWatch = stopBoth
+	h.stopNetWatch = stopAll
 	h.mu.Unlock()
 	go h.resumeMesh()
 	androidbridge.SyncCompanionWidget(true, wPort, readDeviceTelemetry().BatteryPct)
@@ -380,6 +463,8 @@ func (h *Host) StartServer() error {
 
 // StopServer shuts down the active TLS 1.3 Companion listener cleanly.
 func (h *Host) StopServer() error {
+	h.srvOpMu.Lock()
+	defer h.srvOpMu.Unlock()
 	h.mu.Lock()
 	srv := h.srv
 	cancel := h.cancelSrv
@@ -392,6 +477,10 @@ func (h *Host) StopServer() error {
 	}
 	stopNet := h.stopNetWatch
 	h.stopNetWatch = nil
+	if h.meshRebindTimer != nil {
+		h.meshRebindTimer.Stop()
+		h.meshRebindTimer = nil
+	}
 	h.mu.Unlock()
 	if stopNet != nil {
 		stopNet()
@@ -484,15 +573,104 @@ func (h *Host) Status() companion.DeviceStatus {
 	st := readDeviceTelemetry()
 	st.Timestamp = time.Now().Unix()
 	h.mu.Lock()
-	if h.cfg.Permissions.ADBBeacon && h.cfg.WirelessADBPort > 0 {
+	if h.cfg.WirelessADBPort > 0 {
 		st.WirelessADBPort = h.cfg.WirelessADBPort
 	}
 	if h.network != "" {
 		st.NetworkType = h.network
 	}
+	st.DaemonReady = h.daemonReady
+	st.DaemonPID = h.daemonPID
+	st.DaemonTrustedDisplay = h.daemonTrustedDisplay
+	st.DaemonFDVerified = h.daemonFDVerified
+	st.AppVersion = version.Version
+	st.AppBuildHash = h.apkHash
+	st.CompanionPort = h.ListenPortLocked()
+	st.StandbyRunning = h.cfg.Standby
+	st.AccessibilityOn = h.a11yOn
 	h.mu.Unlock()
+	if st.NetworkType == "wifi" {
+		st.WifiIPv4 = localWifiIPv4()
+	}
 	st.MeshNetwork, st.MeshRunning, _ = h.MeshState()
 	return st
+}
+
+// localWifiIPv4 returns the device's non-loopback LAN IPv4 address when connected over Wi-Fi,
+// skipping EasyTier virtual mesh and CGNAT ranges (`10.126.126.*`, `100.64.0.0/10`) when a
+// local private IPv4 address is present.
+func localWifiIPv4() string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return ""
+	}
+	fallback := ""
+	for _, a := range addrs {
+		ipn, ok := a.(*net.IPNet)
+		if !ok || ipn.IP.IsLoopback() {
+			continue
+		}
+		v4 := ipn.IP.To4()
+		if v4 == nil {
+			continue
+		}
+		if v4[0] == 10 && v4[1] == 126 && v4[2] == 126 {
+			continue
+		}
+		if v4[0] == 100 && v4[1] >= 64 && v4[1] <= 127 {
+			if fallback == "" {
+				fallback = v4.String()
+			}
+			continue
+		}
+		if v4.IsPrivate() {
+			return v4.String()
+		}
+		if fallback == "" {
+			fallback = v4.String()
+		}
+	}
+	return fallback
+}
+
+func (h *Host) updateDaemonStatus(st androidbridge.DaemonStatus) {
+	h.mu.Lock()
+	wasReady := h.daemonReady
+	h.daemonReady = st.Ready
+	h.daemonPID = st.PID
+	h.daemonTrustedDisplay = st.HasTrustedDisplay
+	if !st.Ready {
+		h.daemonFDVerified = false
+	} else if st.FDVerified {
+		h.daemonFDVerified = true
+	}
+	verifyNow := !wasReady && st.Ready
+	if verifyNow {
+		h.appendAuditLocked(fmt.Sprintf("uid=2000 daemon attached (pid=%d, trusted_display=%v)", st.PID, st.HasTrustedDisplay))
+	} else if wasReady && !st.Ready {
+		h.appendAuditLocked("uid=2000 daemon detached")
+	}
+	h.mu.Unlock()
+	h.notify()
+
+	if verifyNow {
+		go func() {
+			ok, err := androidbridge.TestDaemonFD()
+			h.mu.Lock()
+			if h.daemonReady && h.daemonPID == st.PID {
+				h.daemonFDVerified = ok
+				if ok {
+					h.appendAuditLocked("uid=2000 daemon socketpair FD verified")
+				} else if err != nil {
+					h.appendAuditLocked("uid=2000 daemon socketpair FD failed: " + err.Error())
+				} else {
+					h.appendAuditLocked("uid=2000 daemon socketpair FD rejected")
+				}
+			}
+			h.mu.Unlock()
+			h.notify()
+		}()
+	}
 }
 
 // SetPermission toggles one named graded permission (`INV-09`) and persists the update.

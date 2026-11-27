@@ -30,8 +30,11 @@ import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import android.provider.Settings
+import java.io.File
+import java.io.FileInputStream
 import java.net.InetAddress
 import java.net.NetworkInterface
+import java.security.MessageDigest
 import org.json.JSONObject
 
 /** Plugin entry point; methods run on the UI thread. */
@@ -39,6 +42,8 @@ class AndroFusePowerPlugin : MyGoPlugin {
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
     private var netCallback: ConnectivityManager.NetworkCallback? = null
+    @Volatile private var lastNetKind: String = ""
+    @Volatile private var cachedApkHash: String? = null
 
     override fun call(method: String, args: JSONObject, reply: PluginReply) {
         val ctx = PluginHost.context
@@ -110,6 +115,43 @@ class AndroFusePowerPlugin : MyGoPlugin {
                 AndroFuseShare.openAccessibilitySettings()
                 reply.success(true)
             }
+            "daemonStatus" -> reply.success(AndroFuseDaemon.status())
+            "daemonTestFD" -> reply.success(AndroFuseDaemon.testSocketPair())
+            "daemonStop" -> reply.success(AndroFuseDaemon.stopDaemon())
+            "daemonOpenSession" -> reply.success(AndroFuseDaemon.openSession(
+                args.optInt("maxSize", 0),
+                args.optInt("bitRate", 8_000_000),
+                args.optInt("maxFps", 0),
+                args.optString("codec", "h264"),
+                args.optString("newDisplay", ""),
+                args.optBoolean("hideDecorations", false),
+                args.optBoolean("flexDisplay", false),
+                args.optInt("displayId", 0),
+                args.optBoolean("control", true),
+                args.optString("startApp", ""),
+            ))
+            "daemonCloseSession" -> reply.success(AndroFuseDaemon.closeSession(args.optString("sessionId", "")))
+            "daemonListApps" -> {
+                Thread { reply.success(AndroFuseDaemon.listApps()) }.apply {
+                    isDaemon = true
+                    start()
+                }
+            }
+            "apkHash" -> {
+                val cached = cachedApkHash
+                if (cached != null) {
+                    reply.success(cached)
+                } else {
+                    Thread {
+                        val h = computeApkHash(ctx)
+                        if (h.isNotEmpty()) cachedApkHash = h
+                        reply.success(h)
+                    }.apply {
+                        isDaemon = true
+                        start()
+                    }
+                }
+            }
             "state" -> {
                 val pm = ctx.getSystemService(Context.POWER_SERVICE) as PowerManager
                 reply.success(JSONObject()
@@ -144,12 +186,21 @@ class AndroFusePowerPlugin : MyGoPlugin {
 
     private fun watchNetwork(ctx: Context) {
         if (netCallback != null) return
+        val emitKind = {
+            val kind = currentNetwork(ctx)
+            val prev = lastNetKind
+            lastNetKind = kind
+            if (kind == "wifi" && prev != "wifi" && nsdListener != null) {
+                restartWirelessDebugging(ctx)
+            }
+            PluginHost.emit("androfusePower", "network", kind)
+        }
+        lastNetKind = currentNetwork(ctx)
         val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         val cb = object : ConnectivityManager.NetworkCallback() {
-            override fun onAvailable(network: Network) = PluginHost.emit("androfusePower", "network", currentNetwork(ctx))
-            override fun onLost(network: Network) = PluginHost.emit("androfusePower", "network", currentNetwork(ctx))
-            override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) =
-                PluginHost.emit("androfusePower", "network", currentNetwork(ctx))
+            override fun onAvailable(network: Network) { emitKind() }
+            override fun onLost(network: Network) { emitKind() }
+            override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) { emitKind() }
         }
         cm.registerDefaultNetworkCallback(cb)
         netCallback = cb
@@ -161,6 +212,16 @@ class AndroFusePowerPlugin : MyGoPlugin {
     private var nsdListener: NsdManager.DiscoveryListener? = null
     private var ownAdbService: String? = null
 
+    private fun restartWirelessDebugging(ctx: Context) {
+        val nsd = ctx.getSystemService(Context.NSD_SERVICE) as NsdManager
+        nsdListener?.let { old ->
+            try { nsd.stopServiceDiscovery(old) } catch (_: Exception) {}
+        }
+        nsdListener = null
+        ownAdbService = null
+        watchWirelessDebugging(ctx)
+    }
+
     private fun watchWirelessDebugging(ctx: Context) {
         if (nsdListener != null) return
         val nsd = ctx.getSystemService(Context.NSD_SERVICE) as NsdManager
@@ -169,7 +230,7 @@ class AndroFusePowerPlugin : MyGoPlugin {
             override fun onDiscoveryStopped(serviceType: String) {}
             override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) { nsdListener = null }
             override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) {}
-            override fun onServiceFound(info: NsdServiceInfo) = resolveOwn(nsd, info)
+            override fun onServiceFound(info: NsdServiceInfo) = resolveOwn(ctx, nsd, info)
             override fun onServiceLost(info: NsdServiceInfo) {
                 if (info.serviceName == ownAdbService) {
                     ownAdbService = null
@@ -182,7 +243,28 @@ class AndroFusePowerPlugin : MyGoPlugin {
     }
 
     @Suppress("DEPRECATION")
-    private fun resolveOwn(nsd: NsdManager, info: NsdServiceInfo) {
+    private fun resolveOwn(ctx: Context, nsd: NsdManager, info: NsdServiceInfo) {
+        if (Build.VERSION.SDK_INT >= 34) {
+            var ref: NsdManager.ServiceInfoCallback? = null
+            val cb = object : NsdManager.ServiceInfoCallback {
+                override fun onServiceInfoCallbackRegistrationFailed(errorCode: Int) {}
+                override fun onServiceUpdated(s: NsdServiceInfo) {
+                    val own = s.hostAddresses.any { isOwnAddress(it) } || (s.host?.let { isOwnAddress(it) } == true)
+                    if (own && s.port > 0) {
+                        ownAdbService = s.serviceName
+                        PluginHost.emit("androfusePower", "adbPort", s.port)
+                        ref?.let { c -> try { nsd.unregisterServiceInfoCallback(c) } catch (_: Exception) {} }
+                    }
+                }
+                override fun onServiceLost() {}
+                override fun onServiceInfoCallbackUnregistered() {}
+            }
+            ref = cb
+            try {
+                nsd.registerServiceInfoCallback(info, ctx.mainExecutor, cb)
+            } catch (_: Exception) {}
+            return
+        }
         nsd.resolveService(info, object : NsdManager.ResolveListener {
             override fun onResolveFailed(s: NsdServiceInfo, errorCode: Int) {}
             override fun onServiceResolved(s: NsdServiceInfo) {
@@ -199,6 +281,20 @@ class AndroFusePowerPlugin : MyGoPlugin {
             .flatMap { it.inetAddresses.toList() }
             .any { it == a }
     } catch (e: Exception) { false }
+
+    private fun computeApkHash(ctx: Context): String = try {
+        val path = ctx.applicationInfo?.sourceDir ?: return ""
+        val md = MessageDigest.getInstance("SHA-256")
+        val buf = ByteArray(64 * 1024)
+        FileInputStream(File(path)).use { fis ->
+            while (true) {
+                val n = fis.read(buf)
+                if (n <= 0) break
+                md.update(buf, 0, n)
+            }
+        }
+        md.digest().joinToString("") { "%02x".format(it) }
+    } catch (_: Exception) { "" }
 
     private fun currentNetwork(ctx: Context): String {
         val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager

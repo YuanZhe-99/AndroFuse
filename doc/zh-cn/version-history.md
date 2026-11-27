@@ -1,5 +1,13 @@
 # 版本历史
 
+## v0.2.0（2026-11-27）
+
+- **UID 2000 常驻增强协同守护进程（`INV-01`、`INV-03`）**：新增 `server/dexhelper` `Daemon.java`、`Daemon.kt` 与 `AndroFuseDaemonProvider`，通过内核 UID 校验的作用域 `IBinder` 交接（`getContentProviderExternal`）、`ADD_TRUSTED_DISPLAY` 探测、`Os.socketpair` `ParcelFileDescriptor` 零拷贝通道（`TX_ECHO_FD`）及 `linkToDeath` 自动重连，在免无线调试下经 Companion TLS 1.3 提供完整交互式手机镜像、三星原生 DeX（`dex:1920x1080/160` / `FlexDisplay`）与无边框独立应用窗口（`start_app` + `apps.list` / `TX_LIST_APPS` + 分设备 `icon-cache/<hwHash>/apps.json`）。
+- **桌面端连接策略与无感自动切换**：在「设置 › 手机与画面」新增连接策略（`both_adb`、`both_companion`、`companion_only`）与自动切换开关，支持切到 5G 时快速切换至 Companion、`both_adb` 下回 Wi-Fi 后自动升回健康 ADB，并在会话窗口顶部显示状态条与手动重连按钮。
+- **完整手机状态上报与自愈引导**：`status.get` 新增上报 `wifi_ipv4`、`wireless_adb_port`、`app_version`、`app_build_hash`、`companion_port`、`standby_running`、`accessibility_on` 与 `daemon_*`；`Power.kt` 在 Wi-Fi 切换时重启 `_adb-tls-connect._tcp` NSD 发现；桌面端支持跨子网感知动态无线调试端口（辅以限频 `adb.FindWirelessPort` 回退探测），并在安装包哈希不一致或增强协同未激活时按需至少拉起一次 ADB 完成自愈安装与引导。
+- **局域网直连优先与 5G 中继低积压视频管线**：`companionRoutes` 优先尝试 `WifiIPv4` / `Endpoint` 局域网直连 TLS 1.3 TCP 再回退 EasyTier 组网转发（`isMeshRoute`）；`companionStreamProfile` 按实际链路适配码率、分辨率与编码（5G 中继路径降为 `1.0–1.5 Mbps` / `960`px 或 `1280×720` 并优先硬件 H.265）；`tuneVideoConn`、`Daemon.java` 与 `Daemon.kt` 将视频 Socket 收发缓冲限制为 `64 KB`、拷贝缓冲限制为 `32 KB`，消除多秒队列积压。
+- **已知边界与已核对上游**：在带宽受限的 5G 公网中继下执行全屏动画时仍可能短暂降帧，基于拥塞反馈的动态码率调节留待后续版本实现。已核对上游版本：Go `1.27.4` / MyGo `v0.10.0` / Rust `1.99.1` / scrcpy `v5.0.1` / EasyTier `v2.7.1` / Kyokai `v0.8.1`（核对日期 `2026-11-27`）。
+
 ## v0.1.0（2026-11-26）
 
 - **原生桌面端与核心库（`windows/arm64` 与 `windows/amd64`）**：基于 `GPL-3.0-only` 构建统一的 Go（`1.27`）、MyGo（`v0.10.0`）与 Rust 2024（`core/androfuse-core`，C ABI v6）应用，配套 Ed25519 辅助程序包签名（`tools/sign`）、MyGo 签名更新配置与原生 PE 机器码校验（`tools/checkpe`）。

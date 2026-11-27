@@ -66,6 +66,9 @@ func TestTLSCompanionAuthAndP1Roundtrip(t *testing.T) {
 		OnDisplayGuard: func(_ DisplayGuardRequest) (DisplayGuardResponse, error) {
 			return DisplayGuardResponse{CleanedCount: 1, Message: "cleaned residual overlay"}, nil
 		},
+		OnListApps: func() ([]DaemonAppEntry, error) {
+			return []DaemonAppEntry{{Package: "com.whatsapp", Label: "WhatsApp", Resizeable: true}}, nil
+		},
 	})
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
@@ -113,6 +116,10 @@ func TestTLSCompanionAuthAndP1Roundtrip(t *testing.T) {
 	cont, err := c.RequestContinuity(callCtx, "handoff_to_pc", "")
 	if err != nil || !cont.OK || cont.Package != "com.android.chrome" {
 		t.Fatalf("RequestContinuity: %+v err=%v", cont, err)
+	}
+	apps, err := c.ListApps(callCtx)
+	if err != nil || len(apps) != 1 || apps[0].Package != "com.whatsapp" {
+		t.Fatalf("ListApps: %+v err=%v", apps, err)
 	}
 	payload := []byte("androfuse-p1-file-transfer")
 	fRes, err := c.PushFile(callCtx, "sample.txt", payload)

@@ -6,7 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -92,7 +92,12 @@ type guiRuntime struct {
 	tunnels         map[string]context.CancelFunc // Wireless debugging tunnels through each phone's Companion, by HardwareHash
 	tunnelTried     map[string]time.Time          // last automatic tunnel attempt per phone
 	tunnelAddrs     map[string]string             // each tunnel's loopback adb address, by HardwareHash
-	synced          map[string]bool               // phones whose Companion was checked since they came online (syncCompanions)
+	portScanTried   map[string]time.Time          // last Wireless debugging port-range scan per phone
+	maintTried      map[string]time.Time          // last automatic APK/daemon self-heal attempt per phone
+	fetchingApps    map[string]bool               // active Companion apps.list RPCs by HardwareHash
+	localAPKPath    string
+	localAPKHash    string
+	synced          map[string]bool // phones whose Companion was checked since they came online (syncCompanions)
 	micUplink       *avbridge.UplinkBridge
 	micUplinkCancel context.CancelFunc
 	recoverRan      bool
@@ -533,8 +538,13 @@ func (a *App) RefreshDevices() {
 
 		devs, dErr := client.Devices(ctx)
 		svcs, _ := client.MDNSServices(ctx)
-		if dErr == nil && a.reconnectRemembered(ctx, client, a.onlineHashes(devs), svcs) {
-			devs, dErr = client.Devices(ctx)
+		if dErr == nil {
+			rctx, rcancel := context.WithTimeout(ctx, 6*time.Second)
+			reconn := a.reconnectRemembered(rctx, client, a.onlineHashes(devs), svcs)
+			rcancel()
+			if reconn {
+				devs, dErr = client.Devices(ctx)
+			}
 		}
 		devs = dropDeadWireless(ctx, client, devs)
 
@@ -591,7 +601,10 @@ func (a *App) RefreshDevices() {
 			}
 			if d.State == "device" && item.Probed {
 				if strings.EqualFold(item.Profile.Manufacturer, "samsung") && d.Transport != adb.TransportEmulator {
-					if rep, rErr := dex.PushAndProbe(ctx, client, d.Serial); rErr == nil {
+					pctx, pcancel := context.WithTimeout(ctx, 10*time.Second)
+					rep, rErr := dex.PushAndProbe(pctx, client, d.Serial)
+					pcancel()
+					if rErr == nil {
 						item.DexProbe = rep
 						item.TruthDeX = dex.EvaluateTruth(item.Profile, rep, "AndroFuseDeX", dex.BackendADBLoopback)
 					} else {
@@ -606,16 +619,14 @@ func (a *App) RefreshDevices() {
 				if iconKey == "" {
 					iconKey = d.DeviceHash
 				}
-				iconDir := filepath.Join(a.stateDir, "icon-cache", iconKey)
-				if a.stateDir == "" {
-					iconDir = filepath.Join(os.TempDir(), "androfuse-icon-cache", iconKey)
-				}
+				iconDir := a.deviceIconDir(iconKey)
 				apps, aErr := dex.ListAppsWithIcons(ctx, client, d.Serial, iconDir)
 				if aErr != nil {
 					apps, aErr = client.ListLaunchableApps(ctx, d.Serial)
 				}
 				if aErr == nil {
 					item.Apps = apps
+					a.saveDeviceApps(iconKey, apps)
 					for _, ap := range apps {
 						if ap.IconPath == "" || decodedIcons[ap.IconPath] != nil {
 							continue
@@ -688,6 +699,13 @@ func (a *App) LaunchDeX(d DiscoveredDevice, forceFallback bool, open OpenIn) {
 	pref := a.dexRoutePref(devKey)
 	route := dex.SelectRoute(d.Profile, d.DexProbe, d.Target.Transport, pref)
 	useNative := !forceFallback && route.Backend == dex.BackendADBLoopback && route.IsGenuineDeX
+	wirelessADB := d.Target.Transport != adb.TransportUSB && d.Target.Transport != adb.TransportEmulator
+	if wirelessADB && a.prefersCompanion() {
+		if r, ok := a.RememberedFor(devKey); ok && r.Companion != nil {
+			a.LaunchDaemonDesktop(devKey, open)
+			return
+		}
+	}
 
 	a.update(func() { a.deviceNotice = "" })
 	go func() {
@@ -708,9 +726,13 @@ func (a *App) LaunchDeX(d DiscoveredDevice, forceFallback bool, open OpenIn) {
 		defer cancel()
 
 		tLabel := transportLabel(d.Target.Transport)
+		wirelessADB := d.Target.Transport != adb.TransportUSB && d.Target.Transport != adb.TransportEmulator
 		if useNative {
 			dexSess, err := dex.StartNativeLoopback(ctx, client, store, d.Target.Serial, 1920, 1080, 160, 30)
 			if err != nil {
+				if wirelessADB && a.autoSwitchOn() && a.fallbackToCompanion(devKey, d.Target.Serial, true, open) {
+					return
+				}
 				a.update(func() { a.deviceNotice = a.failed(L.FailDeX(), err) })
 				return
 			}
@@ -759,6 +781,9 @@ func (a *App) LaunchDeX(d DiscoveredDevice, forceFallback bool, open OpenIn) {
 					ap.Close()
 				}
 				dexSess.Stop()
+				if wirelessADB && a.autoSwitchOn() && a.fallbackToCompanion(devKey, d.Target.Serial, true, open) {
+					return
+				}
 				a.update(func() { a.deviceNotice = a.failed(L.FailDeX(), err) })
 				return
 			}
@@ -813,6 +838,9 @@ func (a *App) LaunchDeX(d DiscoveredDevice, forceFallback bool, open OpenIn) {
 			if ap != nil {
 				ap.Close()
 			}
+			if wirelessADB && a.autoSwitchOn() && a.fallbackToCompanion(devKey, d.Target.Serial, true, open) {
+				return
+			}
 			a.update(func() { a.deviceNotice = a.failed(L.FailDeX(), err) })
 			return
 		}
@@ -831,6 +859,13 @@ func (a *App) LaunchMirror(d DiscoveredDevice, open OpenIn) {
 	if used, limit, atLimit, _ := EncoderHeadroom(d.Profile, a.activeStreamCountFor(devKey)); atLimit {
 		a.update(func() { a.deviceNotice = L.EncoderLimitReached(used, limit) })
 		return
+	}
+	wirelessADB := d.Target.Transport != adb.TransportUSB && d.Target.Transport != adb.TransportEmulator
+	if wirelessADB && a.prefersCompanion() {
+		if r, ok := a.RememberedFor(devKey); ok && r.Companion != nil {
+			a.LaunchShare(devKey, open)
+			return
+		}
 	}
 	a.update(func() { a.deviceNotice = "" })
 	go func() {
@@ -851,6 +886,7 @@ func (a *App) LaunchMirror(d DiscoveredDevice, open OpenIn) {
 		defer cancel()
 
 		tLabel := transportLabel(d.Target.Transport)
+		wirelessADB := d.Target.Transport != adb.TransportUSB && d.Target.Transport != adb.TransportEmulator
 		sid := newSessionID("mirror")
 		sw := newSessionWindow(a, SessionSpec{
 			ID:           sid,
@@ -894,6 +930,9 @@ func (a *App) LaunchMirror(d DiscoveredDevice, open OpenIn) {
 			if ap != nil {
 				ap.Close()
 			}
+			if wirelessADB && a.autoSwitchOn() && a.fallbackToCompanion(devKey, d.Target.Serial, false, open) {
+				return
+			}
 			a.update(func() { a.deviceNotice = a.failed(L.FailScreen(), err) })
 			return
 		}
@@ -916,6 +955,13 @@ func (a *App) LaunchAppWindow(d DiscoveredDevice, app adb.AppEntry, open OpenIn)
 	if used, limit, atLimit, _ := EncoderHeadroom(d.Profile, a.activeStreamCountFor(devKey)); atLimit {
 		a.update(func() { a.deviceNotice = L.EncoderLimitReached(used, limit) })
 		return
+	}
+	wirelessADB := d.Target.Transport != adb.TransportUSB && d.Target.Transport != adb.TransportEmulator
+	if wirelessADB && a.prefersCompanion() {
+		if r, ok := a.RememberedFor(devKey); ok && r.Companion != nil {
+			a.LaunchDaemonAppWindow(devKey, app, open)
+			return
+		}
 	}
 	label := strings.TrimSpace(app.Label)
 	if label == "" {
@@ -945,6 +991,7 @@ func (a *App) LaunchAppWindow(d DiscoveredDevice, app adb.AppEntry, open OpenIn)
 		defer cancel()
 
 		tLabel := transportLabel(d.Target.Transport)
+		wirelessADB := d.Target.Transport != adb.TransportUSB && d.Target.Transport != adb.TransportEmulator
 		sid := newSessionID("app")
 		sw := newSessionWindow(a, SessionSpec{
 			ID:           sid,
@@ -991,6 +1038,9 @@ func (a *App) LaunchAppWindow(d DiscoveredDevice, app adb.AppEntry, open OpenIn)
 		if err != nil {
 			if ap != nil {
 				ap.Close()
+			}
+			if wirelessADB && a.autoSwitchOn() && a.fallbackAppToCompanion(devKey, d.Target.Serial, app, open) {
+				return
 			}
 			a.update(func() { a.deviceNotice = a.failed(L.FailApp(), err) })
 			return
@@ -1654,17 +1704,16 @@ func (a *App) handoffOn() bool {
 	return !a.prefs.NoUSBHandoff
 }
 
-// watchDevices notices phones plugged in, unplugged or reconnected: every 5 s it lists adb's
-// targets (cheap), asks each wireless one to answer and closes it after two misses (adb itself
-// notices a phone that left Wi-Fi only minutes later), and scans fully when that list changed;
-// every 30 s it scans when a remembered phone with automatic reconnect is offline, which tries
-// to reconnect it.
+// watchDevices notices phones plugged in, unplugged or reconnected: every 2 s it lists adb's
+// targets (cheap), asks each wireless one to answer and closes it within ~3 s after two fast
+// misses (adb itself notices a phone that left Wi-Fi only minutes later), and scans fully when
+// that list changed; every 30 s it scans when a remembered phone with automatic reconnect is
+// offline, which tries to reconnect it.
 func (a *App) watchDevices(ctx context.Context) {
 	last := ""
-	tick := time.NewTicker(5 * time.Second)
+	tick := time.NewTicker(2 * time.Second)
 	defer tick.Stop()
 	n := 0
-	misses := map[string]int{} // wireless adb connections that did not answer, in a row
 	for {
 		select {
 		case <-ctx.Done():
@@ -1676,29 +1725,31 @@ func (a *App) watchDevices(ctx context.Context) {
 		if err != nil {
 			continue
 		}
-		lctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		lctx, cancel := context.WithTimeout(ctx, 4*time.Second)
 		devs, err := client.Devices(lctx)
 		cancel()
 		if err != nil {
 			continue
 		}
 		// adb keeps listing a wireless connection as "device" for minutes after the phone left
-		// Wi-Fi (for mobile data): ask each one to answer, and close it after two misses.
+		// Wi-Fi (for mobile data): probe each wireless one and close immediately on two quick misses.
 		dropped := false
 		for _, d := range devs {
 			if d.State != "device" || !strings.Contains(d.Serial, ":") || d.Transport == adb.TransportEmulator {
 				continue
 			}
-			pctx, pcancel := context.WithTimeout(ctx, 3*time.Second)
-			_, pErr := client.Shell(pctx, d.Serial, "echo")
-			pcancel()
-			if pErr == nil {
-				delete(misses, d.Serial)
-				continue
+			ok := false
+			for range 2 {
+				pctx, pcancel := context.WithTimeout(ctx, 1500*time.Millisecond)
+				_, pErr := client.Shell(pctx, d.Serial, "echo")
+				pcancel()
+				if pErr == nil {
+					ok = true
+					break
+				}
 			}
-			if misses[d.Serial]++; misses[d.Serial] >= 2 {
-				delete(misses, d.Serial)
-				dctx, dcancel := context.WithTimeout(ctx, 3*time.Second)
+			if !ok {
+				dctx, dcancel := context.WithTimeout(ctx, 2*time.Second)
 				_ = client.Disconnect(dctx, d.Serial)
 				dcancel()
 				dropped = true
@@ -1712,14 +1763,128 @@ func (a *App) watchDevices(ctx context.Context) {
 		now := strings.Join(parts, ",")
 		changed := now != last
 		last = now
-		if changed || dropped || (n%6 == 0 && a.wantsReconnect(devs)) {
+		if changed || dropped || (n%15 == 0 && a.wantsReconnect(devs)) {
 			a.RefreshDevices()
 		}
 	}
 }
 
+// fallbackToCompanion drops a dead wireless ADB target and immediately hands off to the paired
+// Companion (daemon desktop/DeX or mirror/share) instead of failing the launch.
+func (a *App) fallbackToCompanion(devKey, serial string, desktop bool, open OpenIn) bool {
+	if devKey == "" {
+		return false
+	}
+	r, ok := a.RememberedFor(devKey)
+	if !ok || r.Companion == nil {
+		return false
+	}
+	a.setCardWork(devKey, cardWork{Busy: L.CardSwitchingCompanion(r.displayName())})
+	a.disconnectDeadWirelessAsync(serial)
+	if desktop {
+		a.LaunchDaemonDesktop(devKey, open)
+	} else {
+		a.LaunchShare(devKey, open)
+	}
+	return true
+}
+
+// fallbackAppToCompanion drops a dead wireless ADB target and opens the Independent App Window
+// through the paired Companion daemon instead of failing the launch.
+func (a *App) fallbackAppToCompanion(devKey, serial string, app adb.AppEntry, open OpenIn) bool {
+	if devKey == "" {
+		return false
+	}
+	r, ok := a.RememberedFor(devKey)
+	if !ok || r.Companion == nil {
+		return false
+	}
+	a.setCardWork(devKey, cardWork{Busy: L.CardSwitchingCompanion(r.displayName())})
+	a.disconnectDeadWirelessAsync(serial)
+	a.LaunchDaemonAppWindow(devKey, app, open)
+	return true
+}
+
+func (a *App) disconnectDeadWirelessAsync(serial string) {
+	if serial == "" || !strings.Contains(serial, ":") {
+		return
+	}
+	go func() {
+		if client, _, err := a.ensureADBAndLeases(); err == nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			_ = client.Disconnect(ctx, serial)
+			cancel()
+			a.RefreshDevices()
+		}
+	}()
+}
+
+// companionStreamProfile picks bitrate, FPS cap, size cap, and video codec adapted to the active
+// route (ADB / direct Wi-Fi LAN vs P2P mesh vs relayed WAN / 5G) and decoder capabilities (`INV-05`).
+func (a *App) companionStreamProfile(meshHost, addr string, desktop bool) (bitRate, maxFPS, maxSize int, codecStr string, codecID uint32, relayed bool) {
+	sp := a.streamPrefs()
+	a.mu.Lock()
+	hevcHW := a.diag.SelfCheck.HEVCHWDecoder
+	a.mu.Unlock()
+	overMesh := a.isMeshRoute(addr)
+	direct, latencyMs, inMesh := a.meshPeerRoute(meshHost)
+
+	maxFPS = int(sp.fps)
+	if maxFPS <= 0 {
+		maxFPS = 60
+	}
+	maxSize = sp.size
+	switch {
+	case !overMesh:
+		if desktop {
+			bitRate = 8_000_000
+		} else {
+			bitRate = 6_000_000
+		}
+	case inMesh && direct && latencyMs < 35:
+		if desktop {
+			bitRate = 6_000_000
+		} else {
+			bitRate = 5_000_000
+		}
+	case inMesh && direct:
+		if desktop {
+			bitRate = 2_500_000
+		} else {
+			bitRate = 2_000_000
+		}
+		if maxFPS > 30 {
+			maxFPS = 30
+		}
+		if !desktop && maxSize == 0 {
+			maxSize = 1080
+		}
+	default:
+		relayed = true
+		if desktop {
+			bitRate = 1_500_000
+		} else {
+			bitRate = 1_000_000
+		}
+		if maxFPS > 30 {
+			maxFPS = 30
+		}
+		if !desktop && maxSize == 0 {
+			maxSize = 960
+		}
+	}
+	codecStr, codecID = "h264", scrcpy.CodecH264
+	if sp.codec == scrcpy.CodecH265 || (overMesh && hevcHW && (relayed || latencyMs >= 35)) {
+		codecStr, codecID = "h265", scrcpy.CodecH265
+	}
+	return bitRate, maxFPS, maxSize, codecStr, codecID, relayed
+}
+
 // wantsReconnect reports whether a remembered phone with automatic reconnect is not among devs.
 func (a *App) wantsReconnect(devs []adb.Device) bool {
+	if !a.allowsWirelessADB() {
+		return false
+	}
 	online := a.onlineHashes(devs)
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -1759,6 +1924,74 @@ func (a *App) LaunchShare(hash string, open OpenIn) {
 			fail(err)
 			return
 		}
+		if st, stErr := keys.GetStatus(ctx); stErr == nil && st.DaemonReady {
+			bitRate, maxFPS, maxSize, codecStr, codecID, _ := a.companionStreamProfile(b.MeshHost, addr, false)
+			vidConn, ctrlConn, dErr := companion.DialDaemonStream(ctx, addr, string(tok), b.Fingerprint, companion.DaemonStreamRequest{
+				MaxSize: maxSize,
+				BitRate: bitRate,
+				MaxFPS:  maxFPS,
+				Codec:   codecStr,
+				Control: true,
+			})
+			if dErr == nil {
+				_ = keys.Close()
+				a.setCardWork(hash, cardWork{})
+				a.rt.coreMu.Lock()
+				lib, lErr := a.ensureCoreLocked()
+				a.rt.coreMu.Unlock()
+				if lErr != nil {
+					_ = vidConn.Close()
+					if ctrlConn != nil {
+						_ = ctrlConn.Close()
+					}
+					a.notify(a.failed(L.FailEngine(), lErr))
+					return
+				}
+				sid := newSessionID("mirror")
+				sw := newSessionWindow(a, SessionSpec{
+					ID:           sid,
+					DeviceKey:    hash,
+					Title:        fmt.Sprintf("%s · %s (Companion)", r.displayName(), L.ModeMirrorTitle()),
+					Mode:         SessionModeMirror,
+					Open:         open,
+					Transport:    "Companion",
+					BackendLabel: L.ModeMirrorTitle(),
+					TargetSpec:   fmt.Sprintf("Display 0 · %d fps", maxFPS),
+					ScreenOffCap: true,
+				})
+				var vSess *scrcpy.Session
+				vSess, err = scrcpy.StartFromConns(lib, nil, nil, 0, 0, nil, vidConn, ctrlConn, true, scrcpy.LaunchConfig{
+					SessionID:     sid,
+					EnableControl: true,
+					MaxSize:       maxSize,
+					MaxFPS:        float64(maxFPS),
+					CodecID:       codecID,
+					InitialWidth:  1080,
+					InitialHeight: 1920,
+					OnFrame: func(f core.NV12Frame) {
+						if vSess != nil {
+							st := vSess.Stats()
+							sw.PushNV12(f, st.MeasuredFPS, st.AvgDecodeUs)
+						} else {
+							sw.PushNV12(f, 0, int64(f.DecodeUs))
+						}
+					},
+					OnClipboard: sw.OnDeviceClipboard,
+				})
+				if err != nil {
+					_ = vidConn.Close()
+					if ctrlConn != nil {
+						_ = ctrlConn.Close()
+					}
+					a.notify(a.failed(L.FailScreen(), err))
+					return
+				}
+				a.addSession(sw)
+				a.runOnMain(func() { sw.attachScrcpy(vSess, nil, mirrorDefW, mirrorDefH) })
+				return
+			}
+			_ = a.failed(L.FailScreen(), dErr)
+		}
 		a.setCardWork(hash, cardWork{Busy: L.ShareAsking(name)})
 		stream, err := companion.DialShare(ctx, addr, string(tok), b.Fingerprint)
 		if err != nil {
@@ -1772,7 +2005,7 @@ func (a *App) LaunchShare(hash string, open OpenIn) {
 		a.rt.coreMu.Unlock()
 		if lErr != nil {
 			_ = stream.Close()
-			a.notify(lErr.Error())
+			a.notify(a.failed(L.FailEngine(), lErr))
 			return
 		}
 		sid := newSessionID("share")
@@ -1816,10 +2049,280 @@ func (a *App) LaunchShare(hash string, open OpenIn) {
 		})
 		if err != nil {
 			_ = stream.Close()
-			a.notify(err.Error())
+			a.notify(a.failed(L.FailScreen(), err))
 			return
 		}
 		a.addSession(sw)
 		a.runOnMain(func() { sw.attachScrcpy(vSess, nil, mirrorDefW, mirrorDefH) })
+	}()
+}
+
+// LaunchDaemonDesktop opens a 1920x1080 virtual desktop / Samsung DeX display through the
+// attached UID 2000 daemon over Companion TLS 1.3 without requiring Wireless debugging (`PLAN` §9.2).
+// Side effects: connects over Companion, opens a resizable SessionWindow backed by scrcpy-server.
+func (a *App) LaunchDaemonDesktop(hash string, open OpenIn) {
+	r, ok := a.RememberedFor(hash)
+	if !ok || r.Companion == nil {
+		a.notify(L.CompanionNotPaired())
+		return
+	}
+	b := *r.Companion
+	name := r.displayName()
+	fail := func(err error) { a.setCardWork(hash, cardWork{Note: a.failed(L.FailDeX(), err)}) }
+	a.setCardWork(hash, cardWork{Busy: L.CardReaching(name)})
+	go func() {
+		tok, err := openSecret(b.SealedToken)
+		if err != nil {
+			fail(err)
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+		defer cancel()
+		keys, addr, err := a.findCompanion(ctx, hash, b, string(tok))
+		if err != nil {
+			fail(err)
+			return
+		}
+		st, stErr := keys.GetStatus(ctx)
+		_ = keys.Close()
+		if stErr != nil {
+			fail(stErr)
+			return
+		}
+		if !st.DaemonReady || !st.DaemonTrustedDisplay {
+			fail(fmt.Errorf("daemon desktop unavailable (ready=%v trusted=%v)", st.DaemonReady, st.DaemonTrustedDisplay))
+			return
+		}
+
+		bitRate, maxFPS, _, codecStr, codecID, relayed := a.companionStreamProfile(b.MeshHost, addr, true)
+		isSamsung := isSamsungRemembered(r)
+		dexSpec, fallbackDisp := "dex:1920x1080/160", "1920x1080/200"
+		initW, initH := uint32(1920), uint32(1080)
+		if relayed {
+			dexSpec, fallbackDisp = "dex:1280x720/140", "1280x720/160"
+			initW, initH = 1280, 720
+		}
+		var (
+			vidConn, ctrlConn net.Conn
+			newDisplay        = fallbackDisp
+			flexDisplay       = true
+			mode              = SessionModeDeXFallback
+			label             = L.KindDeXFallback()
+		)
+		if isSamsung {
+			vidConn, ctrlConn, err = companion.DialDaemonStream(ctx, addr, string(tok), b.Fingerprint, companion.DaemonStreamRequest{
+				BitRate:    bitRate,
+				MaxFPS:     maxFPS,
+				Codec:      codecStr,
+				NewDisplay: dexSpec,
+				Control:    true,
+			})
+			if err == nil {
+				newDisplay = ""
+				flexDisplay = false
+				mode = SessionModeDeX
+				label = L.KindDeX()
+			}
+		}
+		if vidConn == nil {
+			vidConn, ctrlConn, err = companion.DialDaemonStream(ctx, addr, string(tok), b.Fingerprint, companion.DaemonStreamRequest{
+				BitRate:     bitRate,
+				MaxFPS:      maxFPS,
+				Codec:       codecStr,
+				NewDisplay:  fallbackDisp,
+				FlexDisplay: true,
+				Control:     true,
+			})
+		}
+		if err != nil {
+			fail(err)
+			return
+		}
+		a.setCardWork(hash, cardWork{})
+		a.rt.coreMu.Lock()
+		lib, lErr := a.ensureCoreLocked()
+		a.rt.coreMu.Unlock()
+		if lErr != nil {
+			_ = vidConn.Close()
+			if ctrlConn != nil {
+				_ = ctrlConn.Close()
+			}
+			a.notify(a.failed(L.FailEngine(), lErr))
+			return
+		}
+
+		sid := newSessionID("ddex")
+		sw := newSessionWindow(a, SessionSpec{
+			ID:           sid,
+			DeviceKey:    hash,
+			Title:        fmt.Sprintf("%s · %s (Companion)", name, label),
+			Mode:         mode,
+			Open:         open,
+			Transport:    "Companion",
+			BackendLabel: label,
+			TargetSpec:   fmt.Sprintf("%d×%d · %d fps", initW, initH, maxFPS),
+			IsDeX:        true,
+			AllowResize:  true,
+		})
+		var vSess *scrcpy.Session
+		vSess, err = scrcpy.StartFromConns(lib, nil, nil, 0, 0, nil, vidConn, ctrlConn, true, scrcpy.LaunchConfig{
+			SessionID:     sid,
+			NewDisplay:    newDisplay,
+			FlexDisplay:   flexDisplay,
+			EnableControl: true,
+			MaxFPS:        float64(maxFPS),
+			CodecID:       codecID,
+			VideoBitRate:  bitRate,
+			InitialWidth:  initW,
+			InitialHeight: initH,
+			OnFrame: func(f core.NV12Frame) {
+				if vSess != nil {
+					st := vSess.Stats()
+					sw.PushNV12(f, st.MeasuredFPS, st.AvgDecodeUs)
+				} else {
+					sw.PushNV12(f, 0, int64(f.DecodeUs))
+				}
+			},
+			OnClipboard: sw.OnDeviceClipboard,
+		})
+		if err != nil {
+			_ = vidConn.Close()
+			if ctrlConn != nil {
+				_ = ctrlConn.Close()
+			}
+			fail(err)
+			return
+		}
+		a.addSession(sw)
+		a.runOnMain(func() { sw.attachScrcpy(vSess, nil, sessionDefW, sessionDefH) })
+	}()
+}
+
+// LaunchDaemonAppWindow opens an isolated chromeless flex-display Independent App Window through
+// the paired UID 2000 daemon over Companion TLS 1.3 (`INV-01`, `PLAN` §9.2).
+// Side effects: connects over Companion, opens a resizable SessionWindow running `app`.
+func (a *App) LaunchDaemonAppWindow(hash string, app adb.AppEntry, open OpenIn) {
+	pkg := strings.TrimSpace(app.Package)
+	if pkg == "" {
+		return
+	}
+	r, ok := a.RememberedFor(hash)
+	if !ok || r.Companion == nil {
+		a.notify(L.CompanionNotPaired())
+		return
+	}
+	label := strings.TrimSpace(app.Label)
+	if label == "" {
+		label = pkg
+	}
+	icon := a.appIconFor(app.IconPath)
+	startArg := pkg
+	if !strings.HasPrefix(startArg, "+") {
+		startArg = "+" + startArg
+	}
+	b := *r.Companion
+	name := r.displayName()
+	fail := func(err error) { a.setCardWork(hash, cardWork{Note: a.failed(L.FailApp(), err)}) }
+	a.setCardWork(hash, cardWork{Busy: L.CardReaching(name)})
+	go func() {
+		tok, err := openSecret(b.SealedToken)
+		if err != nil {
+			fail(err)
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+		defer cancel()
+		keys, addr, err := a.findCompanion(ctx, hash, b, string(tok))
+		if err != nil {
+			fail(err)
+			return
+		}
+		st, stErr := keys.GetStatus(ctx)
+		_ = keys.Close()
+		if stErr != nil {
+			fail(stErr)
+			return
+		}
+		if !st.DaemonReady || !st.DaemonTrustedDisplay {
+			fail(fmt.Errorf("daemon app window unavailable (ready=%v trusted=%v)", st.DaemonReady, st.DaemonTrustedDisplay))
+			return
+		}
+
+		bitRate, maxFPS, _, codecStr, codecID, _ := a.companionStreamProfile(b.MeshHost, addr, false)
+		newDisp := fmt.Sprintf("%dx%d/%d", appWinInitW, appWinInitH, appWinInitDPI)
+		vidConn, ctrlConn, err := companion.DialDaemonStream(ctx, addr, string(tok), b.Fingerprint, companion.DaemonStreamRequest{
+			BitRate:               bitRate,
+			MaxFPS:                maxFPS,
+			Codec:                 codecStr,
+			NewDisplay:            newDisp,
+			HideSystemDecorations: true,
+			FlexDisplay:           true,
+			StartApp:              startArg,
+			Control:               true,
+		})
+		if err != nil {
+			fail(err)
+			return
+		}
+		a.setCardWork(hash, cardWork{})
+		a.rt.coreMu.Lock()
+		lib, lErr := a.ensureCoreLocked()
+		a.rt.coreMu.Unlock()
+		if lErr != nil {
+			_ = vidConn.Close()
+			if ctrlConn != nil {
+				_ = ctrlConn.Close()
+			}
+			a.notify(a.failed(L.FailEngine(), lErr))
+			return
+		}
+
+		sid := newSessionID("dapp")
+		sw := newSessionWindow(a, SessionSpec{
+			ID:           sid,
+			DeviceKey:    hash,
+			Title:        label,
+			Mode:         SessionModeApp,
+			Open:         open,
+			Transport:    "Companion",
+			BackendLabel: label,
+			TargetSpec:   fmt.Sprintf("%d×%d flex · %d fps", appWinInitW, appWinInitH, maxFPS),
+			AllowResize:  true,
+			AppIcon:      icon,
+			AppPackage:   pkg,
+		})
+		var vSess *scrcpy.Session
+		vSess, err = scrcpy.StartFromConns(lib, nil, nil, 0, 0, nil, vidConn, ctrlConn, true, scrcpy.LaunchConfig{
+			SessionID:             sid,
+			NewDisplay:            newDisp,
+			FlexDisplay:           true,
+			HideSystemDecorations: true,
+			StartAppPackage:       startArg,
+			EnableControl:         true,
+			MaxFPS:                float64(maxFPS),
+			CodecID:               codecID,
+			VideoBitRate:          bitRate,
+			InitialWidth:          uint32(appWinInitW),
+			InitialHeight:         uint32(appWinInitH),
+			OnFrame: func(f core.NV12Frame) {
+				if vSess != nil {
+					st := vSess.Stats()
+					sw.PushNV12(f, st.MeasuredFPS, st.AvgDecodeUs)
+				} else {
+					sw.PushNV12(f, 0, int64(f.DecodeUs))
+				}
+			},
+			OnClipboard: sw.OnDeviceClipboard,
+		})
+		if err != nil {
+			_ = vidConn.Close()
+			if ctrlConn != nil {
+				_ = ctrlConn.Close()
+			}
+			fail(err)
+			return
+		}
+		a.addSession(sw)
+		a.runOnMain(func() { sw.attachScrcpy(vSess, nil, appWinPortraitW, appWinPortraitH) })
 	}()
 }

@@ -55,7 +55,12 @@ type Prefs struct {
 	// to install the Companion on a first USB connection.
 	NoUSBHandoff     bool `json:"no_usb_handoff,omitempty"`
 	NoCompanionOffer bool `json:"no_companion_offer,omitempty"`
-	FrontCamera      bool `json:"front_camera,omitempty"`
+	// ConnectionMode picks how phones connect wirelessly: "both_adb" (default), "both_companion",
+	// or "companion_only". NoAutoSwitch turns off automatic fast fallback to Companion and
+	// automatic upgrade back to ADB when Wi-Fi returns.
+	ConnectionMode string `json:"connection_mode,omitempty"`
+	NoAutoSwitch   bool   `json:"no_auto_switch,omitempty"`
+	FrontCamera    bool   `json:"front_camera,omitempty"`
 	// Updates: NoDailyCheck stops the daily check; AutoInstall is "", "idle" or "night".
 	NoDailyCheck bool   `json:"no_daily_check,omitempty"`
 	AutoInstall  string `json:"auto_install,omitempty"`
@@ -102,6 +107,7 @@ type App struct {
 	mdnsServices    []adb.MDNSService
 	deviceNotice    string
 	appIcons        map[string]*ui.Bitmap
+	cachedApps      map[string][]adb.AppEntry
 	dexRoutes       map[string]dex.RoutePreference
 	vmStatus        vm.Status
 
@@ -110,6 +116,7 @@ type App struct {
 	compConnected   bool
 	compHash        string // HardwareHash of the phone whose Companion is connected
 	compStatus      companion.DeviceStatus
+	peerStatus      map[string]companion.DeviceStatus
 	compNotice      string
 	pairingCode     string // the code to check on the phone while a pairing waits
 	pairingModel    string
@@ -175,15 +182,17 @@ func ApplyTheme(theme string) {
 // New constructs an App state container and loads saved preferences.
 func New(profile, stateDir string) *App {
 	a := &App{
-		profile:   profile,
-		stateDir:  stateDir,
-		prefs:     Prefs{Theme: "system"},
-		page:      pageHome,
-		appIcons:  make(map[string]*ui.Bitmap),
-		dexRoutes: make(map[string]dex.RoutePreference),
-		vcamCap:   avbridge.ProbeVirtualCamera(),
-		sessions:  make(map[string]*SessionWindow),
-		netViews:  make(map[string]netView),
+		profile:    profile,
+		stateDir:   stateDir,
+		prefs:      Prefs{Theme: "system"},
+		page:       pageHome,
+		appIcons:   make(map[string]*ui.Bitmap),
+		cachedApps: make(map[string][]adb.AppEntry),
+		peerStatus: make(map[string]companion.DeviceStatus),
+		dexRoutes:  make(map[string]dex.RoutePreference),
+		vcamCap:    avbridge.ProbeVirtualCamera(),
+		sessions:   make(map[string]*SessionWindow),
+		netViews:   make(map[string]netView),
 	}
 	a.loadPrefs()
 	a.loadDevices()
@@ -234,6 +243,7 @@ func (a *App) Start() {
 	a.RefreshVMStatus()
 	go a.resumeNetworks()
 	go a.pollNetworks(context.Background())
+	go a.pollCompanionHealth(context.Background())
 	go a.updateLoop(context.Background())
 	go a.watchDevices(context.Background())
 }
@@ -400,6 +410,42 @@ func (a *App) syncControlIndices() {
 	default:
 		a.langIndex = 0
 	}
+}
+
+// Connection strategy constants stored in Prefs.ConnectionMode.
+const (
+	ConnBothADB       = "both_adb"
+	ConnBothCompanion = "both_companion"
+	ConnCompanionOnly = "companion_only"
+)
+
+func (a *App) connectionMode() string {
+	a.mu.Lock()
+	m := a.prefs.ConnectionMode
+	a.mu.Unlock()
+	switch m {
+	case ConnBothCompanion, ConnCompanionOnly:
+		return m
+	default:
+		return ConnBothADB
+	}
+}
+
+func (a *App) autoSwitchOn() bool {
+	a.mu.Lock()
+	m := a.prefs.ConnectionMode
+	noAuto := a.prefs.NoAutoSwitch
+	a.mu.Unlock()
+	return m != ConnCompanionOnly && !noAuto
+}
+
+func (a *App) prefersCompanion() bool {
+	m := a.connectionMode()
+	return m == ConnCompanionOnly || m == ConnBothCompanion
+}
+
+func (a *App) allowsWirelessADB() bool {
+	return a.connectionMode() != ConnCompanionOnly
 }
 
 func (a *App) appIconFor(iconPath string) *ui.Bitmap {

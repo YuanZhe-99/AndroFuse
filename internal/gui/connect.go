@@ -416,17 +416,34 @@ func (a *App) isMeshAddress(host string) bool {
 	return false
 }
 
-// connectRemembered reconnects an offline remembered phone: its last address first, then through
-// its Companion (on adb, the LAN or a network).
+// connectRemembered reconnects an offline remembered phone according to Prefs.ConnectionMode:
+// when Companion is preferred (companion_only / both_companion), it launches through Companion
+// directly; when ADB is preferred (both_adb), it tries wireless ADB first and automatically falls
+// back to Companion when auto-switch is enabled.
 func (a *App) connectRemembered(r RememberedDevice, openAs int) {
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	if a.prefersCompanion() && r.Companion != nil {
+		switch openAs {
+		case openAsApp:
+			a.openPicker(openAsApp, r.HardwareHash)
+		case openAsDeX:
+			a.LaunchDaemonDesktop(r.HardwareHash, OpenDefault)
+		default:
+			a.LaunchShare(r.HardwareHash, OpenDefault)
+		}
+		return
+	}
+	if !a.allowsWirelessADB() {
+		a.setCardWork(r.HardwareHash, cardWork{Note: L.CardCantReachShare(r.displayName())})
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	a.update(func() { a.connect.cancel = cancel })
 	a.setCardWork(r.HardwareHash, cardWork{Busy: L.CardConnecting(r.displayName())})
 	go func() {
 		defer cancel()
 		client, _, err := a.ensureADBAndLeases()
 		if err == nil && r.Endpoint != "" {
-			cctx, ccancel := context.WithTimeout(ctx, 10*time.Second)
+			cctx, ccancel := context.WithTimeout(ctx, 3*time.Second)
 			_, err = client.ConnectTLS(cctx, r.Endpoint, false)
 			ccancel()
 			if err == nil {
@@ -436,17 +453,32 @@ func (a *App) connectRemembered(r RememberedDevice, openAs int) {
 			}
 		}
 		if r.Companion != nil {
-			var serial string
-			if serial, err = a.adbOverCompanion(ctx, r.HardwareHash); err == nil {
+			tctx, tcancel := context.WithTimeout(ctx, 10*time.Second)
+			serial, cErr := a.adbOverCompanion(tctx, r.HardwareHash)
+			tcancel()
+			if cErr == nil {
 				a.setCardWork(r.HardwareHash, cardWork{})
 				a.afterConnect(serial, openAs)
 				return
 			}
+			if a.autoSwitchOn() {
+				// Wireless ADB failed or is disabled (e.g. switched to 5G); fall back seamlessly to
+				// Companion streaming (daemon DeX/desktop, independent app, or mirror/share).
+				a.setCardWork(r.HardwareHash, cardWork{Busy: L.CardSwitchingCompanion(r.displayName())})
+				switch openAs {
+				case openAsApp:
+					a.setCardWork(r.HardwareHash, cardWork{})
+					a.openPicker(openAsApp, r.HardwareHash)
+				case openAsDeX:
+					a.LaunchDaemonDesktop(r.HardwareHash, OpenDefault)
+				default:
+					a.LaunchShare(r.HardwareHash, OpenDefault)
+				}
+				return
+			}
+			err = cErr
 		}
 		plain := L.CardCantReach(r.displayName())
-		if r.Companion != nil {
-			plain = L.CardCantReachShare(r.displayName())
-		}
 		if err == nil {
 			err = errors.New("no Wireless debugging address and no Companion")
 		}
@@ -488,21 +520,31 @@ func (a *App) adbOverCompanion(ctx context.Context, hash string) (string, error)
 		return "", err
 	}
 	// The port changes each time Wireless debugging turns on, so the remembered address is often
-	// stale while the phone's Wi-Fi address may not be: when the phone is on Wi-Fi, try that
-	// address with the current port first. Another network can hold another device at the same
-	// private address, so the connection counts only when it is this phone (same hardware hash);
-	// otherwise it is closed and the Companion tunnel is used.
-	if host, _, err := net.SplitHostPort(r.Endpoint); err == nil && st.NetworkType == "wifi" {
-		direct := net.JoinHostPort(host, strconv.Itoa(st.WirelessADBPort))
-		dctx, dcancel := context.WithTimeout(ctx, 8*time.Second)
-		if _, err := client.ConnectTLS(dctx, direct, false); err == nil {
-			if prof, err := client.ProbeDevice(dctx, direct); err == nil && (prof.HardwareHash == hash || prof.DeviceHash == hash) {
-				dcancel()
-				return direct, nil
-			}
-			_ = client.Disconnect(dctx, direct)
+	// stale while the phone's Wi-Fi address may not be: when the phone is on Wi-Fi, try its
+	// reported WifiIPv4 (and remembered host) with the current port first.
+	if st.NetworkType == "wifi" {
+		var wifiHosts []string
+		if st.WifiIPv4 != "" && !a.isMeshAddress(st.WifiIPv4) && !strings.HasPrefix(st.WifiIPv4, "127.") {
+			wifiHosts = append(wifiHosts, st.WifiIPv4)
 		}
-		dcancel()
+		if host, _, err := net.SplitHostPort(r.Endpoint); err == nil && host != "" && !strings.HasPrefix(host, "127.") && !a.isMeshAddress(host) {
+			if len(wifiHosts) == 0 || !strings.EqualFold(wifiHosts[0], host) {
+				wifiHosts = append(wifiHosts, host)
+			}
+		}
+		for _, host := range wifiHosts {
+			direct := net.JoinHostPort(host, strconv.Itoa(st.WirelessADBPort))
+			dctx, dcancel := context.WithTimeout(ctx, 4*time.Second)
+			if _, err := client.ConnectTLS(dctx, direct, false); err == nil {
+				if prof, err := client.ProbeDevice(dctx, direct); err == nil && (prof.HardwareHash == hash || prof.DeviceHash == hash) {
+					dcancel()
+					a.noteWirelessEndpoint(hash, direct)
+					return direct, nil
+				}
+				_ = client.Disconnect(dctx, direct)
+			}
+			dcancel()
+		}
 	}
 	a.rt.coreMu.Lock()
 	if stop := a.rt.tunnels[hash]; stop != nil {
@@ -549,4 +591,140 @@ func (a *App) stopTunnels() {
 		stop()
 		delete(a.rt.tunnels, h)
 	}
+}
+
+// discoverAndConnectADB locates or re-establishes a healthy ADB transport for hardwareHash even
+// when Wireless Debugging changed ports across Wi-Fi/5G switches or routed subnets.
+// Order: (1) verify existing online ADB transport, (2) same-LAN mDNS, (3) Companion `status.get`
+// (`wifi_ipv4` + `wireless_adb_port`) or rate-limited `adb.FindWirelessPort` scan when on Wi-Fi,
+// (4) Companion ADB tunnel fallback, or (5) last remembered endpoint when Companion is offline.
+func (a *App) discoverAndConnectADB(ctx context.Context, hash string, allowPortScan bool) (adb.Device, bool) {
+	if hash == "" {
+		return adb.Device{}, false
+	}
+	client, _, err := a.ensureADBAndLeases()
+	if err != nil {
+		return adb.Device{}, false
+	}
+	if cand, ok := a.findLiveTransportFor(ctx, client, hash, ""); ok {
+		if cand.Transport == adb.TransportUSB || cand.Transport == adb.TransportEmulator {
+			return cand, true
+		}
+		pctx, pcancel := context.WithTimeout(ctx, 1500*time.Millisecond)
+		_, sErr := client.Shell(pctx, cand.Serial, "echo")
+		pcancel()
+		if sErr == nil {
+			a.noteWirelessEndpoint(hash, cand.Serial)
+			return cand, true
+		}
+		dctx, dcancel := context.WithTimeout(ctx, 2*time.Second)
+		_ = client.Disconnect(dctx, cand.Serial)
+		dcancel()
+	}
+	if a.connectWirelessFor(ctx, client, hash) {
+		if cand, ok := a.findLiveTransportFor(ctx, client, hash, ""); ok {
+			a.noteWirelessEndpoint(hash, cand.Serial)
+			return cand, true
+		}
+	}
+
+	r, hasRem := a.RememberedFor(hash)
+	if !hasRem {
+		return adb.Device{}, false
+	}
+
+	tryVerifiedTLS := func(addr string, wait time.Duration) (adb.Device, bool) {
+		dctx, dcancel := context.WithTimeout(ctx, wait)
+		defer dcancel()
+		if _, err := client.ConnectTLS(dctx, addr, false); err != nil {
+			return adb.Device{}, false
+		}
+		if prof, pErr := client.ProbeDevice(dctx, addr); pErr == nil && (prof.HardwareHash == hash || prof.DeviceHash == hash) {
+			a.noteWirelessEndpoint(hash, addr)
+			if cand, ok := a.findLiveTransportFor(dctx, client, hash, ""); ok {
+				return cand, true
+			}
+			return adb.Device{Serial: addr, State: "device", Transport: adb.TransportTLSWiFi, DeviceHash: hash}, true
+		}
+		_ = client.Disconnect(dctx, addr)
+		return adb.Device{}, false
+	}
+
+	var remHost string
+	if h, _, err := net.SplitHostPort(r.Endpoint); err == nil && h != "" && !strings.HasPrefix(h, "127.") && !a.isMeshAddress(h) {
+		remHost = h
+	}
+
+	usedCompanion := false
+	if r.Companion != nil {
+		if tok, err := openSecret(r.Companion.SealedToken); err == nil {
+			cctx, ccancel := context.WithTimeout(ctx, 4*time.Second)
+			c, _, cerr := a.findCompanion(cctx, hash, *r.Companion, string(tok))
+			ccancel()
+			if cerr == nil && c != nil {
+				sctx, scancel := context.WithTimeout(ctx, 3*time.Second)
+				st, stErr := c.GetStatus(sctx)
+				_ = c.Close()
+				scancel()
+				if stErr == nil {
+					usedCompanion = true
+					if st.NetworkType == "wifi" {
+						var hosts []string
+						if st.WifiIPv4 != "" && !a.isMeshAddress(st.WifiIPv4) && !strings.HasPrefix(st.WifiIPv4, "127.") {
+							hosts = append(hosts, st.WifiIPv4)
+						}
+						if remHost != "" && (len(hosts) == 0 || !strings.EqualFold(hosts[0], remHost)) {
+							hosts = append(hosts, remHost)
+						}
+						if st.WirelessADBPort > 0 {
+							for _, h := range hosts {
+								if cand, ok := tryVerifiedTLS(net.JoinHostPort(h, strconv.Itoa(st.WirelessADBPort)), 3*time.Second); ok {
+									return cand, true
+								}
+							}
+						}
+						if allowPortScan && len(hosts) > 0 && a.portScanDue(hash) {
+							scanCtx, scanCancel := context.WithTimeout(ctx, 11*time.Second)
+							found := adb.FindWirelessPort(scanCtx, hosts[0], nil)
+							scanCancel()
+							if found > 0 {
+								if cand, ok := tryVerifiedTLS(net.JoinHostPort(hosts[0], strconv.Itoa(found)), 3*time.Second); ok {
+									return cand, true
+								}
+							}
+						}
+					}
+					if st.WirelessADBPort > 0 {
+						if serial, err := a.adbOverCompanion(ctx, hash); err == nil {
+							if cand, ok := a.findLiveTransportFor(ctx, client, hash, ""); ok {
+								return cand, true
+							}
+							if serial != "" {
+								return adb.Device{Serial: serial, State: "device", Transport: adb.TransportTLSWiFi, DeviceHash: hash}, true
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if !usedCompanion {
+		if r.Endpoint != "" {
+			if cand, ok := tryVerifiedTLS(r.Endpoint, 2500*time.Millisecond); ok {
+				return cand, true
+			}
+		}
+		if allowPortScan && remHost != "" && a.portScanDue(hash) {
+			scanCtx, scanCancel := context.WithTimeout(ctx, 11*time.Second)
+			found := adb.FindWirelessPort(scanCtx, remHost, nil)
+			scanCancel()
+			if found > 0 {
+				if cand, ok := tryVerifiedTLS(net.JoinHostPort(remHost, strconv.Itoa(found)), 3*time.Second); ok {
+					return cand, true
+				}
+			}
+		}
+	}
+	return adb.Device{}, false
 }

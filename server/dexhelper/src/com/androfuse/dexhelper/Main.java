@@ -63,6 +63,7 @@ import java.util.regex.Pattern;
  *   serve <token> <width> <height> <dpi> <grace_sec>
  *   attach <token> <ctrl_port>
  *   recover
+ *   daemon [--pkg <package>] [--authority <authority>]
  */
 public final class Main {
 
@@ -103,6 +104,10 @@ public final class Main {
                 String token = validateToken(args[1]);
                 int ctrlPort = Integer.parseInt(args[2]);
                 runAttach(token, ctrlPort);
+                return;
+            }
+            if ("daemon".equals(args[0])) {
+                Daemon.run(args);
                 return;
             }
             bootstrapWorkarounds();
@@ -338,7 +343,7 @@ public final class Main {
         return null;
     }
 
-    private static Context getSystemContextWorkaround() throws Exception {
+    static Context getSystemContextWorkaround() throws Exception {
         Class<?> atCls = Class.forName("android.app.ActivityThread");
         Object at = null;
         try {
@@ -865,10 +870,10 @@ public final class Main {
         } catch (Throwable ignored) {}
     }
 
-    private static String nonNull(String s) { return s == null ? "" : s; }
-    private static String sanitizeLine(String s) { return nonNull(s).replace('\r', ' ').replace('\n', ' '); }
+    static String nonNull(String s) { return s == null ? "" : s; }
+    static String sanitizeLine(String s) { return nonNull(s).replace('\r', ' ').replace('\n', ' '); }
 
-    private static String jsonStr(String s) {
+    static String jsonStr(String s) {
         StringBuilder out = new StringBuilder("\"");
         String v = nonNull(s);
         for (int i = 0; i < v.length(); i++) {

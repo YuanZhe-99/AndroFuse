@@ -83,6 +83,32 @@ func (h *Host) resumeMesh() {
 	_, _ = h.startMesh(s.NetworkName, string(secret), s.Peers, s.FullSpeed)
 }
 
+// onNetworkChanged records a ConnectivityManager network transition and schedules a debounced
+// EasyTier mesh rebind when switching between live transports (e.g., cellular <-> wifi).
+func (h *Host) onNetworkChanged(kind string) {
+	h.mu.Lock()
+	prev := h.network
+	h.network = kind
+	shouldRebind := prev != "" && prev != kind && kind != "" && kind != "none" && h.cfg.Mesh != nil
+	if shouldRebind {
+		if h.meshRebindTimer != nil {
+			h.meshRebindTimer.Stop()
+		}
+		delay := h.meshRebindDelay
+		if delay <= 0 {
+			delay = 700 * time.Millisecond
+		}
+		fn := h.resumeMesh
+		if h.onMeshRebind != nil {
+			fn = h.onMeshRebind
+		}
+		h.meshRebindTimer = time.AfterFunc(delay, fn)
+		h.appendAuditLocked(fmt.Sprintf("network switched (%s -> %s), refreshing mesh", prev, kind))
+	}
+	h.mu.Unlock()
+	h.notify()
+}
+
 // LeaveMesh stops the embedded mesh and forgets the network.
 func (h *Host) LeaveMesh() {
 	h.mu.Lock()

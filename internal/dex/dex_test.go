@@ -901,3 +901,10 @@ func TestLiveDeXSurvivesTransportDrop(t *testing.T) {
 		t.Fatalf("detached helper still running after STOP:\n%s", ps)
 	}
 }
+
+func TestDetachedDaemonCommand(t *testing.T) {
+	cmd := detachedHelperCommand("daemon --pkg com.yuanzhe.androfuse")
+	if !strings.Contains(cmd, "com.androfuse.dexhelper.Main daemon --pkg com.yuanzhe.androfuse") || !strings.Contains(cmd, "setsid") {
+		t.Fatalf("unexpected detachedHelperCommand for daemon: %q", cmd)
+	}
+}

@@ -149,6 +149,7 @@ func (h *Host) homeTab(c *ui.Context, wide bool) {
 			ui.Text(c, lastErr).FontSize(12).TextColor(t.Danger)
 		}
 	})
+	h.daemonCard(c)
 	h.adbCard(c)
 
 	sectionTitle(c, L.PhoneComputersTitle())
@@ -472,6 +473,31 @@ func lanIPv4() string {
 		return a.IP.String()
 	}
 	return ""
+}
+
+// daemonCard shows whether the persistent direct wireless control daemon is active (`PLAN` §9.2).
+func (h *Host) daemonCard(c *ui.Context) {
+	t := c.Theme()
+	h.mu.Lock()
+	ready := h.daemonReady
+	h.mu.Unlock()
+	dot := t.TextMuted
+	title, sub := L.PhoneDaemonOff(), L.PhoneDaemonOffSub()
+	if ready {
+		dot, title, sub = t.Accent, L.PhoneDaemonReady(), L.PhoneDaemonReadySub()
+	}
+	card(c.Key("comp-daemon-card")).Children(func() {
+		ui.Row(c.Key("comp-daemon-row")).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
+			tile(c, iconScreen)
+			ui.Column(c).Grow(1).MinWidth(0).Gap(2).Children(func() {
+				ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+					ui.Box(c.Key("comp-daemon-dot")).Size(8, 8).Radius(4).Background(dot)
+					ui.Text(c, title).Bold().FontSize(14)
+				})
+				ui.Text(c, sub).FontSize(12).TextColor(t.TextMuted)
+			})
+		})
+	})
 }
 
 // adbCard shows this phone's Wireless debugging port, which the Companion finds on its own

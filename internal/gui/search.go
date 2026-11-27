@@ -84,9 +84,22 @@ func (a *App) pickerPopover(c *ui.Context, anchor ui.Element) {
 		if p.Kind == openAsApp && p.Device != "" {
 			for _, d := range devs {
 				if d.HardwareHash == p.Device {
-					a.appPicker(c, k, d)
+					a.appPickerFor(c, k, a.phoneName(d), d.Apps, func(ap adb.AppEntry) {
+						a.LaunchAppWindow(d, ap, a.pickerOpenIn())
+					})
 					return
 				}
+			}
+			if r, ok := a.RememberedFor(p.Device); ok && r.Companion != nil {
+				if apps := a.appsForDevice(r.HardwareHash); len(apps) > 0 {
+					a.appPickerFor(c, k, r.displayName(), apps, func(ap adb.AppEntry) {
+						a.LaunchDaemonAppWindow(r.HardwareHash, ap, a.pickerOpenIn())
+					})
+					return
+				}
+				go a.fetchCompanionApps(r.HardwareHash)
+				a.appPickerLoading(c, k, r.displayName())
+				return
 			}
 		}
 
@@ -165,6 +178,21 @@ func (a *App) pickerPopover(c *ui.Context, anchor ui.Element) {
 						continue
 					}
 					r := r
+					if p.Kind == openAsApp && r.Companion != nil {
+						apps := a.appsForDevice(r.HardwareHash)
+						st, hasSt := a.peerStatusFor(r.HardwareHash)
+						if len(apps) > 0 || (hasSt && st.DaemonReady && st.DaemonTrustedDisplay) {
+							row("pk-off-"+r.HardwareHash, func() {
+								phoneAvatar(c, 32, phoneLogo(r.Maker, r.Brand, r.Model, r.Name), nil, r.displayName())
+							}, r.displayName(), L.KindApp(), true, func() {
+								if len(apps) == 0 {
+									go a.fetchCompanionApps(r.HardwareHash)
+								}
+								a.update(func() { a.picker.Device = r.HardwareHash; a.picker.Query = "" })
+							})
+							continue
+						}
+					}
 					row("pk-off-"+r.HardwareHash, func() {
 						phoneAvatar(c, 32, phoneLogo(r.Maker, r.Brand, r.Model, r.Name), nil, r.displayName())
 					}, r.displayName(), L.LastConnected(lastSeenWords(r.LastSeen)), true, func() {
@@ -236,21 +264,21 @@ func (a *App) openKind(d DiscoveredDevice, kind int, open OpenIn) {
 	}
 }
 
-// appPicker is the picker's app grid for one phone: a search, user apps first, a tile per app.
-func (a *App) appPicker(c *ui.Context, k tokens, d DiscoveredDevice) {
+// appPickerFor is the picker's app grid for one phone: a search, user apps first, a tile per app.
+func (a *App) appPickerFor(c *ui.Context, k tokens, phoneTitle string, apps []adb.AppEntry, onLaunch func(adb.AppEntry)) {
 	t := c.Theme()
 	ui.Row(c.Key("apps-head")).FillWidth().Gap(6).AlignItems(ui.Center).Children(func() {
 		if iconBtn(c, "apps-back", iconBack, L.ActionBack(), false).Clicked() {
 			a.update(func() { a.picker.Device = "" })
 		}
-		ui.Text(c, a.phoneName(d)).Bold().FontSize(sizeBody).Grow(1).SingleLine()
+		ui.Text(c, phoneTitle).Bold().FontSize(sizeBody).Grow(1).SingleLine()
 	})
 	ui.TextInput(c.Key("apps-q"), &a.picker.Query).Placeholder(L.AppFilterHint()).FillWidth().AutoFocus()
 	a.mu.Lock()
 	query := strings.ToLower(strings.TrimSpace(a.picker.Query))
 	a.mu.Unlock()
 	var shown []adb.AppEntry
-	for _, ap := range d.Apps {
+	for _, ap := range apps {
 		if query == "" && ap.System {
 			continue
 		}
@@ -260,7 +288,7 @@ func (a *App) appPicker(c *ui.Context, k tokens, d DiscoveredDevice) {
 		shown = append(shown, ap)
 	}
 	if len(shown) == 0 && query == "" {
-		shown = d.Apps
+		shown = apps
 	}
 	ui.Scroll(c.Key("apps-grid")).FillWidth().MaxHeight(360).Children(func() {
 		ui.Row(c).FillWidth().Gap(4).Wrap().Children(func() {
@@ -284,10 +312,24 @@ func (a *App) appPicker(c *ui.Context, k tokens, d DiscoveredDevice) {
 				})
 				if tile.Clicked() {
 					a.closePicker()
-					a.LaunchAppWindow(d, ap, a.pickerOpenIn())
+					onLaunch(ap)
 				}
 			}
 		})
+	})
+	a.pickerFoot(c, k)
+}
+
+func (a *App) appPickerLoading(c *ui.Context, k tokens, phoneTitle string) {
+	ui.Row(c.Key("apps-head")).FillWidth().Gap(6).AlignItems(ui.Center).Children(func() {
+		if iconBtn(c, "apps-back", iconBack, L.ActionBack(), false).Clicked() {
+			a.update(func() { a.picker.Device = "" })
+		}
+		ui.Text(c, phoneTitle).Bold().FontSize(sizeBody).Grow(1).SingleLine()
+	})
+	ui.Row(c.Key("apps-loading")).FillWidth().Padding(24, 12).Gap(10).AlignItems(ui.Center).Justify(ui.Center).Children(func() {
+		ui.Spinner(c).Size(16, 16)
+		ui.Text(c, L.PickerLoadingApps()).FontSize(sizeSmall).TextColor(k.text2)
 	})
 	a.pickerFoot(c, k)
 }
@@ -370,6 +412,27 @@ func (a *App) searchResults(c *ui.Context, query string) []searchResult {
 						}
 					},
 					run: func() { a.LaunchAppWindow(d, ap, OpenDefault) }}, n)
+			}
+		}
+		for _, r := range a.offlineRemembered(devs) {
+			r := r
+			if r.Companion == nil {
+				continue
+			}
+			for _, ap := range a.appsForDevice(r.HardwareHash) {
+				ap := ap
+				if !matches(ap.Label, ap.Package) {
+					continue
+				}
+				add(searchResult{key: "a-off-" + r.HardwareHash + ap.Package, group: L.SearchApps(), title: ap.Label, sub: L.SearchOpenOn(r.displayName()),
+					icon: func(c *ui.Context) {
+						if bmp := a.appIconFor(ap.IconPath); bmp != nil {
+							ui.Image(c, bmp).Size(18, 18).Radius(4)
+						} else {
+							ui.Icon(c, iconAppWin).Size(18, 18)
+						}
+					},
+					run: func() { a.LaunchDaemonAppWindow(r.HardwareHash, ap, OpenDefault) }}, n)
 			}
 		}
 	}

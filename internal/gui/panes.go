@@ -186,6 +186,7 @@ func (a *App) pane(c *ui.Context, sw *SessionWindow, partner *SessionWindow, top
 	ui.Column(c.Key("pane-"+sw.spec.ID)).Fill().MinWidth(0).MinHeight(0).Radius(paneRadius).Clip().
 		Background(t.Background).Border(1, t.Border).Bind(&sw.paneHandle).Children(func() {
 		a.sessionHeader(c, sw, partner, true, topRight)
+		sw.statusStrip(c)
 		sw.shareStrip(c)
 		ui.Column(c.Key("pane-body")).Grow(1).FillWidth().MinHeight(0).Background(ui.Hex(stageBgHex)).Children(func() {
 			sw.content(c, true)

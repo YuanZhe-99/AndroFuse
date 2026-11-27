@@ -22,6 +22,7 @@ import (
 
 	"github.com/YuanZhe-99/AndroFuse/internal/adb"
 	"github.com/YuanZhe-99/AndroFuse/internal/lease"
+	"github.com/YuanZhe-99/AndroFuse/internal/scrcpy"
 
 	"github.com/YuanZhe-99/AndroFuse/internal/sysproc"
 )
@@ -834,4 +835,41 @@ func (s *LoopbackSession) Stop() {
 	if s.leases != nil {
 		_ = s.leases.Release(s.sessionID)
 	}
+}
+
+// StartDaemon pushes and launches the detached persistent UID 2000 daemon (`server/dexhelper`
+// `daemon`, PLAN §9.2), which pushes its scoped `IBinder` to the Companion app and idles with
+// zero active wakeups until stopped or replaced.
+//
+// Inputs: companionPkg overrides the default Companion package (`com.yuanzhe.androfuse`).
+// Side effects: uploads `androfuse-dex-helper.jar` to RemoteHelperPath and spawns a detached
+// background `app_process` on the device.
+func StartDaemon(ctx context.Context, client *adb.Client, serial, companionPkg string) error {
+	if client == nil {
+		return errors.New("adb client is required")
+	}
+	if strings.TrimSpace(companionPkg) == "" {
+		companionPkg = "com.yuanzhe.androfuse"
+	}
+	jar, err := FindHelperJar()
+	if err != nil {
+		return err
+	}
+	if err := client.PushFile(ctx, serial, jar, RemoteHelperPath); err != nil {
+		return fmt.Errorf("push dex helper: %w", err)
+	}
+	if srvPath, sErr := scrcpy.FindCachedServer(); sErr == nil {
+		if err := client.PushFile(ctx, serial, srvPath, scrcpy.RemoteServerPath); err != nil {
+			return fmt.Errorf("push scrcpy-server: %w", err)
+		}
+	}
+	// Terminate any prior uid=2000 daemon so the new JAR/binary takes over the lock cleanly.
+	_, _ = client.Shell(ctx, serial, "pkill -f 'com.androfuse.dexhelper.Main daemon' >/dev/null 2>&1 || true; sleep 0.2")
+	inner := detachedHelperCommand(fmt.Sprintf("daemon --pkg %s", companionPkg))
+	bg := fmt.Sprintf("(%s) </dev/null >/dev/null 2>&1 &", inner)
+	_, err = client.Shell(ctx, serial, bg)
+	if err != nil {
+		return fmt.Errorf("launch uid=2000 daemon: %w", err)
+	}
+	return nil
 }

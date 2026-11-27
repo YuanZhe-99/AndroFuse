@@ -17,9 +17,11 @@ import (
 	"time"
 
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/ui"
 
 	"github.com/YuanZhe-99/AndroFuse/internal/adb"
 	"github.com/YuanZhe-99/AndroFuse/internal/companion"
+	"github.com/YuanZhe-99/AndroFuse/internal/dex"
 	"github.com/YuanZhe-99/AndroFuse/internal/mesh"
 	"github.com/YuanZhe-99/AndroFuse/internal/version"
 	L "github.com/YuanZhe-99/AndroFuse/locales"
@@ -112,6 +114,9 @@ func (a *App) PairCompanionOverADB(serial, model string, joinMesh bool) {
 				meshHost = res.Model // a Companion from before mesh.Hostname
 			}
 			a.bindCompanion(hash, res.Port, res.CertFingerprint, res.Token, meshHost)
+		}
+		if dErr := dex.StartDaemon(ctx, client, serial, companionPackage); dErr != nil {
+			_ = a.failed(L.FailCompanion(), dErr)
 		}
 		if !joinMesh || !inNet {
 			a.RefreshDevices()
@@ -270,16 +275,21 @@ func (a *App) ReconnectCompanion(hash string) {
 	}()
 }
 
-// companionRoute is one loopback address that reaches a phone's Companion, and the Companion
-// port behind it (0 for adb's local socket, which has none).
+// companionRoute is an address that reaches a phone's Companion, the Companion port behind it
+// (0 for adb's local socket, which has none), and whether it rides EasyTier or a direct LAN IP.
 type companionRoute struct {
-	addr string
-	port int
+	addr      string
+	port      int
+	isMesh    bool
+	directLAN bool
 }
 
-// companionRoutes returns loopback addresses that may reach b's Companion: an adb forward of its
-// local socket when the phone is on adb, else mesh port forwards to its mesh IPv4 at the saved
-// port and at the ports its device id gives (companion.DevicePorts), added in one restart.
+// companionRoutes returns addresses that may reach b's Companion in priority order:
+//  1. adb forward of its local socket when the phone is on adb,
+//  2. direct Wi-Fi / LAN TCP to the phone's reported WifiIPv4 or remembered endpoint host (TLS 1.3
+//     with certificate fingerprint pinning and pairing token auth),
+//  3. EasyTier mesh loopback port forwards to its mesh IPv4 at the saved port and candidate
+//     companion.DevicePorts(id).
 func (a *App) companionRoutes(ctx context.Context, hash string, b CompanionBinding) ([]companionRoute, error) {
 	a.mu.Lock()
 	serial := ""
@@ -289,28 +299,19 @@ func (a *App) companionRoutes(ctx context.Context, hash string, b CompanionBindi
 		}
 	}
 	a.mu.Unlock()
+	var routes []companionRoute
 	if serial != "" {
-		client, _, err := a.ensureADBAndLeases()
-		if err != nil {
-			return nil, err
+		if client, _, err := a.ensureADBAndLeases(); err == nil {
+			fctx, fcancel := context.WithTimeout(ctx, 2*time.Second)
+			port, fErr := client.ForwardPort(fctx, serial, 0, "localabstract:"+companion.LocalSocket)
+			fcancel()
+			if fErr == nil {
+				routes = append(routes, companionRoute{addr: fmt.Sprintf("127.0.0.1:%d", port)})
+			}
 		}
-		port, err := client.ForwardPort(ctx, serial, 0, "localabstract:"+companion.LocalSocket)
-		if err != nil {
-			return nil, err
-		}
-		return []companionRoute{{addr: fmt.Sprintf("127.0.0.1:%d", port)}}, nil
 	}
 
-	// Right after a network starts or restarts, its routes take a moment to list the phone again.
-	id, ip, ok := a.meshPeerIPv4(b.MeshHost)
-	for deadline := time.Now().Add(10 * time.Second); !ok && time.Now().Before(deadline) && ctx.Err() == nil; {
-		time.Sleep(500 * time.Millisecond)
-		id, ip, ok = a.meshPeerIPv4(b.MeshHost)
-	}
-	if !ok {
-		return nil, errors.New(L.CompanionNoRoute())
-	}
-	ports := []int{}
+	var ports []int
 	if b.Port > 0 {
 		ports = append(ports, b.Port)
 	}
@@ -321,19 +322,89 @@ func (a *App) companionRoutes(ctx context.Context, hash string, b CompanionBindi
 			}
 		}
 	}
-	locals, err := a.meshForwards(id, ip, ports)
-	if err != nil {
-		return nil, err
+
+	if len(ports) > 0 {
+		var hosts []string
+		addLANHost := func(raw string) {
+			ip := net.ParseIP(strings.TrimSpace(raw))
+			if ip == nil || ip.To4() == nil || ip.IsLoopback() || ip.IsUnspecified() {
+				return
+			}
+			s := ip.String()
+			if !slices.Contains(hosts, s) {
+				hosts = append(hosts, s)
+			}
+		}
+		if st, ok := a.peerStatusFor(hash); ok {
+			addLANHost(st.WifiIPv4)
+		}
+		if r, ok := a.RememberedFor(hash); ok && r.Endpoint != "" {
+			if h, _, err := net.SplitHostPort(r.Endpoint); err == nil {
+				addLANHost(h)
+			}
+		}
+		lanPorts := ports
+		if len(lanPorts) > 2 {
+			lanPorts = lanPorts[:2]
+		}
+		for _, h := range hosts {
+			for _, p := range lanPorts {
+				routes = append(routes, companionRoute{
+					addr:      net.JoinHostPort(h, fmt.Sprintf("%d", p)),
+					port:      p,
+					directLAN: true,
+				})
+			}
+		}
 	}
-	out := make([]companionRoute, len(ports))
-	for i, p := range ports {
-		out[i] = companionRoute{addr: fmt.Sprintf("127.0.0.1:%d", locals[i]), port: p}
+
+	// Right after a network starts or restarts, its routes take a moment to list the phone again.
+	if b.MeshHost != "" {
+		id, ip, ok := a.meshPeerIPv4(b.MeshHost)
+		if !ok && len(routes) == 0 {
+			for deadline := time.Now().Add(5 * time.Second); !ok && time.Now().Before(deadline) && ctx.Err() == nil; {
+				time.Sleep(300 * time.Millisecond)
+				id, ip, ok = a.meshPeerIPv4(b.MeshHost)
+			}
+		}
+		if ok && len(ports) > 0 {
+			if locals, err := a.meshForwards(id, ip, ports); err == nil {
+				for i, p := range ports {
+					routes = append(routes, companionRoute{
+						addr:   fmt.Sprintf("127.0.0.1:%d", locals[i]),
+						port:   p,
+						isMesh: true,
+					})
+				}
+			}
+		}
 	}
-	return out, nil
+	if len(routes) == 0 {
+		return nil, errors.New(L.CompanionNoRoute())
+	}
+	return routes, nil
+}
+
+// isMeshRoute reports whether addr matches one of the active EasyTier loopback port forwards.
+func (a *App) isMeshRoute(addr string) bool {
+	host, portStr, err := net.SplitHostPort(strings.TrimSpace(addr))
+	if err != nil || host != "127.0.0.1" {
+		return false
+	}
+	a.rt.coreMu.Lock()
+	defer a.rt.coreMu.Unlock()
+	for _, cfg := range a.rt.meshCfgs {
+		for _, pf := range cfg.PortForwards {
+			if fmt.Sprintf("%d", pf.LocalPort) == portStr {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // findCompanion connects to hash's Companion over the first of companionRoutes that answers,
-// trying again for up to 30 s while a new mesh forward settles.
+// trying again for up to 12 s while a new mesh forward settles.
 // Returns: the connected client and the address that reached it.
 // Side effects: saves the port that answered when it is not the saved one, and the hostname the
 // Companion reported (noteMeshHost).
@@ -342,9 +413,19 @@ func (a *App) findCompanion(ctx context.Context, hash string, b CompanionBinding
 	if err != nil {
 		return nil, "", err
 	}
-	for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(time.Second) {
+	skipLAN := make(map[string]bool)
+	for deadline := time.Now().Add(12 * time.Second); ; time.Sleep(500 * time.Millisecond) {
+		tried := false
 		for _, r := range routes {
-			dctx, cancel := context.WithTimeout(ctx, 4*time.Second)
+			if r.directLAN && skipLAN[r.addr] {
+				continue
+			}
+			tried = true
+			timeout := 2500 * time.Millisecond
+			if r.directLAN {
+				timeout = 1000 * time.Millisecond
+			}
+			dctx, cancel := context.WithTimeout(ctx, timeout)
 			c, dErr := companion.Dial(dctx, r.addr, tok, b.Fingerprint)
 			cancel()
 			if dErr == nil {
@@ -357,9 +438,15 @@ func (a *App) findCompanion(ctx context.Context, hash string, b CompanionBinding
 			if errors.Is(dErr, companion.ErrFingerprint) {
 				return nil, "", dErr // another certificate: retrying will not help
 			}
+			if r.directLAN {
+				skipLAN[r.addr] = true
+			}
 			err = dErr
 		}
-		if time.Now().After(deadline) || ctx.Err() != nil {
+		if !tried || time.Now().After(deadline) || ctx.Err() != nil {
+			if err == nil {
+				err = errors.New(L.CompanionNoRoute())
+			}
 			return nil, "", err
 		}
 	}
@@ -465,9 +552,6 @@ func (a *App) syncCompanion(d DiscoveredDevice) {
 		a.updateCompanion(ctx, client, d.HardwareHash, serial, name, apk)
 	}
 	cfg, inNet := a.pairNetworkConfig()
-	if !inNet {
-		return
-	}
 	tok, err := openSecret(r.Companion.SealedToken)
 	if err != nil {
 		return
@@ -484,7 +568,12 @@ func (a *App) syncCompanion(d DiscoveredDevice) {
 	}
 	defer c.Close()
 	st, err := c.GetStatus(ctx)
-	if err != nil || (st.MeshRunning && st.MeshNetwork == cfg.NetworkName) {
+	if err == nil && !st.DaemonReady {
+		if dErr := dex.StartDaemon(ctx, client, serial, companionPackage); dErr != nil {
+			_ = a.failed(L.FailCompanion(), dErr)
+		}
+	}
+	if err != nil || !inNet || (st.MeshRunning && st.MeshNetwork == cfg.NetworkName) {
 		return
 	}
 	jr, err := c.JoinMesh(ctx, companion.MeshJoinRequest{NetworkName: cfg.NetworkName, NetworkSecret: cfg.NetworkSecret, Peers: peersForPhone(cfg)})
@@ -556,5 +645,278 @@ func (a *App) UpdateCompanion(d DiscoveredDevice) {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
 		a.updateCompanion(ctx, client, d.HardwareHash, d.Target.Serial, a.phoneName(d), apk)
+	}()
+}
+
+func (a *App) localCompanionAPK() (path, shaHex string) {
+	a.mu.Lock()
+	apk := a.customAPK
+	a.mu.Unlock()
+	if apk == "" {
+		apk = companionAPK()
+	}
+	if apk == "" {
+		return "", ""
+	}
+	a.rt.coreMu.Lock()
+	if a.rt.localAPKPath == apk && a.rt.localAPKHash != "" {
+		h := a.rt.localAPKHash
+		a.rt.coreMu.Unlock()
+		return apk, h
+	}
+	a.rt.coreMu.Unlock()
+
+	raw, err := os.ReadFile(apk)
+	if err != nil {
+		return apk, ""
+	}
+	sum := sha256.Sum256(raw)
+	h := hex.EncodeToString(sum[:])
+	a.rt.coreMu.Lock()
+	a.rt.localAPKPath = apk
+	a.rt.localAPKHash = h
+	a.rt.coreMu.Unlock()
+	return apk, h
+}
+
+func (a *App) peerStatusFor(hash string) (companion.DeviceStatus, bool) {
+	if hash == "" {
+		return companion.DeviceStatus{}, false
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if st, ok := a.peerStatus[hash]; ok {
+		return st, true
+	}
+	if a.compConnected && a.compHash == hash {
+		return a.compStatus, true
+	}
+	return companion.DeviceStatus{}, false
+}
+
+func (a *App) hasOnlineADB(hash string) bool {
+	if hash == "" {
+		return false
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, d := range a.devices {
+		if (d.HardwareHash == hash || d.Target.DeviceHash == hash) && d.Target.State == "device" {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *App) maintDue(hash string, cooldown time.Duration) bool {
+	if hash == "" {
+		return false
+	}
+	a.rt.coreMu.Lock()
+	defer a.rt.coreMu.Unlock()
+	if a.rt.maintTried == nil {
+		a.rt.maintTried = map[string]time.Time{}
+	}
+	if time.Since(a.rt.maintTried[hash]) < cooldown {
+		return false
+	}
+	a.rt.maintTried[hash] = time.Now()
+	return true
+}
+
+// phoneNeedsAction decides whether the desktop should pull up ADB, update the Companion APK,
+// or activate Enhanced mode on a remembered paired phone from its reported Companion status.
+func phoneNeedsAction(st companion.DeviceStatus, localHash string, onlineADB, allowsWirelessADB bool) (needsAPK, needsDaemon, wantsADB bool) {
+	needsAPK = localHash != "" && st.AppBuildHash != "" && !strings.EqualFold(st.AppBuildHash, localHash)
+	needsDaemon = !st.DaemonReady
+	wantsADB = allowsWirelessADB && !onlineADB
+	return needsAPK, needsDaemon, wantsADB
+}
+
+// fetchCompanionApps populates the per-device app list directly from Companion Enhanced mode
+// (`apps.list`), reusing any cached icon PNGs on disk so Independent App Windows work without ADB.
+func (a *App) fetchCompanionApps(hash string) {
+	r, ok := a.RememberedFor(hash)
+	if !ok || r.Companion == nil {
+		return
+	}
+	a.rt.coreMu.Lock()
+	if a.rt.fetchingApps == nil {
+		a.rt.fetchingApps = map[string]bool{}
+	}
+	if a.rt.fetchingApps[hash] {
+		a.rt.coreMu.Unlock()
+		return
+	}
+	a.rt.fetchingApps[hash] = true
+	a.rt.coreMu.Unlock()
+	defer func() {
+		a.rt.coreMu.Lock()
+		delete(a.rt.fetchingApps, hash)
+		a.rt.coreMu.Unlock()
+	}()
+
+	tok, err := openSecret(r.Companion.SealedToken)
+	if err != nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	c, _, err := a.findCompanion(ctx, hash, *r.Companion, string(tok))
+	if err != nil {
+		return
+	}
+	list, lErr := c.ListApps(ctx)
+	_ = c.Close()
+	if lErr != nil || len(list) == 0 {
+		return
+	}
+	iconDir := a.deviceIconDir(hash)
+	apps := make([]adb.AppEntry, 0, len(list))
+	decoded := make(map[string]*ui.Bitmap)
+	for _, ap := range list {
+		entry := adb.AppEntry{
+			Package:    ap.Package,
+			Label:      ap.Label,
+			System:     ap.System,
+			Resizeable: ap.Resizeable,
+		}
+		if iconDir != "" {
+			p := filepath.Join(iconDir, ap.Package+".png")
+			if _, sErr := os.Stat(p); sErr == nil {
+				entry.IconPath = p
+				if raw, rErr := os.ReadFile(p); rErr == nil {
+					if bmp, bErr := ui.DecodeBitmap(raw); bErr == nil {
+						decoded[p] = bmp
+					}
+				}
+			}
+		}
+		apps = append(apps, entry)
+	}
+	a.saveDeviceApps(hash, apps)
+	a.update(func() {
+		if a.appIcons == nil {
+			a.appIcons = make(map[string]*ui.Bitmap)
+		}
+		for p, bmp := range decoded {
+			a.appIcons[p] = bmp
+		}
+	})
+}
+
+func (a *App) pollCompanionHealth(ctx context.Context) {
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(3 * time.Second):
+	}
+	run := func() {
+		for _, r := range a.rememberedList() {
+			if r.Companion == nil {
+				continue
+			}
+			_, inNet := a.networkWay(r)
+			if !inNet && !a.hasOnlineADB(r.HardwareHash) {
+				continue
+			}
+			a.checkCompanionHealthOnce(ctx, r)
+		}
+	}
+	run()
+	t := time.NewTicker(15 * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			run()
+		}
+	}
+}
+
+func (a *App) checkCompanionHealthOnce(ctx context.Context, r RememberedDevice) {
+	if r.Companion == nil {
+		return
+	}
+	tok, err := openSecret(r.Companion.SealedToken)
+	if err != nil {
+		return
+	}
+	dctx, dcancel := context.WithTimeout(ctx, 5*time.Second)
+	c, _, err := a.findCompanion(dctx, r.HardwareHash, *r.Companion, string(tok))
+	dcancel()
+	if err != nil || c == nil {
+		return
+	}
+	sctx, scancel := context.WithTimeout(ctx, 3*time.Second)
+	st, err := c.GetStatus(sctx)
+	_ = c.Close()
+	scancel()
+	if err != nil {
+		return
+	}
+	a.update(func() {
+		if a.peerStatus == nil {
+			a.peerStatus = make(map[string]companion.DeviceStatus)
+		}
+		a.peerStatus[r.HardwareHash] = st
+		if a.compHash == r.HardwareHash {
+			a.compStatus = st
+		}
+	})
+	a.ensurePhoneReady(ctx, r, st)
+}
+
+func (a *App) ensurePhoneReady(ctx context.Context, r RememberedDevice, st companion.DeviceStatus) {
+	if st.DaemonReady && len(a.appsForDevice(r.HardwareHash)) == 0 {
+		go a.fetchCompanionApps(r.HardwareHash)
+	}
+	apkPath, localHash := a.localCompanionAPK()
+	onlineADB := a.hasOnlineADB(r.HardwareHash)
+	needsAPK, needsDaemon, wantsADB := phoneNeedsAction(st, localHash, onlineADB, a.allowsWirelessADB())
+	if apkPath == "" {
+		needsAPK = false
+	}
+	if !needsAPK && !needsDaemon && !wantsADB {
+		return
+	}
+	if !onlineADB && st.NetworkType != "wifi" {
+		return
+	}
+	if !a.maintDue(r.HardwareHash, 45*time.Second) {
+		return
+	}
+	go func() {
+		mctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+		defer cancel()
+		client, _, err := a.ensureADBAndLeases()
+		if err != nil {
+			return
+		}
+		cand, ok := a.discoverAndConnectADB(mctx, r.HardwareHash, true)
+		if !ok {
+			return
+		}
+		if needsAPK {
+			a.updateCompanion(mctx, client, r.HardwareHash, cand.Serial, r.displayName(), apkPath)
+		}
+		if needsDaemon || needsAPK {
+			a.setCardWork(r.HardwareHash, cardWork{Busy: L.CardActivatingEnhanced(r.displayName())})
+			dErr := dex.StartDaemon(mctx, client, cand.Serial, companionPackage)
+			if dErr != nil {
+				a.setCardWork(r.HardwareHash, cardWork{Note: a.failed(L.FailCompanion(), dErr)})
+			} else {
+				a.setCardWork(r.HardwareHash, cardWork{})
+			}
+		}
+		if !a.allowsWirelessADB() && strings.Contains(cand.Serial, ":") && (needsAPK || needsDaemon) {
+			dctx, dcancel := context.WithTimeout(context.Background(), 3*time.Second)
+			_ = client.Disconnect(dctx, cand.Serial)
+			dcancel()
+			return
+		}
+		a.RefreshDevices()
 	}()
 }
