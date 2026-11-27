@@ -142,6 +142,19 @@ jobs:
         run: |
           version=$(sed -n 's/^const Version = "\(.*\)"/\1/p' internal/version/version.go)
           mkdir -p dist
+          build_apk() {
+            for attempt in 1 2 3; do
+              if "$@"; then
+                return 0
+              fi
+              if [ "$attempt" -eq 3 ]; then
+                return 1
+              fi
+              delay=$((attempt * 20))
+              echo "APK build attempt $attempt failed (e.g. Maven Central 429); retrying in ${delay}s..."
+              sleep "$delay"
+            done
+          }
           if [ -n "$KEYSTORE_B64" ]; then
             ks="$RUNNER_TEMP/release.jks"
             echo "$KEYSTORE_B64" | base64 --decode > "$ks"
@@ -155,13 +168,13 @@ jobs:
               json.dump(cfg, f, indent=2)
               f.write("\n")
           PY
-            MYGO_ANDROID_KEYSTORE_PASSWORD="$KEYSTORE_PASSWORD" MYGO_ANDROID_KEY_PASSWORD="${KEY_PASSWORD:-$KEYSTORE_PASSWORD}" \
+            build_apk env MYGO_ANDROID_KEYSTORE_PASSWORD="$KEYSTORE_PASSWORD" MYGO_ANDROID_KEY_PASSWORD="${KEY_PASSWORD:-$KEYSTORE_PASSWORD}" \
               go tool mygo build -platform android/arm64 .
             rm -f "$ks"
             git checkout -- mygo.json
           else
             echo "No ANDROFUSE_ANDROID_KEYSTORE configured; building with debug signature."
-            go tool mygo build -platform android/arm64 .
+            build_apk go tool mygo build -platform android/arm64 .
           fi
           sdk="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
           bt=$(ls -d "$sdk"/build-tools/* | sort -V | tail -1)
