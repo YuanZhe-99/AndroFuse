@@ -69,6 +69,7 @@ cargo fmt --manifest-path core/Cargo.toml --all --check
 cargo clippy --manifest-path core/Cargo.toml --workspace --all-targets -- -D warnings
 cargo test --manifest-path core/Cargo.toml --workspace
 cargo deny --manifest-path core/Cargo.toml check licenses bans sources
+go run github.com/zricethezav/gitleaks/v8@v8.30.1 git --no-banner --redact -v .
 ```
 
 ## Release Signing

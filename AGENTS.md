@@ -113,6 +113,9 @@ Other conventions:
 - Interface strings go through the ARB catalogs (`locales/en.json`, `locales/zh-Hans.json`);
   `go tool mygo i18n check` must pass, and `go tool mygo generate` commits `locales/catalog_gen.go`.
 - Layout numbers and colors are named tokens in `internal/gui/style.go`, not scattered literals.
+- Secret-shaped test fixtures (tokens, device keys, hashes) begin with `0123456789abcdef` or
+  contain `fixture`, `dummy` or `fake`, so `.gitleaks.toml` covers them; never add per-commit
+  fingerprints to `.gitleaksignore` for test fixtures.
 
 ## Behavior contract
 
@@ -151,6 +154,7 @@ cargo fmt --manifest-path core/Cargo.toml --all --check
 cargo clippy --manifest-path core/Cargo.toml --workspace --all-targets -- -D warnings
 cargo test --manifest-path core/Cargo.toml --workspace
 cargo deny --manifest-path core/Cargo.toml check licenses bans sources
+go run github.com/zricethezav/gitleaks/v8@v8.30.1 git --no-banner --redact -v .
 ```
 
 - Run the `ui.NewTester` render checks (`internal/gui`) across `en` and `zh-Hans`, light and dark,

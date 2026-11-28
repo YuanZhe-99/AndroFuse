@@ -3,8 +3,11 @@ title = "AndroFuse gitleaks config"
 [extend]
 useDefault = true
 
+# Secret-shaped values in Go tests (tokens, device keys, hashes) are fixtures. Write them so they
+# begin with the sequential hex "0123456789abcdef" or contain "fixture", "dummy" or "fake"; this
+# allowlist then covers every such value, so a new test never needs its own fingerprint entry.
 [[allowlists]]
-description = "Dummy sequential hex fixture DeviceKey/Hash in Go tests"
+description = "Fixture secrets in Go tests"
 condition = "AND"
 paths = ['''_test\.go$''']
-regexes = ['''^0123456789abcdef$''']
+regexes = ['''^0123456789abcdef''', '''(?i)fixture|dummy|fake''']
