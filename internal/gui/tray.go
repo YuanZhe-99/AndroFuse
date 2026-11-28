@@ -99,7 +99,7 @@ func (a *App) trayItems() []*mygo.MenuItem {
 	for _, r := range a.offlineRemembered(devs) {
 		sub := []*mygo.MenuItem{{Label: L.ConnectGo(), Click: click(func() { a.connectRemembered(r, openAsScreen) })}}
 		if r.Companion != nil {
-			sub = append(sub, &mygo.MenuItem{Label: L.ShareScreen(), Click: click(func() { a.LaunchShare(r.HardwareHash, OpenDefault) })})
+			sub = append(sub, &mygo.MenuItem{Label: L.ShareScreen(), Click: click(func() { a.LaunchCompanionMirror(r.HardwareHash, OpenDefault) })})
 		}
 		items = append(items, &mygo.MenuItem{Label: r.displayName(), Badge: L.StateOffline(), Submenu: sub})
 	}

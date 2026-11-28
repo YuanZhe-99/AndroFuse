@@ -1,5 +1,14 @@
 # 版本历史
 
+## v0.2.4（2026-11-27）
+
+- **Windows 安装包恢复可用**：安装包现在在 `androfuse.exe` 旁附带固定 SHA-256 的 `scrcpy-server-v5.0.1`，并能找到 `bin/androfuse-dex-helper.jar`（缺少任一项构建即失败）；0.2.3 安装版无法显示手机画面，也无法激活增强协同。
+- **增强协同守护进程自动修复**：直接 ADB 会话与一次性辅助命令使用各自的副本（`androfuse-scrcpy-session.jar`、`androfuse-dex-tool.jar`），不再删除或替换守护进程锁定的文件；守护进程副本缺失、过期或被改写时桌面端会重启它（`dex.DaemonOutdated`），scrcpy-server 崩溃时 `daemon.open` 会重试一次。
+- **手机休眠时应用窗口保持刷新**：AppGuard 不再关闭手机面板电源（这会冻结窗口，并可能让屏幕无法点亮）；窗口关闭时让仍处于锁屏的手机重新休眠；每次采集重置或 flex 缩放后对应用显示重新上电（`cmd display power-off` / `power-reset`），卡顿守护在窗口无响应时请求新的编码会话，修复了需要锁屏再解锁才出现画面的空白窗口（三星 One UI）。
+- **移动网络**：组网 TCP 走 EasyTier 的 KCP 代理；省电模式保留对称 NAT 打洞；慢速链路上的应用窗口缩放时不超过链路尺寸上限。
+- **伴侣**：默认开启后台待机，提醒把电池设为「不受限制」，并在手机上显示和编辑电脑上的网络名称；移除只能观看的屏幕共享回退（MediaProjection、无障碍服务）。
+- **修复**：每台手机复用一条 `adb forward`（此前会不断累积）；更新前先停止 adb 和安装目录中的进程（"Access is denied"）。
+
 ## v0.2.3（2026-11-27）
 
 - **独立应用窗口物理息屏保活与双层「有限返回」（`AppGuard.java`、`internal/dex/appguard.go`）**：

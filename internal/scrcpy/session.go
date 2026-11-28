@@ -96,6 +96,7 @@ type Session struct {
 	mu               sync.Mutex
 	stats            SessionStats
 	lastFrame        time.Time // when the last frame was decoded; Stats reports 0 fps once it is stale
+	lastInput        time.Time // when the last touch, scroll or key went to the phone (stallGuard)
 	lastErr          error
 	doneCh           chan struct{}
 	errCh            chan error
@@ -205,7 +206,7 @@ func StartADB(ctx context.Context, client *adb.Client, lib *core.Lib, store *lea
 	if cfg.SessionID == "" {
 		cfg.SessionID = fmt.Sprintf("scrcpy-%08x", scid)
 	}
-	if err := client.PushFile(ctx, cfg.Serial, serverPath, RemoteServerPath); err != nil {
+	if err := client.PushFile(ctx, cfg.Serial, serverPath, RemoteSessionServerPath); err != nil {
 		return nil, fmt.Errorf("push scrcpy-server: %w", err)
 	}
 
@@ -233,7 +234,7 @@ func StartADB(ctx context.Context, client *adb.Client, lib *core.Lib, store *lea
 
 	serverArgs := BuildServerArgs(scid, cfg)
 	shellCmd := fmt.Sprintf("CLASSPATH=%s app_process / com.genymobile.scrcpy.Server %s",
-		RemoteServerPath, strings.Join(serverArgs, " "))
+		RemoteSessionServerPath, strings.Join(serverArgs, " "))
 	cmd := exec.Command(client.Path, "-s", cfg.Serial, "shell", shellCmd)
 	sysproc.HideConsole(cmd)
 	var outBuf serverLogWriter
@@ -383,10 +384,49 @@ func StartFromConns(
 			}
 		}
 		go s.controlReadLoop()
+		if cfg.StartAppPackage != "" {
+			go s.stallGuard()
+		}
 	}
 
 	go s.videoLoop()
 	return s, nil
+}
+
+// stallGuard revives an app window whose picture stopped: when nothing has decoded 3 s after the
+// stream started, or input went to the phone and no frame followed within 1.5 s, it asks for a
+// fresh encoder session (TYPE_RESET_VIDEO), at most once every 5 s.
+// Notes: on Samsung One UI an app window opened while the phone slept could stop drawing until the
+// phone was locked and unlocked; a capture reset makes the daemon (or, over adb,
+// repowerVirtualDisplay) power-cycle the virtual display, which brings the picture back.
+func (s *Session) stallGuard() {
+	started := time.Now()
+	var lastReset time.Time
+	t := time.NewTicker(500 * time.Millisecond)
+	defer t.Stop()
+	for {
+		select {
+		case <-s.doneCh:
+			return
+		case now := <-t.C:
+			s.mu.Lock()
+			frame, input := s.lastFrame, s.lastInput
+			s.mu.Unlock()
+			if stalled(now, started, frame, input) && now.Sub(lastReset) >= 5*time.Second {
+				lastReset = now
+				_ = s.SendControl(EncodeResetVideo())
+			}
+		}
+	}
+}
+
+// stalled reports whether an app window's picture looks stuck at now: no frame 3 s after the start,
+// or input 1.5 s ago that no frame has followed.
+func stalled(now, started, lastFrame, lastInput time.Time) bool {
+	if lastFrame.IsZero() {
+		return now.Sub(started) >= 3*time.Second
+	}
+	return lastInput.After(lastFrame) && now.Sub(lastInput) >= 1500*time.Millisecond
 }
 
 // SendControl writes one encoded control packet on the scrcpy control socket.
@@ -396,6 +436,11 @@ func (s *Session) SendControl(pkt []byte) error {
 	s.mu.Unlock()
 	if c == nil {
 		return errors.New("control socket unavailable")
+	}
+	if len(pkt) > 0 && (pkt[0] == MsgInjectKeycode || pkt[0] == MsgInjectTouch || pkt[0] == MsgInjectScroll) {
+		s.mu.Lock()
+		s.lastInput = time.Now()
+		s.mu.Unlock()
 	}
 	s.ctrlMu.Lock()
 	defer s.ctrlMu.Unlock()
@@ -407,7 +452,37 @@ func (s *Session) SendControl(pkt []byte) error {
 
 // Resize requests a dynamic flex-display size update (TYPE_RESIZE_DISPLAY).
 func (s *Session) Resize(width, height uint16) error {
-	return s.SendControl(EncodeResizeDisplay(width, height))
+	if err := s.SendControl(EncodeResizeDisplay(width, height)); err != nil {
+		return err
+	}
+	// A flex resize restarts capture without logging it.
+	s.repowerVirtualDisplay(500 * time.Millisecond)
+	return nil
+}
+
+// repowerVirtualDisplay power-cycles this direct ADB session's app-window virtual display through the
+// display service (`cmd display power-off`, then `power-reset`) after delay; a no-op for other
+// sessions (the Enhanced mode daemon does the same itself, Daemon.java).
+// Notes: on Samsung One UI (Galaxy Z Fold8, Android 17), when an app window opened while the phone
+// slept, every capture reset (a flex resize, or RESET_VIDEO) left SurfaceFlinger's copy of the
+// display powered off while the display service still counted it on, so the window drew nothing
+// until the phone was locked and unlocked.
+// Side effects: one `adb shell` on the session's device.
+func (s *Session) repowerVirtualDisplay(delay time.Duration) {
+	id := s.VirtualDisplayID()
+	if s.adb == nil || id <= 0 || s.cfg.StartAppPackage == "" {
+		return
+	}
+	go func() {
+		select {
+		case <-s.doneCh:
+			return
+		case <-time.After(delay):
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_, _ = s.adb.Shell(ctx, s.cfg.Serial, fmt.Sprintf("cmd display power-off %d; cmd display power-reset %d", id, id))
+	}()
 }
 
 // InjectTouch sends an absolute touch or mouse MotionEvent onto the session display (INV-12).
@@ -900,12 +975,16 @@ func (w *serverLogWriter) Write(p []byte) (int, error) {
 	}
 	var target *Session
 	var foundID int
+	var reset *Session
 	for _, b := range p {
 		if b == '\n' {
 			if id, ok := parseNewDisplayID(w.lineBuf.String()); ok && w.dispID == 0 {
 				w.dispID = id
 				foundID = id
 				target = w.sess
+			}
+			if strings.Contains(w.lineBuf.String(), "Video capture reset") {
+				reset = w.sess
 			}
 			w.lineBuf.Reset()
 		} else if b != '\r' {
@@ -915,6 +994,9 @@ func (w *serverLogWriter) Write(p []byte) (int, error) {
 	w.mu.Unlock()
 	if target != nil && foundID > 0 {
 		target.setVirtualDisplayID(foundID)
+	}
+	if reset != nil {
+		reset.repowerVirtualDisplay(150 * time.Millisecond)
 	}
 	return len(p), nil
 }

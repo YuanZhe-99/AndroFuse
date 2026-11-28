@@ -256,3 +256,86 @@ func TestExtractPlatformToolsZip(t *testing.T) {
 		t.Fatal("expected Zip-Slip entry to be rejected")
 	}
 }
+
+func TestStagePlatformTools(t *testing.T) {
+	dir := t.TempDir()
+	srcDir := filepath.Join(dir, "app", "platform-tools")
+	stageRoot := filepath.Join(dir, "stage")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	exeName := adbExeName()
+	srcExe := filepath.Join(srcDir, exeName)
+	srcDLL := filepath.Join(srcDir, "AdbWinApi.dll")
+	if err := os.WriteFile(srcExe, []byte("adb-v1-binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(srcDLL, []byte("dll-v1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	staged1, err := StagePlatformTools(srcDir, stageRoot)
+	if err != nil {
+		t.Fatalf("StagePlatformTools initial: %v", err)
+	}
+	if filepath.Dir(staged1) == srcDir {
+		t.Fatalf("expected staged path outside %q, got %q", srcDir, staged1)
+	}
+	if got, err := os.ReadFile(staged1); err != nil || string(got) != "adb-v1-binary" {
+		t.Fatalf("staged adb mismatch: %q, err=%v", got, err)
+	}
+	stagedDLL := filepath.Join(filepath.Dir(staged1), "AdbWinApi.dll")
+	if got, err := os.ReadFile(stagedDLL); err != nil || string(got) != "dll-v1" {
+		t.Fatalf("staged dll mismatch: %q, err=%v", got, err)
+	}
+
+	// Fast-path reuse: unchanged regular files must not be rewritten.
+	beforeInfo, err := os.Stat(staged1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	staged2, err := StagePlatformTools(srcDir, stageRoot)
+	if err != nil {
+		t.Fatalf("StagePlatformTools reuse: %v", err)
+	}
+	if staged2 != staged1 {
+		t.Fatalf("expected same staged path %q, got %q", staged1, staged2)
+	}
+	afterInfo, err := os.Stat(staged2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !afterInfo.ModTime().Equal(beforeInfo.ModTime()) {
+		t.Fatalf("expected fast-path reuse without rewriting %q", staged2)
+	}
+
+	// When adb binary content changes, a new bundled-<hash> directory is created and the old one cleaned.
+	if err := os.WriteFile(srcExe, []byte("adb-v2-binary-updated"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	staged3, err := StagePlatformTools(srcDir, stageRoot)
+	if err != nil {
+		t.Fatalf("StagePlatformTools update: %v", err)
+	}
+	if staged3 == staged1 {
+		t.Fatalf("expected new staged directory after binary change, still got %q", staged3)
+	}
+	if got, err := os.ReadFile(staged3); err != nil || string(got) != "adb-v2-binary-updated" {
+		t.Fatalf("updated staged adb mismatch: %q, err=%v", got, err)
+	}
+	if _, err := os.Stat(filepath.Dir(staged1)); !os.IsNotExist(err) {
+		t.Fatalf("expected superseded directory %q to be cleaned up, stat err=%v", filepath.Dir(staged1), err)
+	}
+}
+
+func TestListedForward(t *testing.T) {
+	out := "emulator-5554 tcp:5000 localabstract:androfuse-companion\n" +
+		"192.0.2.10:38102 tcp:53291 localabstract:scrcpy_1234\n" +
+		"192.0.2.10:38102 tcp:53314 localabstract:androfuse-companion\n"
+	if got := listedForward(out, "192.0.2.10:38102", "localabstract:androfuse-companion"); got != 53314 {
+		t.Fatalf("listedForward = %d, want 53314", got)
+	}
+	if got := listedForward(out, "192.0.2.11:5555", "localabstract:androfuse-companion"); got != 0 {
+		t.Fatalf("listedForward for another phone = %d, want 0", got)
+	}
+}

@@ -25,23 +25,6 @@ func WatchWirelessDebugging(func(port int)) (stop func()) { return func() {} }
 // WatchWirelessPairing never fires outside Android.
 func WatchWirelessPairing(func(port int)) (stop func()) { return func() {} }
 
-// StartShare is unavailable outside Android.
-func StartShare(int, int, string, string, string) error {
-	return errors.New("screen sharing runs on Android only")
-}
-
-// StopShare is a no-op outside Android.
-func StopShare() {}
-
-// GlobalAction is unavailable outside Android.
-func GlobalAction(string) bool { return false }
-
-// AccessibilityOn is false outside Android.
-func AccessibilityOn() bool { return false }
-
-// OpenAccessibilitySettings is a no-op outside Android.
-func OpenAccessibilitySettings() {}
-
 // Identity is empty outside Android.
 func Identity() (name, model, release string, sdk int) { return "", "", "", 0 }
 
@@ -58,6 +41,12 @@ func Battery() (pct int, charging bool, tempC float64, ok bool) { return -1, fal
 
 // OpenNotificationSettings is a no-op outside Android.
 func OpenNotificationSettings() {}
+
+// BatteryRestricted is false outside Android.
+func BatteryRestricted() bool { return false }
+
+// OpenBatterySettings is a no-op outside Android.
+func OpenBatterySettings() {}
 
 // GetDaemonStatus returns an empty status outside Android.
 func GetDaemonStatus() DaemonStatus { return DaemonStatus{} }

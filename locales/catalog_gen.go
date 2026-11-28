@@ -2254,16 +2254,6 @@ func (msgs Messages) KindScreen() string {
 	return Catalog.Format(msgs.locale, "KindScreen", nil)
 }
 
-// KindShare says "Companion screen sharing"
-// in the language the app shows.
-func KindShare() string { return In(i18n.Locale()).KindShare() }
-
-// KindShare says "Companion screen sharing"
-// in the language of msgs.
-func (msgs Messages) KindShare() string {
-	return Catalog.Format(msgs.locale, "KindShare", nil)
-}
-
 // LastConnected says "Last connected {time}"
 // in the language the app shows.
 func LastConnected(time_ string) string { return In(i18n.Locale()).LastConnected(time_) }
@@ -3888,16 +3878,6 @@ func (msgs Messages) SetUpdates() string {
 	return Catalog.Format(msgs.locale, "SetUpdates", nil)
 }
 
-// ShareStrip says "The phone is on mobile data, so AndroFuse Companion shares its screen: you can see it and use Back, Home and Recents.…"
-// in the language the app shows.
-func ShareStrip() string { return In(i18n.Locale()).ShareStrip() }
-
-// ShareStrip says "The phone is on mobile data, so AndroFuse Companion shares its screen: you can see it and use Back, Home and Recents.…"
-// in the language of msgs.
-func (msgs Messages) ShareStrip() string {
-	return Catalog.Format(msgs.locale, "ShareStrip", nil)
-}
-
 // SidebarToggle says "Show or hide the sidebar"
 // in the language the app shows.
 func SidebarToggle() string { return In(i18n.Locale()).SidebarToggle() }
@@ -4568,91 +4548,31 @@ func (msgs Messages) PhoneADBOffSub() string {
 	return Catalog.Format(msgs.locale, "PhoneADBOffSub", nil)
 }
 
-// ShareNeedsAccessibility says "Turn on AndroFuse in the phone's accessibility settings to use Back, Home and Recents"
-// in the language the app shows.
-func ShareNeedsAccessibility() string { return In(i18n.Locale()).ShareNeedsAccessibility() }
-
-// ShareNeedsAccessibility says "Turn on AndroFuse in the phone's accessibility settings to use Back, Home and Recents"
-// in the language of msgs.
-func (msgs Messages) ShareNeedsAccessibility() string {
-	return Catalog.Format(msgs.locale, "ShareNeedsAccessibility", nil)
-}
-
-// PermScreenShare says "Screen viewing on mobile data"
+// PermScreenShare says "Screen, DeX and app windows without Wireless debugging"
 // in the language the app shows.
 func PermScreenShare() string { return In(i18n.Locale()).PermScreenShare() }
 
-// PermScreenShare says "Screen viewing on mobile data"
+// PermScreenShare says "Screen, DeX and app windows without Wireless debugging"
 // in the language of msgs.
 func (msgs Messages) PermScreenShare() string {
 	return Catalog.Format(msgs.locale, "PermScreenShare", nil)
 }
 
-// PermScreenShareSub says "On by default · lets paired computers view this screen before Enhanced mode is active (Android asks each time)"
+// PermScreenShareSub says "On by default · lets paired computers show and control this phone through Enhanced mode"
 // in the language the app shows.
 func PermScreenShareSub() string { return In(i18n.Locale()).PermScreenShareSub() }
 
-// PermScreenShareSub says "On by default · lets paired computers view this screen before Enhanced mode is active (Android asks each time)"
+// PermScreenShareSub says "On by default · lets paired computers show and control this phone through Enhanced mode"
 // in the language of msgs.
 func (msgs Messages) PermScreenShareSub() string {
 	return Catalog.Format(msgs.locale, "PermScreenShareSub", nil)
 }
 
-// PermA11y says "Back, Home and Recents while sharing"
-// in the language the app shows.
-func PermA11y() string { return In(i18n.Locale()).PermA11y() }
-
-// PermA11y says "Back, Home and Recents while sharing"
-// in the language of msgs.
-func (msgs Messages) PermA11y() string {
-	return Catalog.Format(msgs.locale, "PermA11y", nil)
-}
-
-// PermA11ySubOff says "Off · turn on AndroFuse in Android's accessibility settings"
-// in the language the app shows.
-func PermA11ySubOff() string { return In(i18n.Locale()).PermA11ySubOff() }
-
-// PermA11ySubOff says "Off · turn on AndroFuse in Android's accessibility settings"
-// in the language of msgs.
-func (msgs Messages) PermA11ySubOff() string {
-	return Catalog.Format(msgs.locale, "PermA11ySubOff", nil)
-}
-
-// PermA11ySubOn says "On · the computer can press Back, Home and Recents"
-// in the language the app shows.
-func PermA11ySubOn() string { return In(i18n.Locale()).PermA11ySubOn() }
-
-// PermA11ySubOn says "On · the computer can press Back, Home and Recents"
-// in the language of msgs.
-func (msgs Messages) PermA11ySubOn() string {
-	return Catalog.Format(msgs.locale, "PermA11ySubOn", nil)
-}
-
-// PermA11yOpen says "Turn on"
-// in the language the app shows.
-func PermA11yOpen() string { return In(i18n.Locale()).PermA11yOpen() }
-
-// PermA11yOpen says "Turn on"
-// in the language of msgs.
-func (msgs Messages) PermA11yOpen() string {
-	return Catalog.Format(msgs.locale, "PermA11yOpen", nil)
-}
-
-// ShareAsking says "Asking {name} to share its screen; allow it on the phone"
-// in the language the app shows.
-func ShareAsking(name string) string { return In(i18n.Locale()).ShareAsking(name) }
-
-// ShareAsking says "Asking {name} to share its screen; allow it on the phone"
-// in the language of msgs.
-func (msgs Messages) ShareAsking(name string) string {
-	return Catalog.Format(msgs.locale, "ShareAsking", map[string]any{"name": name})
-}
-
-// ShareScreen says "Share screen through the Companion"
+// ShareScreen says "Phone screen through the Companion"
 // in the language the app shows.
 func ShareScreen() string { return In(i18n.Locale()).ShareScreen() }
 
-// ShareScreen says "Share screen through the Companion"
+// ShareScreen says "Phone screen through the Companion"
 // in the language of msgs.
 func (msgs Messages) ShareScreen() string {
 	return Catalog.Format(msgs.locale, "ShareScreen", nil)
@@ -4838,24 +4758,14 @@ func (msgs Messages) CardCantReach(name string) string {
 	return Catalog.Format(msgs.locale, "CardCantReach", map[string]any{"name": name})
 }
 
-// CardCantReachShare says "Couldn't reach {name}'s Wireless debugging. Check that it is on; if the phone uses mobile data, use Share screen thro…"
+// CardCantReachShare says "Couldn't reach {name}'s Wireless debugging. Check that it is on; if the phone uses mobile data, open its screen throu…"
 // in the language the app shows.
 func CardCantReachShare(name string) string { return In(i18n.Locale()).CardCantReachShare(name) }
 
-// CardCantReachShare says "Couldn't reach {name}'s Wireless debugging. Check that it is on; if the phone uses mobile data, use Share screen thro…"
+// CardCantReachShare says "Couldn't reach {name}'s Wireless debugging. Check that it is on; if the phone uses mobile data, open its screen throu…"
 // in the language of msgs.
 func (msgs Messages) CardCantReachShare(name string) string {
 	return Catalog.Format(msgs.locale, "CardCantReachShare", map[string]any{"name": name})
-}
-
-// CardShareFailed says "Couldn't share {name}'s screen. Make sure AndroFuse is running on the phone and both are in the same network."
-// in the language the app shows.
-func CardShareFailed(name string) string { return In(i18n.Locale()).CardShareFailed(name) }
-
-// CardShareFailed says "Couldn't share {name}'s screen. Make sure AndroFuse is running on the phone and both are in the same network."
-// in the language of msgs.
-func (msgs Messages) CardShareFailed(name string) string {
-	return Catalog.Format(msgs.locale, "CardShareFailed", map[string]any{"name": name})
 }
 
 // FigCharging says "charging"
@@ -5028,36 +4938,6 @@ func (msgs Messages) VMBootingAndroid() string {
 	return Catalog.Format(msgs.locale, "VMBootingAndroid", nil)
 }
 
-// ShareNotifTitle says "AndroFuse is sharing this screen"
-// in the language the app shows.
-func ShareNotifTitle() string { return In(i18n.Locale()).ShareNotifTitle() }
-
-// ShareNotifTitle says "AndroFuse is sharing this screen"
-// in the language of msgs.
-func (msgs Messages) ShareNotifTitle() string {
-	return Catalog.Format(msgs.locale, "ShareNotifTitle", nil)
-}
-
-// ShareNotifText says "Your computer can see this screen. Tap to open AndroFuse."
-// in the language the app shows.
-func ShareNotifText() string { return In(i18n.Locale()).ShareNotifText() }
-
-// ShareNotifText says "Your computer can see this screen. Tap to open AndroFuse."
-// in the language of msgs.
-func (msgs Messages) ShareNotifText() string {
-	return Catalog.Format(msgs.locale, "ShareNotifText", nil)
-}
-
-// ShareNotifStop says "Stop"
-// in the language the app shows.
-func ShareNotifStop() string { return In(i18n.Locale()).ShareNotifStop() }
-
-// ShareNotifStop says "Stop"
-// in the language of msgs.
-func (msgs Messages) ShareNotifStop() string {
-	return Catalog.Format(msgs.locale, "ShareNotifStop", nil)
-}
-
 // PhoneTagline says "Use this phone with AndroFuse on your Windows PC"
 // in the language the app shows.
 func PhoneTagline() string { return In(i18n.Locale()).PhoneTagline() }
@@ -5116,6 +4996,66 @@ func PhoneNotifSub() string { return In(i18n.Locale()).PhoneNotifSub() }
 // in the language of msgs.
 func (msgs Messages) PhoneNotifSub() string {
 	return Catalog.Format(msgs.locale, "PhoneNotifSub", nil)
+}
+
+// PhoneBatteryTitle says "Battery usage"
+// in the language the app shows.
+func PhoneBatteryTitle() string { return In(i18n.Locale()).PhoneBatteryTitle() }
+
+// PhoneBatteryTitle says "Battery usage"
+// in the language of msgs.
+func (msgs Messages) PhoneBatteryTitle() string {
+	return Catalog.Format(msgs.locale, "PhoneBatteryTitle", nil)
+}
+
+// PhoneBatteryOn says "Unrestricted · AndroFuse can keep running in the background"
+// in the language the app shows.
+func PhoneBatteryOn() string { return In(i18n.Locale()).PhoneBatteryOn() }
+
+// PhoneBatteryOn says "Unrestricted · AndroFuse can keep running in the background"
+// in the language of msgs.
+func (msgs Messages) PhoneBatteryOn() string {
+	return Catalog.Format(msgs.locale, "PhoneBatteryOn", nil)
+}
+
+// PhoneBatteryOff says "Restricted · Android may pause AndroFuse in the background"
+// in the language the app shows.
+func PhoneBatteryOff() string { return In(i18n.Locale()).PhoneBatteryOff() }
+
+// PhoneBatteryOff says "Restricted · Android may pause AndroFuse in the background"
+// in the language of msgs.
+func (msgs Messages) PhoneBatteryOff() string {
+	return Catalog.Format(msgs.locale, "PhoneBatteryOff", nil)
+}
+
+// BatteryRemindTitle says "Let AndroFuse run in the background"
+// in the language the app shows.
+func BatteryRemindTitle() string { return In(i18n.Locale()).BatteryRemindTitle() }
+
+// BatteryRemindTitle says "Let AndroFuse run in the background"
+// in the language of msgs.
+func (msgs Messages) BatteryRemindTitle() string {
+	return Catalog.Format(msgs.locale, "BatteryRemindTitle", nil)
+}
+
+// BatteryRemindSub says "Set Battery to Unrestricted. Otherwise Android may pause AndroFuse when the screen is off, and your PC can't reach th…"
+// in the language the app shows.
+func BatteryRemindSub() string { return In(i18n.Locale()).BatteryRemindSub() }
+
+// BatteryRemindSub says "Set Battery to Unrestricted. Otherwise Android may pause AndroFuse when the screen is off, and your PC can't reach th…"
+// in the language of msgs.
+func (msgs Messages) BatteryRemindSub() string {
+	return Catalog.Format(msgs.locale, "BatteryRemindSub", nil)
+}
+
+// BatteryRemindAction says "Open battery settings"
+// in the language the app shows.
+func BatteryRemindAction() string { return In(i18n.Locale()).BatteryRemindAction() }
+
+// BatteryRemindAction says "Open battery settings"
+// in the language of msgs.
+func (msgs Messages) BatteryRemindAction() string {
+	return Catalog.Format(msgs.locale, "BatteryRemindAction", nil)
 }
 
 // MeshPhoneNotJoined says "Not in a network"
@@ -5618,11 +5558,11 @@ func (msgs Messages) CardEnhancedNeedsSetup() string {
 	return Catalog.Format(msgs.locale, "CardEnhancedNeedsSetup", nil)
 }
 
-// ActionViewScreen says "View screen"
+// ActionViewScreen says "Phone screen"
 // in the language the app shows.
 func ActionViewScreen() string { return In(i18n.Locale()).ActionViewScreen() }
 
-// ActionViewScreen says "View screen"
+// ActionViewScreen says "Phone screen"
 // in the language of msgs.
 func (msgs Messages) ActionViewScreen() string {
 	return Catalog.Format(msgs.locale, "ActionViewScreen", nil)

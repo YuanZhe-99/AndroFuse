@@ -43,14 +43,14 @@ func ListAppsWithIcons(ctx context.Context, client *adb.Client, serial, iconCach
 	callCtx, cancel := context.WithTimeout(ctx, 18*time.Second)
 	defer cancel()
 
-	if err := client.PushFile(callCtx, serial, jar, RemoteHelperPath); err != nil {
+	if err := client.PushFile(callCtx, serial, jar, RemoteToolPath); err != nil {
 		return nil, fmt.Errorf("push dex helper for apps: %w", err)
 	}
-	_, _ = client.Shell(callCtx, serial, "chmod 600 "+RemoteHelperPath+" 2>/dev/null || true")
+	_, _ = client.Shell(callCtx, serial, "chmod 600 "+RemoteToolPath+" 2>/dev/null || true")
 	var all strings.Builder
 	resume := ""
 	for range 4 {
-		cmd := fmt.Sprintf("CLASSPATH=%s app_process / com.androfuse.dexhelper.Main apps", RemoteHelperPath)
+		cmd := fmt.Sprintf("CLASSPATH=%s app_process / com.androfuse.dexhelper.Main apps", RemoteToolPath)
 		if resume != "" {
 			cmd += " --resume " + resume
 		}

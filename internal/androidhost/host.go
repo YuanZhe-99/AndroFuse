@@ -6,7 +6,6 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -39,7 +38,8 @@ type Config struct {
 	Permissions     companion.Permissions `json:"permissions"`
 	WirelessADBPort int                   `json:"wireless_adb_port,omitempty"`
 	// Standby keeps the Companion reachable in the background through a minimum-importance
-	// foreground service; off by default (PLAN §9.1-3).
+	// foreground service; on by default (StandbyDefault), because Samsung and other OEMs freeze a
+	// backgrounded Companion, which then stops answering and leaves its streams open.
 	Standby bool `json:"standby,omitempty"`
 	// Mesh is the EasyTier network handed over by a paired desktop; nil when not joined.
 	Mesh *MeshSettings `json:"mesh,omitempty"`
@@ -53,6 +53,9 @@ type Config struct {
 	// PermDefaultsV2 records whether the phone has initialized v0.2+ consumer-friendly default
 	// permissions (ADBBeacon & ScreenShare enabled prior to any pairing).
 	PermDefaultsV2 bool `json:"perm_defaults_v2,omitempty"`
+	// StandbyDefault records that Standby was turned on once by default (new installs and phones
+	// upgraded from builds where it was off); a later choice to turn it off is kept.
+	StandbyDefault bool `json:"standby_default,omitempty"`
 }
 
 // Host owns the Android-side TLS 1.3 Companion server, persisted permissions, and audit log.
@@ -77,8 +80,6 @@ type Host struct {
 	pair                 *pairPrompt
 	tab                  string // Companion tab shown on phones (tabHome when "")
 	beaconCheck          string // outcome of the last wireless debugging port check
-	a11yOn               bool   // the Companion's accessibility service is on (checked in the background)
-	a11yChecked          time.Time
 	daemonReady          bool
 	daemonPID            int
 	daemonTrustedDisplay bool
@@ -100,6 +101,8 @@ type Host struct {
 	meshRebindTimer *time.Timer
 	meshRebindDelay time.Duration
 	onMeshRebind    func()
+	batteryLimited  bool      // Android may restrict AndroFuse in the background (androidbridge.BatteryRestricted)
+	batteryChecked  time.Time // when batteryLimited was last read
 }
 
 // New constructs an Android Companion Host rooted at stateDir and loads saved config.
@@ -113,6 +116,8 @@ func New(stateDir string, onChange func()) *Host {
 			Token:          tok,
 			Permissions:    companion.DefaultPermissions(),
 			PermDefaultsV2: true,
+			Standby:        true,
+			StandbyDefault: true,
 		},
 	}
 	h.loadConfig()
@@ -122,6 +127,10 @@ func New(stateDir string, onChange func()) *Host {
 			h.cfg.Permissions.ScreenShare = true
 		}
 		h.cfg.PermDefaultsV2 = true
+	}
+	if !h.cfg.StandbyDefault {
+		h.cfg.Standby, h.cfg.StandbyDefault = true, true
+		h.saveConfigLocked() // nothing else runs yet
 	}
 	if h.cfg.ListenPort == legacyListenPort {
 		// Builds before random ports saved the old fixed port; draw a random one instead.
@@ -221,31 +230,6 @@ func (h *Host) StartServer() error {
 				return nil, err
 			}
 			return apps, nil
-		},
-		OnShare: func() (net.Conn, error) {
-			if err := androidbridge.StartShare(1280, 4_000_000, L.ShareNotifTitle(), L.ShareNotifText(), L.ShareNotifStop()); err != nil {
-				return nil, err
-			}
-			var c net.Conn
-			var err error
-			for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(200 * time.Millisecond) {
-				if c, err = net.Dial("unix", "@androfuse-share"); err == nil {
-					break
-				}
-			}
-			if err == nil {
-				h.mu.Lock()
-				h.appendAuditLocked("computer started screen sharing")
-				h.mu.Unlock()
-				h.notify()
-			}
-			return c, err
-		},
-		OnKey: func(action string) error {
-			if !androidbridge.GlobalAction(action) {
-				return errors.New(L.ShareNeedsAccessibility())
-			}
-			return nil
 		},
 		OnDaemonStream: func(req companion.DaemonStreamRequest) (string, net.Conn, net.Conn, func(), error) {
 			androidbridge.TouchActive()
@@ -638,7 +622,6 @@ func (h *Host) Status() companion.DeviceStatus {
 	st.AppBuildHash = h.apkHash
 	st.CompanionPort = h.ListenPortLocked()
 	st.StandbyRunning = h.cfg.Standby
-	st.AccessibilityOn = h.a11yOn
 	h.mu.Unlock()
 	if st.NetworkType == "wifi" {
 		st.WifiIPv4 = localWifiIPv4()

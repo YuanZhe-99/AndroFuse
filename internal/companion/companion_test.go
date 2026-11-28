@@ -271,58 +271,6 @@ func TestTunnelReachesOnlyTheWirelessDebuggingPort(t *testing.T) {
 	}
 }
 
-// TestShareStreamsOnlyWithPermission checks that share.open hands over the phone's stream and
-// input.key reaches the handler, and that both are refused without the permission.
-func TestShareStreamsOnlyWithPermission(t *testing.T) {
-	perms := Permissions{ScreenShare: true}
-	var gotKey string
-	srv, err := NewServer("SHARE001", "Pixel", "16", 36, Handler{
-		GetPermissions: func() Permissions { return perms },
-		OnShare: func() (net.Conn, error) {
-			a, b := net.Pipe()
-			go func() { _, _ = a.Write([]byte("H264")); a.Close() }()
-			return b, nil
-		},
-		OnKey: func(action string) error { gotKey = action; return nil },
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := srv.Listen("127.0.0.1:0"); err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go func() { _ = srv.Serve(ctx) }()
-	defer srv.Close()
-
-	stream, err := DialShare(ctx, srv.Addr(), "SHARE001", srv.Fingerprint())
-	if err != nil {
-		t.Fatal(err)
-	}
-	buf := make([]byte, 4)
-	_ = stream.SetDeadline(time.Now().Add(5 * time.Second))
-	if _, err := io.ReadFull(stream, buf); err != nil || string(buf) != "H264" {
-		t.Fatalf("share stream = %q, %v", buf, err)
-	}
-	stream.Close()
-	c, err := Dial(ctx, srv.Addr(), "SHARE001", srv.Fingerprint())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer c.Close()
-	if err := c.Key(ctx, "back"); err != nil || gotKey != "back" {
-		t.Fatalf("Key = %v, handler got %q", err, gotKey)
-	}
-	perms.ScreenShare = false
-	if err := c.Key(ctx, "home"); err == nil {
-		t.Fatal("input.key without the permission must be refused")
-	}
-	if _, err := DialShare(ctx, srv.Addr(), "SHARE001", srv.Fingerprint()); err == nil {
-		t.Fatal("share.open without the permission must be refused")
-	}
-}
-
 func TestPairingSASAndMITMRejection(t *testing.T) {
 	allow := true
 	var asked PairRequest

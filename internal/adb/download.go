@@ -3,6 +3,8 @@ package adb
 import (
 	"archive/zip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
@@ -35,6 +37,128 @@ func DefaultPlatformToolsDir() string {
 		base = os.TempDir()
 	}
 	return filepath.Join(base, "AndroFuse", "platform-tools")
+}
+
+// DefaultPlatformToolsStageRoot returns the per-user staging directory root where bundled
+// `platform-tools/` files are copied before execution on Windows
+// (`%LOCALAPPDATA%\AndroFuse\platform-tools-staged`), isolated from DefaultPlatformToolsDir().
+func DefaultPlatformToolsStageRoot() string {
+	return filepath.Join(filepath.Dir(DefaultPlatformToolsDir()), "platform-tools-staged")
+}
+
+// StagePlatformTools copies regular files from a bundled platform-tools directory srcDir into a
+// content-hashed subdirectory (`bundled-<hash12>`) under stageRoot so executing adb never locks the
+// application install directory against in-place updates on Windows.
+// Inputs: srcDir holds `adb` / `adb.exe` and its DLLs; stageRoot holds staged subdirectories.
+// Returns: the full path to the staged adb executable.
+// Side effects: populates `stageRoot/bundled-<hash12>` when incomplete and best-effort removes
+// superseded `bundled-*` sibling directories.
+func StagePlatformTools(srcDir, stageRoot string) (string, error) {
+	srcDir = filepath.Clean(srcDir)
+	stageRoot = filepath.Clean(stageRoot)
+	exeName := adbExeName()
+	srcExe := filepath.Join(srcDir, exeName)
+	exeBytes, err := os.ReadFile(srcExe)
+	if err != nil {
+		return "", fmt.Errorf("read bundled %s: %w", exeName, err)
+	}
+	sum := sha256.Sum256(exeBytes)
+	hashTag := "bundled-" + hex.EncodeToString(sum[:])[:12]
+	targetDir := filepath.Join(stageRoot, hashTag)
+
+	srcEntries, err := os.ReadDir(srcDir)
+	if err != nil {
+		return "", fmt.Errorf("read bundled platform-tools dir: %w", err)
+	}
+	type regFile struct {
+		name string
+		size int64
+	}
+	var files []regFile
+	for _, ent := range srcEntries {
+		if ent.IsDir() || !ent.Type().IsRegular() {
+			continue
+		}
+		info, iErr := ent.Info()
+		if iErr != nil {
+			return "", fmt.Errorf("stat bundled %s: %w", ent.Name(), iErr)
+		}
+		files = append(files, regFile{name: ent.Name(), size: info.Size()})
+	}
+
+	complete := true
+	for _, rf := range files {
+		info, sErr := os.Stat(filepath.Join(targetDir, rf.name))
+		if sErr != nil || !info.Mode().IsRegular() || info.Size() != rf.size {
+			complete = false
+			break
+		}
+	}
+	if !complete {
+		if err := os.MkdirAll(stageRoot, 0o755); err != nil {
+			return "", fmt.Errorf("create stage root: %w", err)
+		}
+		tmpDir, err := os.MkdirTemp(stageRoot, ".stage-*")
+		if err != nil {
+			return "", fmt.Errorf("create stage temp dir: %w", err)
+		}
+		cleanup := true
+		defer func() {
+			if cleanup {
+				_ = os.RemoveAll(tmpDir)
+			}
+		}()
+
+		for _, rf := range files {
+			mode := os.FileMode(0o644)
+			if strings.EqualFold(rf.name, "adb") || strings.EqualFold(rf.name, "adb.exe") {
+				mode = 0o755
+			}
+			in, err := os.Open(filepath.Join(srcDir, rf.name))
+			if err != nil {
+				return "", err
+			}
+			out, err := os.OpenFile(filepath.Join(tmpDir, rf.name), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
+			if err != nil {
+				_ = in.Close()
+				return "", err
+			}
+			_, cErr := io.Copy(out, in)
+			_ = in.Close()
+			if wErr := out.Close(); cErr != nil || wErr != nil {
+				if cErr != nil {
+					return "", cErr
+				}
+				return "", wErr
+			}
+		}
+
+		if err := os.Rename(tmpDir, targetDir); err != nil {
+			// Another instance may have raced us to populate targetDir; verify completeness.
+			for _, rf := range files {
+				info, sErr := os.Stat(filepath.Join(targetDir, rf.name))
+				if sErr != nil || !info.Mode().IsRegular() || info.Size() != rf.size {
+					return "", fmt.Errorf("finalize staged platform-tools: %w", err)
+				}
+			}
+		} else {
+			cleanup = false
+		}
+	}
+
+	if siblings, err := os.ReadDir(stageRoot); err == nil {
+		for _, ent := range siblings {
+			if ent.IsDir() && strings.HasPrefix(ent.Name(), "bundled-") && ent.Name() != hashTag {
+				_ = os.RemoveAll(filepath.Join(stageRoot, ent.Name()))
+			}
+		}
+	}
+
+	stagedExe := filepath.Join(targetDir, exeName)
+	if _, err := os.Stat(stagedExe); err != nil {
+		return "", fmt.Errorf("staged archive missing %s: %w", exeName, err)
+	}
+	return stagedExe, nil
 }
 
 // PlatformToolsURL returns Google's official HTTPS platform-tools archive URL for goos.

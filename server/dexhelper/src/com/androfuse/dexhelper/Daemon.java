@@ -665,9 +665,16 @@ final class Daemon {
                     prev.close();
                 }
                 if (isAppMode) {
-                    AppGuard existingGuard = s.appGuard;
-                    if (existingGuard != null) {
+                    // Retire the pre-session holder first (only the flag: it shares bound's process and
+                    // descriptors), so an AppGuard its async attach finishes later closes itself instead
+                    // of running beside bound's and holding a second set of screen wake locks.
+                    AppGuard existingGuard;
+                    synchronized (s) {
+                        s.closed = true;
+                        existingGuard = s.appGuard;
                         s.appGuard = null;
+                    }
+                    if (existingGuard != null) {
                         if (!bound.closed) {
                             bound.appGuard = existingGuard;
                         } else {
@@ -685,7 +692,7 @@ final class Daemon {
                 if (wantCtrl && ctrlSock != null) {
                     pumpPair(bound, ctrlSock.getInputStream(), new FileOutputStream(ctrlPfd.getFileDescriptor()), false);
                     if (isAppMode) {
-                        pumpCtrlForAppSession(bound, new FileInputStream(ctrlPfd.getFileDescriptor()), ctrlSock.getOutputStream());
+                        pumpCtrlForAppSession(bound, new FileInputStream(ctrlPfd.getFileDescriptor()), ctrlSock.getOutputStream(), parsedNewDisplayId);
                     } else {
                         pumpPair(bound, new FileInputStream(ctrlPfd.getFileDescriptor()), ctrlSock.getOutputStream(), false);
                     }
@@ -721,11 +728,15 @@ final class Daemon {
                 }
                 try {
                     AppGuard guard = AppGuard.start(sysCtx, vdId, startApp, null);
-                    if (s.closed) {
-                        guard.close();
-                        return;
+                    synchronized (s) {
+                        if (!s.closed && s.appGuard == null) {
+                            s.appGuard = guard;
+                            guard = null;
+                        }
                     }
-                    s.appGuard = guard;
+                    if (guard != null) {
+                        guard.close();
+                    }
                 } catch (Throwable ignored) {}
             }, "AndroFuse-Daemon-AppGuard-" + vdId);
             t.setDaemon(true);
@@ -785,7 +796,7 @@ final class Daemon {
          * <p>Notes: Drops Home (3) and Recents (187), and evaluates {@link AppGuard#shouldAllowBack()} on
          * KEYCODE_BACK (4) and TYPE_BACK_OR_SCREEN_ON (4) key-down before forwarding the matching up event.
          */
-        private void pumpCtrlForAppSession(ActiveSession s, InputStream rawIn, OutputStream out) {
+        private void pumpCtrlForAppSession(ActiveSession s, InputStream rawIn, OutputStream out, int[] displayIdRef) {
             Thread t = new Thread(() -> {
                 DataInputStream in = new DataInputStream(rawIn);
                 boolean allowBackDown = true;
@@ -936,6 +947,10 @@ final class Daemon {
                             }
                             case 21: // TYPE_RESIZE_DISPLAY (5 bytes total)
                                 forwardFixedControl(type, 4, in, out);
+                                // A flex resize restarts capture without logging it: re-power the display too.
+                                if (displayIdRef != null && displayIdRef[0] > 0) {
+                                    repowerVirtualDisplay(displayIdRef[0], 500L);
+                                }
                                 break;
                             default:
                                 return;
@@ -1084,6 +1099,35 @@ final class Daemon {
             t.start();
         }
 
+        /**
+         * Power-cycles one app-window virtual display through the display service (`cmd display
+         * power-off` then `power-reset`), which the shell user may do without touching any other display.
+         *
+         * <p>Notes: on Samsung One UI (Galaxy Z Fold8, Android 17), when an app window opened while the phone
+         * slept, every scrcpy capture reset (a flex resize, or RESET_VIDEO) left SurfaceFlinger's copy of the
+         * virtual display powered off while the display service still counted it on, so the window drew
+         * nothing until the phone was locked and unlocked; the cycle makes the service send "on" again.
+         * It runs after a logged capture reset and, since a flex resize restarts capture silently, after
+         * forwarding TYPE_RESIZE_DISPLAY.
+         */
+        private static void repowerVirtualDisplay(int displayId, long delayMs) {
+            Thread t = new Thread(() -> {
+                try {
+                    Thread.sleep(delayMs);
+                    for (String step : new String[] {"power-off", "power-reset"}) {
+                        java.lang.Process p = new ProcessBuilder("/system/bin/cmd", "display", step, String.valueOf(displayId))
+                            .redirectErrorStream(true).start();
+                        p.getInputStream().close();
+                        if (!p.waitFor(2, TimeUnit.SECONDS)) {
+                            p.destroyForcibly();
+                        }
+                    }
+                } catch (Throwable ignored) {}
+            }, "AndroFuse-Daemon-Repower-" + displayId);
+            t.setDaemon(true);
+            t.start();
+        }
+
         private static void drainProcessOutput(java.lang.Process proc, StringBuilder log, int[] outDisplayId, IntConsumer onDisplayId) {
             Thread t = new Thread(() -> {
                 boolean notified = false;
@@ -1109,6 +1153,9 @@ final class Daemon {
                                     }
                                 } catch (NumberFormatException ignored) {}
                             }
+                        }
+                        if (outDisplayId != null && outDisplayId[0] > 0 && line.contains("Video capture reset")) {
+                            repowerVirtualDisplay(outDisplayId[0], 150L);
                         }
                     }
                 } catch (Throwable ignored) {}

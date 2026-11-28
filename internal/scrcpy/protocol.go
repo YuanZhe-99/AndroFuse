@@ -18,8 +18,13 @@ import (
 const (
 	// ServerVersion is the pinned upstream scrcpy-server wire protocol version.
 	ServerVersion = "5.0.1"
-	// RemoteServerPath is the non-world-writable device location used for app_process.
+	// RemoteServerPath is the non-world-writable device location of the copy the persistent UID
+	// 2000 daemon pins and reuses (`cleanup=false`); only dex.StartDaemon writes it.
 	RemoteServerPath = "/data/local/tmp/androfuse-scrcpy-server.jar"
+	// RemoteSessionServerPath is the separate copy direct ADB sessions push and run. They use
+	// `cleanup=true`, which makes scrcpy-server delete its own jar on exit, so they must never
+	// share RemoteServerPath with the daemon.
+	RemoteSessionServerPath = "/data/local/tmp/androfuse-scrcpy-session.jar"
 	// ExpectedServerSHA256 is the verified SHA-256 digest of official scrcpy-server-v5.0.1.
 	ExpectedServerSHA256 = "764eb6f79811d5211fe9df341120882ba9994c7a61b897d7bf3fb662e53bc536"
 
@@ -183,8 +188,9 @@ func SocketName(scid uint32) string {
 	return fmt.Sprintf("scrcpy_%08x", scid)
 }
 
-// FindCachedServer resolves scrcpy-server-v5.0.1 from ANDROFUSE_SCRCPY_SERVER,
-// executable directory, or repo `.dev/cache/scrcpy-server-v5.0.1`.
+// FindCachedServer resolves scrcpy-server-v5.0.1 from ANDROFUSE_SCRCPY_SERVER, the executable
+// directory (where Windows packages ship it, scripts/build.sh), or repo
+// `.dev/cache/scrcpy-server-v5.0.1`.
 func FindCachedServer() (string, error) {
 	if env := strings.TrimSpace(os.Getenv("ANDROFUSE_SCRCPY_SERVER")); env != "" {
 		if _, err := os.Stat(env); err == nil {

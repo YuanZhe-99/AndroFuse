@@ -134,6 +134,7 @@ func (h *Host) homeTab(c *ui.Context, wide bool) {
 		ui.Text(c, L.PhoneTagline()).FontSize(14).TextColor(t.TextMuted)
 	})
 
+	h.batteryReminder(c)
 	sectionTitle(c, L.PhoneSectionConnection())
 	card(c.Key("comp-service-card")).Children(func() {
 		ui.Row(c.Key("comp-service-row")).FillWidth().Gap(10).AlignItems(ui.Center).Children(func() {
@@ -213,20 +214,26 @@ func (h *Host) linkRow(c *ui.Context, key string, icon *ui.SVG, title, sub, tab 
 func (h *Host) meshCard(c *ui.Context) {
 	t := c.Theme()
 	name, running, errMsg := h.MeshState()
+	shown := name
+	h.mu.Lock()
+	if h.cfg.Mesh != nil && h.cfg.Mesh.Label != "" {
+		shown = h.cfg.Mesh.Label
+	}
+	h.mu.Unlock()
 	card(c.Key("comp-mesh-card")).Children(func() {
 		ui.Row(c.Key("comp-mesh-head")).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
 			tile(c, iconGlobe)
 			ui.Column(c.Key("comp-mesh-text")).Grow(1).MinWidth(0).Gap(2).Children(func() {
 				title := L.MeshPhoneNotJoined()
 				if name != "" {
-					title = name
+					title = shown
 				}
 				ui.Text(c, title).Bold().FontSize(14).SingleLine()
 				switch {
 				case name == "":
 					ui.Text(c, L.MeshPhoneNone()).FontSize(12).TextColor(t.TextMuted)
 				case running:
-					ui.Text(c, L.MeshPhoneJoined(name)).FontSize(12).TextColor(t.TextMuted)
+					ui.Text(c, L.MeshPhoneJoined(shown)).FontSize(12).TextColor(t.TextMuted)
 				default:
 					ui.Text(c, L.MeshPhoneConnecting()).FontSize(12).TextColor(t.TextMuted)
 				}
@@ -258,8 +265,8 @@ func (h *Host) meshCard(c *ui.Context) {
 	})
 }
 
-// settingsCard holds background standby (PLAN §9.1-3), the app's language and a way to Android's
-// notification settings for AndroFuse.
+// settingsCard holds background standby (PLAN §9.1-3), the app's language, and ways to Android's
+// notification and battery settings for AndroFuse.
 func (h *Host) settingsCard(c *ui.Context) {
 	t := c.Theme()
 	h.mu.Lock()
@@ -290,6 +297,24 @@ func (h *Host) settingsCard(c *ui.Context) {
 		})
 		if b.Clicked() {
 			go androidbridge.OpenNotificationSettings()
+		}
+		ui.Box(c).FillWidth().Height(1).Background(t.Border)
+		batterySub := L.PhoneBatteryOn()
+		if h.batteryRestricted() {
+			batterySub = L.PhoneBatteryOff()
+		}
+		bb := ui.ButtonBase(c.Key("comp-battery")).FillWidth().Label(L.PhoneBatteryTitle())
+		bb.Children(func() {
+			ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
+				ui.Column(c).Grow(1).MinWidth(0).Gap(2).Children(func() {
+					ui.Text(c, L.PhoneBatteryTitle()).Bold().FontSize(14)
+					ui.Text(c, batterySub).FontSize(12).TextColor(t.TextMuted)
+				})
+				ui.Icon(c, iconChevron).Size(14, 14).TextColor(t.TextMuted)
+			})
+		})
+		if bb.Clicked() {
+			go h.openBatterySettings()
 		}
 	})
 }
@@ -366,9 +391,6 @@ func (h *Host) permissionsTab(c *ui.Context) {
 					tile(c, pm.icon)
 					switchRow(c, "perm-"+pm.key, pm.title, pm.sub, &on, func() { h.SetPermission(pm.key, on) })
 				})
-			}
-			if gi == 1 {
-				h.accessibilityRow(c)
 			}
 		})
 	}
@@ -539,44 +561,6 @@ func (h *Host) adbCard(c *ui.Context) {
 	})
 }
 
-// accessibilityRow shows whether the Companion's accessibility service is on (Back, Home and
-// Recents while sharing the screen) and opens Android's settings to turn it on.
-func (h *Host) accessibilityRow(c *ui.Context) {
-	t := c.Theme()
-	h.mu.Lock()
-	on, stale := h.a11yOn, time.Since(h.a11yChecked) > 3*time.Second
-	if stale {
-		h.a11yChecked = time.Now()
-	}
-	h.mu.Unlock()
-	if stale {
-		go func() {
-			now := androidbridge.AccessibilityOn()
-			h.mu.Lock()
-			changed := now != h.a11yOn
-			h.a11yOn = now
-			h.mu.Unlock()
-			if changed {
-				h.notify()
-			}
-		}()
-	}
-	ui.Row(c.Key("perm-row-a11y")).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
-		tile(c, iconHand)
-		ui.Column(c).Grow(1).MinWidth(0).Gap(2).Children(func() {
-			ui.Text(c, L.PermA11y()).Bold().FontSize(14)
-			sub := L.PermA11ySubOff()
-			if on {
-				sub = L.PermA11ySubOn()
-			}
-			ui.Text(c, sub).FontSize(12).TextColor(t.TextMuted)
-		})
-		if !on && ui.Button(c.Key("perm-a11y-open"), L.PermA11yOpen()).Clicked() {
-			go androidbridge.OpenAccessibilitySettings()
-		}
-	})
-}
-
 // meshEditor is the network form under the network card while it is open: name, servers and
 // secret, as on the computer's Settings › Network.
 func (h *Host) meshEditor(c *ui.Context) {
@@ -590,6 +574,8 @@ func (h *Host) meshEditor(c *ui.Context) {
 	ui.Column(c.Key("comp-mesh-form")).FillWidth().Gap(10).Padding(8, 0, 0, 0).Children(func() {
 		ui.Text(c, L.NetFormName()).FontSize(12).TextColor(t.TextMuted)
 		ui.TextInput(c.Key("comp-mesh-name"), &f.Name).FillWidth()
+		ui.Text(c, L.NetFormLabel()).FontSize(12).TextColor(t.TextMuted)
+		ui.TextInput(c.Key("comp-mesh-label"), &f.Label).FillWidth()
 		ui.Text(c, L.NetFormServers()).FontSize(12).TextColor(t.TextMuted)
 		ui.TextArea(c.Key("comp-mesh-servers"), &f.Servers).FillWidth().Lines(2, 5).Font("monospace")
 		ui.Text(c, L.NetFormServersHint()).FontSize(12).TextColor(t.TextMuted)
@@ -677,4 +663,81 @@ func (h *Host) aboutCard(c *ui.Context) {
 			})
 		})
 	})
+}
+
+// batteryRestricted reports whether Android may restrict AndroFuse in the background, read again
+// in the background at most every 3 s while a view asks, so the reminder goes away soon after the
+// phone's user allows background use.
+func (h *Host) batteryRestricted() bool {
+	h.mu.Lock()
+	limited, stale := h.batteryLimited, time.Since(h.batteryChecked) > 3*time.Second
+	if stale {
+		h.batteryChecked = time.Now()
+	}
+	h.mu.Unlock()
+	if stale {
+		go func() {
+			now := androidbridge.BatteryRestricted()
+			h.mu.Lock()
+			changed := now != h.batteryLimited
+			h.batteryLimited = now
+			h.mu.Unlock()
+			if changed {
+				h.notify()
+			}
+		}()
+	}
+	return limited
+}
+
+// batteryReminder asks, at the top of Home, to let AndroFuse run in the background while Android
+// may freeze it (Samsung and others pause backgrounded apps, which then stop answering the PC).
+func (h *Host) batteryReminder(c *ui.Context) {
+	if !h.batteryRestricted() {
+		return
+	}
+	t := c.Theme()
+	card(c.Key("comp-battery-card")).Children(func() {
+		ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
+			tile(c, iconBattery)
+			ui.Column(c).Grow(1).MinWidth(0).Gap(2).Children(func() {
+				ui.Text(c, L.BatteryRemindTitle()).Bold().FontSize(14)
+				ui.Text(c, L.BatteryRemindSub()).FontSize(12).TextColor(t.TextMuted)
+			})
+		})
+		if ui.PrimaryButton(c.Key("comp-battery-open"), L.BatteryRemindAction()).Clicked() {
+			go h.openBatterySettings()
+		}
+	})
+}
+
+// Resumed rereads what the phone's user may have changed in Android's settings while AndroFuse
+// was in the background (battery usage), and redraws; the app calls it when it comes back to the
+// front (App.OnActivate).
+func (h *Host) Resumed() {
+	h.mu.Lock()
+	h.batteryChecked = time.Time{}
+	h.mu.Unlock()
+	h.notify()
+}
+
+// openBatterySettings opens Android's battery setting for AndroFuse, then rereads it every second
+// for up to a minute and redraws once it changes: Android's "allow background use" dialog only
+// pauses the app, so no resume tells the view the phone's user answered.
+func (h *Host) openBatterySettings() {
+	androidbridge.OpenBatterySettings()
+	h.mu.Lock()
+	was := h.batteryLimited
+	h.mu.Unlock()
+	for range 60 {
+		time.Sleep(time.Second)
+		now := androidbridge.BatteryRestricted()
+		if now != was {
+			h.mu.Lock()
+			h.batteryLimited, h.batteryChecked = now, time.Now()
+			h.mu.Unlock()
+			h.notify()
+			return
+		}
+	}
 }

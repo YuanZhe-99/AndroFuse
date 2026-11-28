@@ -149,6 +149,7 @@ func (a *App) PairCompanionOverADB(serial, model string, joinMesh bool) {
 			NetworkName:   cfg.NetworkName,
 			NetworkSecret: cfg.NetworkSecret,
 			Peers:         peersForPhone(cfg),
+			Label:         a.pairNetworkName(),
 		})
 		switch {
 		case err != nil:
@@ -525,7 +526,7 @@ func (a *App) companionRoutes(ctx context.Context, hash string, b CompanionBindi
 	if serial != "" {
 		if client, _, err := a.ensureADBAndLeases(); err == nil {
 			fctx, fcancel := context.WithTimeout(ctx, 2*time.Second)
-			port, fErr := client.ForwardPort(fctx, serial, 0, "localabstract:"+companion.LocalSocket)
+			port, fErr := client.ForwardReuse(fctx, serial, "localabstract:"+companion.LocalSocket)
 			fcancel()
 			if fErr == nil {
 				routes = append(routes, companionRoute{addr: fmt.Sprintf("127.0.0.1:%d", port)})
@@ -730,16 +731,17 @@ func (a *App) syncCompanions(devs []DiscoveredDevice) {
 // syncCompanion brings d's installed Companion up to date: it installs the bundled Companion
 // over an older or different one, pairs with it when this computer has not (the code shows on
 // both screens, as for a first pairing), and, once paired, hands it the pairing network again
-// when the phone is not in it. A phone without the Companion is left alone here; the first
+// when the phone is not in it, and (re)starts the Enhanced mode daemon when it is not running or
+// is outdated (dex.DaemonOutdated). A phone without the Companion is left alone here; the first
 // connection offers to install it (firstConnect).
-// Side effects: `adb install -r` and `am start` on the phone; may pair and hand over the network;
-// failures go to Save logs only.
+// Side effects: `adb install -r`, `am start` and dex.StartDaemon on the phone; may pair and hand
+// over the network; failures go to Save logs only.
 func (a *App) syncCompanion(d DiscoveredDevice) {
 	client, _, err := a.ensureADBAndLeases()
 	if err != nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := a.adbWorkContext(2 * time.Minute)
 	defer cancel()
 	serial, name := d.Target.Serial, a.phoneName(d)
 	out, _ := client.Shell(ctx, serial, "pm path "+companionPackage)
@@ -810,7 +812,13 @@ func (a *App) syncCompanion(d DiscoveredDevice) {
 			a.peerStatus[d.HardwareHash] = st
 		})
 	}
-	if err == nil && !st.DaemonReady {
+	// A running daemon whose helper or scrcpy-server copy is missing, from another desktop
+	// version, or replaced since it started fails every session it runs: start it afresh too.
+	outdated := ""
+	if err == nil && st.DaemonReady {
+		outdated, _ = dex.DaemonOutdated(ctx, client, serial)
+	}
+	if err == nil && (!st.DaemonReady || outdated != "") {
 		if dErr := dex.StartDaemon(ctx, client, serial, companionPackage); dErr != nil {
 			_ = a.failed(L.FailCompanion(), dErr)
 		} else if refreshed, gErr := c.GetStatus(ctx); gErr == nil {
@@ -823,7 +831,7 @@ func (a *App) syncCompanion(d DiscoveredDevice) {
 	if err != nil || !inNet || (st.MeshRunning && st.MeshNetwork == cfg.NetworkName) {
 		return
 	}
-	jr, err := c.JoinMesh(ctx, companion.MeshJoinRequest{NetworkName: cfg.NetworkName, NetworkSecret: cfg.NetworkSecret, Peers: peersForPhone(cfg)})
+	jr, err := c.JoinMesh(ctx, companion.MeshJoinRequest{NetworkName: cfg.NetworkName, NetworkSecret: cfg.NetworkSecret, Peers: peersForPhone(cfg), Label: a.pairNetworkName()})
 	switch {
 	case err != nil:
 		a.failed(L.FailCompanion(), err)
@@ -1395,6 +1403,6 @@ func (a *App) runAfterEnhanced(hash string, thenOpen int) {
 	case openAsApp:
 		a.openPicker(openAsApp, hash)
 	case openAsScreen:
-		a.LaunchShare(hash, OpenDefault)
+		a.LaunchCompanionMirror(hash, OpenDefault)
 	}
 }

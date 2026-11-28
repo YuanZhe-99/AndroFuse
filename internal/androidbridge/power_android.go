@@ -78,42 +78,6 @@ func WatchWirelessPairing(fn func(port int)) (stop func()) {
 	return off
 }
 
-// StartShare asks Android for screen-capture consent and, when the user allows it, starts the
-// Companion's screen sharing (android/Share.kt): an H.264 stream at most maxSize pixels on its
-// longest side, served in scrcpy framing on the abstract socket "androfuse-share".
-// Returns: an error when the user declines or capture cannot start.
-func StartShare(maxSize, bitRate int, title, text, stop string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
-	return power.Call(ctx, "startShare", map[string]any{"maxSize": maxSize, "bitRate": bitRate, "title": title, "text": text, "stop": stop}, nil)
-}
-
-// StopShare ends screen sharing.
-func StopShare() { _ = callPower("stopShare", nil) }
-
-// GlobalAction runs Back, Home or Recents ("back", "home", "recents") through the Companion's
-// accessibility service; false when that service is off.
-func GlobalAction(action string) bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	var ok bool
-	_ = power.Call(ctx, "globalAction", map[string]string{"action": action}, &ok)
-	return ok
-}
-
-// AccessibilityOn reports whether the user turned the Companion's accessibility service on.
-func AccessibilityOn() bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	var ok bool
-	_ = power.Call(ctx, "accessibilityOn", nil, &ok)
-	return ok
-}
-
-// OpenAccessibilitySettings opens Android's accessibility settings, where the user turns the
-// Companion's service on.
-func OpenAccessibilitySettings() { _ = callPower("openAccessibility", nil) }
-
 // Identity is what the phone calls itself: name is the device name its person set in Settings ›
 // About phone (Build.MODEL when unset), model the model number, and release and sdk Android's
 // version.
@@ -171,6 +135,22 @@ func Battery() (pct int, charging bool, tempC float64, ok bool) {
 
 // OpenNotificationSettings opens Android's notification settings for AndroFuse.
 func OpenNotificationSettings() { _ = callPower("openNotificationSettings", nil) }
+
+// BatteryRestricted reports whether Android may restrict AndroFuse in the background (battery
+// optimization on; Samsung's "Optimized" or "Restricted"), so it can be frozen and stop answering.
+func BatteryRestricted() bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var on bool
+	if err := power.Call(ctx, "batteryRestricted", nil, &on); err != nil {
+		return false
+	}
+	return on
+}
+
+// OpenBatterySettings asks Android to let AndroFuse run in the background (the system's one-tap
+// dialog where offered, otherwise App info, where Battery is set to Unrestricted).
+func OpenBatterySettings() { _ = callPower("openBatterySettings", nil) }
 
 // GetDaemonStatus queries the current state of the persistent UID 2000 daemon (`PLAN` §9.2).
 func GetDaemonStatus() DaemonStatus {

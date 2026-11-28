@@ -61,10 +61,20 @@ if [ ! -f "$pt_dir/adb.exe" ]; then
 	fi
 fi
 
+# Ship the pinned, SHA-256-verified scrcpy-server next to androfuse.exe: every ADB mirror and the
+# Enhanced mode daemon push it to phones, so a package without it cannot show any phone screen.
+srv="scrcpy-server-v5.0.1"
+if [ ! -f ".dev/cache/$srv" ]; then
+	go run ./tools/fetchdeps
+fi
+mkdir -p resources/windows
+cp ".dev/cache/$srv" "resources/windows/$srv"
+
 # Build shared UID 2000 DeX / icon helper JAR if javac/d8 are present (or keep existing build artifact).
 if command -v javac >/dev/null 2>&1 && [ -n "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}" ]; then
 	go run ./tools/builddex
 fi
+test -f build/androfuse-dex-helper.jar || { echo "missing build/androfuse-dex-helper.jar (go run ./tools/builddex)" >&2; exit 1; }
 
 for t in "${targets[@]}"; do
 	goos=${t%/*}
@@ -85,9 +95,7 @@ for t in "${targets[@]}"; do
 	test -f "$bin/androfuse_core.dll" || { echo "missing $bin/androfuse_core.dll" >&2; exit 1; }
 
 	CGO_ENABLED=0 GOOS=windows GOARCH="$goarch" go build -trimpath -ldflags="-s -w" -o "$bin/androfuse-svc.exe" ./cmd/androfuse-svc
-	if [ -f build/androfuse-dex-helper.jar ]; then
-		cp build/androfuse-dex-helper.jar "$bin/androfuse-dex-helper.jar"
-	fi
+	cp build/androfuse-dex-helper.jar "$bin/androfuse-dex-helper.jar"
 
 	# Enforce native PE machine verification (`INV-10`).
 	go run ./tools/checkpe -dir "$bin" -arch "$goarch"

@@ -840,7 +840,7 @@ func (a *App) offlineCard(c *ui.Context, k tokens, r RememberedDevice) {
 						}
 					}
 					if m.Item(L.ActionViewScreen()).Chosen() {
-						a.LaunchShare(r.HardwareHash, OpenDefault)
+						a.LaunchCompanionMirror(r.HardwareHash, OpenDefault)
 					}
 					if m.Item(L.KindAppMenu()).Chosen() {
 						if daemonAppsOK {
@@ -964,11 +964,11 @@ func (a *App) offlineCard(c *ui.Context, k tokens, r RememberedDevice) {
 							a.LaunchDaemonDesktop(r.HardwareHash, OpenDefault)
 						}
 						if iconBtn(c, key+"-share-icon", iconMirror, L.ActionViewScreen(), false).Disabled(busy).Clicked() {
-							a.LaunchShare(r.HardwareHash, OpenDefault)
+							a.LaunchCompanionMirror(r.HardwareHash, OpenDefault)
 						}
 					} else {
 						if ui.PrimaryButton(c.Key(key+"-share-main"), L.ActionViewScreen()).Disabled(busy).Clicked() {
-							a.LaunchShare(r.HardwareHash, OpenDefault)
+							a.LaunchCompanionMirror(r.HardwareHash, OpenDefault)
 						}
 						if iconBtn(c, key+"-ddex", iconDex, L.KindDeXFallback(), false).Disabled(busy).Clicked() {
 							a.LaunchDaemonDesktop(r.HardwareHash, OpenDefault)
@@ -982,7 +982,7 @@ func (a *App) offlineCard(c *ui.Context, k tokens, r RememberedDevice) {
 					}
 				} else {
 					if ui.PrimaryButton(c.Key(key+"-share-main"), L.ActionViewScreen()).Disabled(busy).Clicked() {
-						a.LaunchShare(r.HardwareHash, OpenDefault)
+						a.LaunchCompanionMirror(r.HardwareHash, OpenDefault)
 					}
 					if ui.Button(c.Key(key+"-ddex"), dexLabel).Disabled(busy).Clicked() {
 						a.EnsureEnhancedAndRun(r.HardwareHash, openAsDeX)
@@ -1000,7 +1000,7 @@ func (a *App) offlineCard(c *ui.Context, k tokens, r RememberedDevice) {
 					a.connectRemembered(r, openAs)
 				}
 				if r.Companion != nil && ui.Button(c.Key(key+"-share"), L.ActionViewScreen()).Disabled(busy).Clicked() {
-					a.LaunchShare(r.HardwareHash, OpenDefault)
+					a.LaunchCompanionMirror(r.HardwareHash, OpenDefault)
 				}
 			}
 		})

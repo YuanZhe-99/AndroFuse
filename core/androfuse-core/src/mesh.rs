@@ -70,8 +70,9 @@ pub struct MeshConfig {
     #[serde(default)]
     pub port_forwards: Vec<PortForward>,
     /// Trades connection set-up speed for fewer background wakeups (phones on battery): one runtime
-    /// thread, direct links built only when traffic needs them, no UPnP and no symmetric-NAT
-    /// hole punching.
+    /// thread, direct links built only when traffic needs them and no UPnP. Symmetric-NAT hole
+    /// punching stays on: mobile carriers use symmetric NAT, so without it a phone on mobile data
+    /// could only ever be reached through the network's servers.
     #[serde(default)]
     pub low_power: bool,
     /// Never builds direct links; all traffic goes through the network's servers (Settings ›
@@ -140,11 +141,12 @@ pub fn build_toml(cfg: &MeshConfig) -> Result<String, String> {
         "network_secret = {}\n",
         q(cfg.network_secret.trim())
     ));
-    t.push_str("\n[flags]\nno_tun = true\n");
+    // TCP across the network (the computer's port forwards to a phone) rides KCP over UDP where both
+    // ends allow it, which recovers from mobile-network loss far faster than TCP; EasyTier falls
+    // back to TCP otherwise.
+    t.push_str("\n[flags]\nno_tun = true\nenable_kcp_proxy = true\n");
     if cfg.low_power {
-        t.push_str(
-            "multi_thread = false\nlazy_p2p = true\ndisable_upnp = true\ndisable_sym_hole_punching = true\n",
-        );
+        t.push_str("multi_thread = false\nlazy_p2p = true\ndisable_upnp = true\n");
     }
     if cfg.disable_p2p {
         t.push_str("disable_p2p = true\n");
@@ -336,7 +338,7 @@ mod tests {
         };
         let t = build_toml(&cfg).unwrap();
         assert!(t.contains("disable_p2p = true") && t.contains("latency_first = true"));
-        assert!(t.contains("[flags]\nno_tun = true"));
+        assert!(t.contains("[flags]\nno_tun = true\nenable_kcp_proxy = true"));
         assert!(t.contains("network_secret = \"p\\\"w\\\\d\""));
         assert!(t.contains("bind_addr = \"127.0.0.1:41235\""));
         assert!(t.contains("dst_addr = \"10.126.126.2:37000\""));
@@ -354,6 +356,8 @@ mod tests {
         })
         .unwrap();
         assert!(low.contains("multi_thread = false\nlazy_p2p = true"));
+        // A phone on mobile data sits behind symmetric NAT: punching through it must stay on.
+        assert!(!low.contains("disable_sym_hole_punching"));
         let c = CString::new(low).unwrap();
         // SAFETY: `c` is a valid NUL-terminated string for the duration of the call.
         let rc = unsafe { easytier_ffi::parse_config(c.as_ptr()) };

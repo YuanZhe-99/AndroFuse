@@ -27,14 +27,14 @@ Authoritative English → Simplified Chinese glossary for AndroFuse documentatio
 | Chromeless App Window | 无系统边框独立应用窗口 | Virtual-display app window launched with `vd_system_decorations=false` and native titlebar |
 | Bounded Back | 有限返回 | Single-app navigation control that goes back inside the app and stops at the root screen without closing into a black display |
 | Fragmented MP4 Recording | 分片 MP4 直存录屏 | Zero-reencode H.264 Annex-B muxing into `ftyp`/`moov`/`moof`/`mdat` |
-| Background Standby | 后台待机 | Opt-in minimum-importance foreground service that keeps the Companion reachable |
+| Background Standby | 后台待机 | Minimum-importance foreground service, on by default, that keeps the Companion reachable |
+| Unrestricted (battery usage) | 不受限制 | Android battery setting that lets AndroFuse run in the background |
 | Activity Lease | 活动租约 | Wake lock + Wi-Fi lock held only during transfers and released after 30 s idle |
 | Delay-Load | 延迟加载 | A DLL import resolved only when one of its functions is first called (e.g. `packet.dll`) |
 | Phone screen | 手机屏幕 | Phone mirroring as the interface names it (V3) |
 | App window | 应用窗口 | Independent app window as the interface names it (V3) |
 | Android desktop mode | Android 桌面模式 | The fallback backend (Android's own desktop mode on a virtual display), never called DeX (`INV-06`) |
 | Cross-network | 跨网络 | The EasyTier networks in the interface (instead of "mesh") |
-| Companion screen sharing | 伴侣共享屏幕 | MediaProjection screen sharing on mobile data |
 | Local assistant | 本机助手 | The opt-in local MCP control (instead of "MCP") |
 | Android on this PC | 电脑上的 Android | The managed VM (instead of an AVD name) |
 | Android emulator | Android 模拟器 | An emulator found over adb (never its AVD name) |

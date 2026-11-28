@@ -399,3 +399,23 @@ func TestLiveFold8Spikes(t *testing.T) {
 		t.Fatalf("expected empty lease store after teardown, got %+v", rem)
 	}
 }
+
+func TestStalledAppWindow(t *testing.T) {
+	t0 := time.Unix(1000, 0)
+	for _, tc := range []struct {
+		name              string
+		now, frame, input time.Time
+		want              bool
+	}{
+		{"no frame yet, 2 s in", t0.Add(2 * time.Second), time.Time{}, time.Time{}, false},
+		{"no frame 3 s in", t0.Add(3 * time.Second), time.Time{}, time.Time{}, true},
+		{"frames, no input", t0.Add(60 * time.Second), t0.Add(time.Second), time.Time{}, false},
+		{"input answered by a frame", t0.Add(10 * time.Second), t0.Add(8 * time.Second), t0.Add(7 * time.Second), false},
+		{"input just sent", t0.Add(10 * time.Second), t0.Add(5 * time.Second), t0.Add(9 * time.Second), false},
+		{"input unanswered for 1.5 s", t0.Add(10 * time.Second), t0.Add(5 * time.Second), t0.Add(8500 * time.Millisecond), true},
+	} {
+		if got := stalled(tc.now, t0, tc.frame, tc.input); got != tc.want {
+			t.Errorf("%s: stalled = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}

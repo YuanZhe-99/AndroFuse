@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/egoist/mygo"
+
+	"github.com/YuanZhe-99/AndroFuse/internal/adb"
 )
 
 // updateState is Settings › About and updates' Updates section.
@@ -92,32 +94,41 @@ func (a *App) isInstallingUpdate() bool {
 	return a.update_.Installing
 }
 
-// stopBundledADBForUpdate shuts down adb.exe when running from the executable's own directory
-// (bundled `platform-tools/`) so Windows directory locks do not block in-place update swaps.
+// stopBundledADBForUpdate keeps adb from locking the install directory the updater replaces: it
+// blocks and cancels background adb work, stops the adb server (through the active client and the
+// bundled `platform-tools/adb.exe`, which an older version may have started), then ends any process
+// still running from the install directory.
+// Side effects: adb kill-server; TerminateProcess on Windows (update_windows.go).
 func (a *App) stopBundledADBForUpdate() {
+	a.rt.updating.Store(true)
+	a.cancelADBWork()
 	a.rt.coreMu.Lock()
 	client := a.rt.adbClient
 	a.rt.coreMu.Unlock()
-	if client == nil || client.Path == "" {
-		return
+	kill := func(c *adb.Client) {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		_, _ = c.Run(ctx, "kill-server")
+		cancel()
+	}
+	if client != nil {
+		kill(client)
 	}
 	exe, err := os.Executable()
 	if err != nil {
 		return
 	}
-	cleanClient := strings.ToLower(filepath.Clean(client.Path))
-	cleanDir := strings.ToLower(filepath.Clean(filepath.Dir(exe))) + string(filepath.Separator)
-	if !strings.HasPrefix(cleanClient, cleanDir) {
-		return
+	dir := filepath.Dir(exe)
+	bundled := filepath.Join(dir, "platform-tools", "adb.exe")
+	if _, err := os.Stat(bundled); err == nil && (client == nil || !strings.EqualFold(client.Path, bundled)) {
+		kill(&adb.Client{Path: bundled})
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	_, _ = client.Run(ctx, "kill-server")
-	cancel()
+	terminateInstallDirProcesses(dir)
 }
 
 // InstallUpdate downloads and installs the version found, then cleanly exits and relaunches AndroFuse.
-// Side effects: stops bundled ADB, closes active sessions, marks quitting so the tray hook allows
-// shutdown, and triggers mygo.App.Relaunch.
+// Side effects: closes active sessions and tunnels, stops adb and install-dir processes before and
+// after installing (stopBundledADBForUpdate), marks quitting so the tray hook allows shutdown, and
+// triggers mygo.App.Relaunch.
 func (a *App) InstallUpdate() {
 	a.mu.Lock()
 	up := a.update_.Found
@@ -128,6 +139,8 @@ func (a *App) InstallUpdate() {
 	a.update_.Installing, a.update_.Progress, a.update_.Err = true, 0, ""
 	a.mu.Unlock()
 	go func() {
+		a.CloseAllSessions()
+		a.stopTunnels()
 		a.stopBundledADBForUpdate()
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer cancel()
@@ -137,6 +150,7 @@ func (a *App) InstallUpdate() {
 			}
 		})
 		if err != nil {
+			a.rt.updating.Store(false)
 			a.update(func() {
 				a.update_.Installing = false
 				a.update_.Err = err.Error()

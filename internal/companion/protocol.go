@@ -37,13 +37,13 @@ type Permissions struct {
 	DisplayGuard  bool `json:"display_guard"`
 	ADBBeacon     bool `json:"adb_beacon"`
 	MediaBridge   bool `json:"media_bridge"`
-	// ScreenShare lets a paired computer see this screen when Wireless debugging cannot run
-	// (mobile data); Android still asks for consent each time.
+	// ScreenShare lets a paired computer show and control this screen, DeX and app windows through
+	// Enhanced mode (`daemon.open`) without Wireless debugging.
 	ScreenShare bool `json:"screen_share"`
 }
 
-// DefaultPermissions returns safe defaults: telemetry, TLS ADB tunnel, and MediaProjection screen
-// viewing are enabled so first-time setup works smoothly while sensitive clipboard, notification,
+// DefaultPermissions returns safe defaults: telemetry, TLS ADB tunnel, and Enhanced mode
+// screens (ScreenShare) are enabled so first-time setup works smoothly while sensitive clipboard, notification,
 // file, continuity, and mic/camera permissions remain opt-in (`INV-07`, `INV-09`).
 func DefaultPermissions() Permissions {
 	return Permissions{
@@ -120,7 +120,6 @@ type DeviceStatus struct {
 	AppBuildHash         string `json:"app_build_hash,omitempty"`
 	CompanionPort        int    `json:"companion_port,omitempty"`
 	StandbyRunning       bool   `json:"standby_running,omitempty"`
-	AccessibilityOn      bool   `json:"accessibility_on,omitempty"`
 	Timestamp            int64  `json:"timestamp"`
 }
 
@@ -288,6 +287,9 @@ type MeshJoinRequest struct {
 	NetworkName   string   `json:"network_name"`
 	NetworkSecret string   `json:"network_secret"`
 	Peers         []string `json:"peers,omitempty"`
+	// Label is the name the computer shows for the network (its Settings › Network name), which the
+	// phone shows too; empty keeps the phone's own.
+	Label string `json:"label,omitempty"`
 }
 
 // MeshJoinResponse reports whether the phone's embedded mesh is now running.

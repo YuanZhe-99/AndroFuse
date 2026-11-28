@@ -122,6 +122,11 @@ func FindClient() (*Client, error) {
 			filepath.Join(dir, exeName),
 		} {
 			if _, err := os.Stat(p); err == nil {
+				if runtime.GOOS == "windows" && filepath.Base(filepath.Dir(p)) == "platform-tools" {
+					if staged, sErr := StagePlatformTools(filepath.Dir(p), DefaultPlatformToolsStageRoot()); sErr == nil {
+						return &Client{Path: staged}, nil
+					}
+				}
 				return &Client{Path: p}, nil
 			}
 		}
@@ -712,6 +717,34 @@ func (c *Client) RemoveForward(ctx context.Context, serial string, localPort int
 	}
 	_, err := c.Run(ctx, "-s", serial, "forward", "--remove", fmt.Sprintf("tcp:%d", localPort))
 	return err
+}
+
+// ForwardReuse returns the local port of an existing `adb forward` from serial to remote, creating
+// one only when none is listed, so callers that look a phone up repeatedly do not pile up forwards.
+// Side effects: at most one new adb forward.
+func (c *Client) ForwardReuse(ctx context.Context, serial, remote string) (int, error) {
+	if out, err := c.Run(ctx, "forward", "--list"); err == nil {
+		if p := listedForward(out, serial, remote); p > 0 {
+			return p, nil
+		}
+	}
+	return c.ForwardPort(ctx, serial, 0, remote)
+}
+
+// listedForward finds serial's `tcp:<port> <remote>` line in `adb forward --list` output.
+func listedForward(out, serial, remote string) int {
+	for _, l := range strings.Split(out, "\n") {
+		f := strings.Fields(l)
+		if len(f) != 3 || f[0] != serial || f[2] != remote {
+			continue
+		}
+		if p, ok := strings.CutPrefix(f[1], "tcp:"); ok {
+			if n, err := strconv.Atoi(p); err == nil && n > 0 {
+				return n
+			}
+		}
+	}
+	return 0
 }
 
 // PushFile uploads localPath to remotePath on the device.

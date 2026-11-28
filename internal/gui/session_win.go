@@ -34,9 +34,6 @@ const (
 	SessionModeCamera      SessionMode = "camera"
 	SessionModeMiracastDeX SessionMode = "miracast_dex"
 	SessionModeDeXFallback SessionMode = "dex_fallback"
-	// SessionModeShare is the Companion's screen sharing on mobile data (MediaProjection), when
-	// Wireless debugging cannot run.
-	SessionModeShare SessionMode = "share"
 )
 
 // SessionSpec configures a live interactive desktop stream window.
@@ -52,6 +49,9 @@ type SessionSpec struct {
 	IsDeX        bool
 	IsMiracast   bool
 	AllowResize  bool
+	// MaxSize caps the longer side, in pixels, that resizing asks a flex display for (0 = no cap):
+	// slow Companion links get the size the link can carry, not the window's pixel size.
+	MaxSize      int
 	ScreenOffCap bool
 	AppIcon      *ui.Bitmap
 	AppPackage   string
@@ -118,7 +118,6 @@ type SessionWindow struct {
 	touchMode     bool
 	screenOff     bool
 	telemOpen     bool                  // the header's telemetry popover
-	shareKey      func(action string)   // Back, Home, Recents for a Companion screen-sharing session
 	closed        chan struct{}         // closed once Close released the stream, its leases and audio
 	camBridge     *avbridge.MJPEGServer // a camera session's loopback MJPEG bridge (set before streaming)
 	switching     bool                  // Switch camera or auto-upgrade is replacing the stream
@@ -1400,7 +1399,6 @@ func (sw *SessionWindow) view(c *ui.Context) {
 	ui.Column(c.Key("sess-own")).Fill().Background(t.Background).Children(func() {
 		sw.app.sessionHeader(c, sw, nil, false, runtime.GOOS == "windows")
 		sw.statusStrip(c)
-		sw.shareStrip(c)
 		ui.Column(c.Key("sess-own-body")).Grow(1).FillWidth().MinHeight(0).Background(ui.Hex(stageBgHex)).Children(func() {
 			sw.content(c, false)
 		})
@@ -1438,19 +1436,6 @@ func (sw *SessionWindow) statusStrip(c *ui.Context) {
 		if ui.Button(c.Key("sess-reconn-btn"), L.ActionReconnectNow()).Clicked() {
 			go sw.ReconnectNow()
 		}
-	})
-}
-
-// shareStrip explains, under the header of a Companion screen-sharing session, what works and
-// what waits for Wi-Fi (`INV-09`: it is not the phone screen over Wireless debugging).
-func (sw *SessionWindow) shareStrip(c *ui.Context) {
-	if sw.spec.Mode != SessionModeShare {
-		return
-	}
-	k := tok(c)
-	ui.Row(c.Key("share-strip")).FillWidth().Shrink(0).Padding(8, 12).Gap(8).AlignItems(ui.Center).Background(k.sunk).Children(func() {
-		ui.Icon(c, iconInfo).Size(14, 14).TextColor(k.text2)
-		ui.Text(c, L.ShareStrip()).FontSize(sizeSmall).TextColor(k.text2).SingleLine().MinWidth(0)
 	})
 }
 
@@ -1515,6 +1500,10 @@ func (sw *SessionWindow) onStageBounds(box ui.Rect) {
 	}
 	targetW := clampEven(int(box.W*scale), minW, 2560)
 	targetH := clampEven(int(box.H*scale), minH, 1600)
+	if m := sw.spec.MaxSize; m > 0 && max(targetW, targetH) > m {
+		k := float32(m) / float32(max(targetW, targetH))
+		targetW, targetH = clampEven(int(float32(targetW)*k), 2, m), clampEven(int(float32(targetH)*k), 2, m)
+	}
 
 	sw.mu.Lock()
 	sw.lastResizeBox = box

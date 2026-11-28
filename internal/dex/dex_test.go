@@ -903,8 +903,24 @@ func TestLiveDeXSurvivesTransportDrop(t *testing.T) {
 }
 
 func TestDetachedDaemonCommand(t *testing.T) {
-	cmd := detachedHelperCommand("daemon --pkg com.yuanzhe.androfuse")
-	if !strings.Contains(cmd, "com.androfuse.dexhelper.Main daemon --pkg com.yuanzhe.androfuse") || !strings.Contains(cmd, "setsid") {
+	cmd := detachedHelperCommand(RemoteHelperPath, "daemon --pkg com.yuanzhe.androfuse")
+	if !strings.Contains(cmd, "com.androfuse.dexhelper.Main daemon --pkg com.yuanzhe.androfuse") || !strings.Contains(cmd, "setsid") || !strings.Contains(cmd, "CLASSPATH="+RemoteHelperPath) {
 		t.Fatalf("unexpected detachedHelperCommand for daemon: %q", cmd)
+	}
+}
+
+func TestDaemonOutdatedFrom(t *testing.T) {
+	const h, s = "aa11", "bb22"
+	for _, tc := range []struct{ out, want string }{
+		{"FILE=100 aa11\nFILE=100 bb22\n", ""},                    // no daemon running
+		{"START=200\nFILE=100 aa11\nFILE=100 bb22\n", ""},         // current
+		{"START=200\nFILE=100 aa11\nFILE= \n", "scrcpy-server"},   // scrcpy copy deleted
+		{"START=200\nFILE=100 ffff\nFILE=100 bb22\n", "helper"},   // older desktop's helper
+		{"START=200\nFILE=100 AA11\nFILE=300 bb22\n", "replaced"}, // rewritten after start
+		{"START=200\nFILE=201 aa11\nFILE=202 bb22\n", ""},         // pushed just before launch
+	} {
+		if got := daemonOutdatedFrom(tc.out, h, s); got != tc.want {
+			t.Errorf("daemonOutdatedFrom(%q) = %q, want %q", tc.out, got, tc.want)
+		}
 	}
 }

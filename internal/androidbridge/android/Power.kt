@@ -81,17 +81,6 @@ class AndroFusePowerPlugin : MyGoPlugin {
                 watchWirelessDebugging(ctx)
                 reply.success(true)
             }
-            "startShare" -> {
-                AndroFuseShare.start(args.optInt("maxSize", 1280), args.optInt("bitRate", 4_000_000),
-                    args.optString("title", "AndroFuse"), args.optString("text", ""), args.optString("stop", "Stop")) { ok, why ->
-                    if (ok) reply.success(true) else reply.failure(PluginFailure(why, why))
-                }
-            }
-            "stopShare" -> {
-                AndroFuseShare.stop()
-                reply.success(true)
-            }
-            "globalAction" -> reply.success(AndroFuseShare.globalAction(args.optString("action")))
             "identity" -> reply.success(JSONObject()
                 .put("name", Settings.Global.getString(ctx.contentResolver, "device_name")?.takeIf { it.isNotBlank() } ?: Build.MODEL)
                 .put("manufacturer", Build.MANUFACTURER)
@@ -128,9 +117,22 @@ class AndroFusePowerPlugin : MyGoPlugin {
                 ctx.startActivity(i)
                 reply.success(true)
             }
-            "accessibilityOn" -> reply.success(AndroFuseA11yService.instance != null)
-            "openAccessibility" -> {
-                AndroFuseShare.openAccessibilitySettings()
+            "batteryRestricted" -> {
+                // Android's battery optimization (Samsung: "Optimized" or "Restricted") lets the system
+                // freeze the backgrounded Companion; "Unrestricted" exempts it.
+                val pm = ctx.getSystemService(Context.POWER_SERVICE) as PowerManager
+                reply.success(!pm.isIgnoringBatteryOptimizations(ctx.packageName))
+            }
+            "openBatterySettings" -> {
+                // The one-tap "allow background use" dialog where offered, else App info (Battery).
+                val ask = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, android.net.Uri.parse("package:" + ctx.packageName))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                try {
+                    ctx.startActivity(ask)
+                } catch (_: Exception) {
+                    ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:" + ctx.packageName))
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                }
                 reply.success(true)
             }
             "daemonStatus" -> reply.success(AndroFuseDaemon.status())

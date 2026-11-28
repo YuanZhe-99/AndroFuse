@@ -61,13 +61,13 @@ func StartAppGuard(
 	if err != nil {
 		return nil, err
 	}
-	if err := client.PushFile(ctx, serial, jar, RemoteHelperPath); err != nil {
+	if err := client.PushFile(ctx, serial, jar, RemoteToolPath); err != nil {
 		return nil, fmt.Errorf("push dex helper for appguard: %w", err)
 	}
-	_, _ = client.Shell(ctx, serial, "chmod 600 "+RemoteHelperPath+" 2>/dev/null || true")
+	_, _ = client.Shell(ctx, serial, "chmod 600 "+RemoteToolPath+" 2>/dev/null || true")
 
 	shellCmd := fmt.Sprintf("CLASSPATH=%s app_process / com.androfuse.dexhelper.Main appguard %d %s",
-		RemoteHelperPath, displayID, pkg)
+		RemoteToolPath, displayID, pkg)
 	cmd := exec.Command(client.Path, "-s", serial, "shell", shellCmd)
 	sysproc.HideConsole(cmd)
 

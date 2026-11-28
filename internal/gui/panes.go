@@ -128,7 +128,7 @@ func (a *App) session(id string) *SessionWindow {
 }
 
 // kindWord names what a session shows: Samsung DeX, the large-screen desktop (not DeX), the phone
-// screen, an app window, the camera, or the Companion's screen sharing (`INV-06`).
+// screen, an app window, or the camera (`INV-06`).
 func (sw *SessionWindow) kindWord() string {
 	switch sw.spec.Mode {
 	case SessionModeDeX, SessionModeMiracastDeX:
@@ -139,8 +139,6 @@ func (sw *SessionWindow) kindWord() string {
 		return L.KindApp()
 	case SessionModeCamera:
 		return L.KindCamera()
-	case SessionModeShare:
-		return L.KindShare()
 	default:
 		return L.KindScreen()
 	}
@@ -187,7 +185,6 @@ func (a *App) pane(c *ui.Context, sw *SessionWindow, partner *SessionWindow, top
 		Background(t.Background).Border(1, t.Border).Bind(&sw.paneHandle).Children(func() {
 		a.sessionHeader(c, sw, partner, true, topRight)
 		sw.statusStrip(c)
-		sw.shareStrip(c)
 		ui.Column(c.Key("pane-body")).Grow(1).FillWidth().MinHeight(0).Background(ui.Hex(stageBgHex)).Children(func() {
 			sw.content(c, true)
 		})
@@ -339,8 +336,6 @@ func (sw *SessionWindow) transportWord() string {
 		return "USB"
 	case strings.Contains(tr, "Emulator"):
 		return L.RouteThisComputer()
-	case sw.spec.Mode == SessionModeShare:
-		return L.RouteCrossNetwork()
 	case strings.Contains(tr, "127.0.0.1"), strings.Contains(tr, "Companion"):
 		return L.RouteCompanion()
 	default:
@@ -398,7 +393,7 @@ func (sw *SessionWindow) toolbar(c *ui.Context, k tokens, room bool) {
 				sw.Screenshot()
 				focus()
 			}
-			if sw.spec.Mode != SessionModeShare && iconBtn(c, "tool-clip", iconClipboard, L.ActionSendClipboard(), false).Clicked() {
+			if iconBtn(c, "tool-clip", iconClipboard, L.ActionSendClipboard(), false).Clicked() {
 				sw.SyncClipboardToDevice(c.ReadClipboard())
 				focus()
 			}
@@ -427,7 +422,6 @@ func (sw *SessionWindow) toolMenu(m *ui.Menu, c *ui.Context, all bool) {
 	if s == nil {
 		return
 	}
-	share := sw.spec.Mode == SessionModeShare
 	isApp := sw.spec.Mode == SessionModeApp
 	if sw.spec.Mode == SessionModeCamera {
 		sw.cameraMenu(m, all, muted, recording)
@@ -448,16 +442,13 @@ func (sw *SessionWindow) toolMenu(m *ui.Menu, c *ui.Context, all bool) {
 		if m.Item(L.ActionScreenshot()).Chosen() {
 			sw.Screenshot()
 		}
-		if !share && m.Item(L.ActionSendClipboard()).Chosen() {
+		if m.Item(L.ActionSendClipboard()).Chosen() {
 			sw.SyncClipboardToDevice(c.ReadClipboard())
 		}
 		if m.Item(L.ActionFullscreen()).Chosen() {
 			sw.toggleFullScreen()
 		}
 		m.Separator()
-	}
-	if share {
-		return
 	}
 	recLabel := L.ActionRecordStart()
 	if recording {
@@ -701,11 +692,10 @@ func drawWindowButtons(c *ui.Context, win *mygo.Window, onClose func()) {
 }
 
 // pressKey presses Back, Home or Recents ("back", "home", "recents") on the session's phone:
-// through scrcpy's control socket, Bounded Back AppGuard for Independent App Windows, or
-// through the Companion for its screen sharing.
+// through scrcpy's control socket, or Bounded Back AppGuard for Independent App Windows.
 func (sw *SessionWindow) pressKey(action string) {
 	sw.mu.Lock()
-	s, share, guard := sw.scrcpySess, sw.shareKey, sw.appGuard
+	s, guard := sw.scrcpySess, sw.appGuard
 	sw.mu.Unlock()
 	if sw.spec.Mode == SessionModeApp {
 		if action != "back" {
@@ -722,12 +712,6 @@ func (sw *SessionWindow) pressKey(action string) {
 		}
 		if s != nil {
 			_ = s.TapKeycode(scrcpy.KeycodeBack)
-		}
-		return
-	}
-	if sw.spec.Mode == SessionModeShare {
-		if share != nil {
-			share(action)
 		}
 		return
 	}

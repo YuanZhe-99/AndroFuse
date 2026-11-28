@@ -459,7 +459,7 @@ func (a *App) connectRemembered(r RememberedDevice, openAs int) {
 		case openAsDeX:
 			a.LaunchDaemonDesktop(r.HardwareHash, OpenDefault)
 		default:
-			a.LaunchShare(r.HardwareHash, OpenDefault)
+			a.LaunchCompanionMirror(r.HardwareHash, OpenDefault)
 		}
 		return
 	}
@@ -494,7 +494,7 @@ func (a *App) connectRemembered(r RememberedDevice, openAs int) {
 			}
 			if a.autoSwitchOn() {
 				// Wireless ADB failed or is disabled (e.g. switched to 5G); fall back seamlessly to
-				// Companion streaming (daemon DeX/desktop, independent app, or mirror/share).
+				// Companion streaming (daemon DeX/desktop, independent app, or mirror).
 				a.setCardWork(r.HardwareHash, cardWork{Busy: L.CardSwitchingCompanion(r.displayName())})
 				switch openAs {
 				case openAsApp:
@@ -503,7 +503,7 @@ func (a *App) connectRemembered(r RememberedDevice, openAs int) {
 				case openAsDeX:
 					a.LaunchDaemonDesktop(r.HardwareHash, OpenDefault)
 				default:
-					a.LaunchShare(r.HardwareHash, OpenDefault)
+					a.LaunchCompanionMirror(r.HardwareHash, OpenDefault)
 				}
 				return
 			}

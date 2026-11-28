@@ -19,7 +19,10 @@ import (
 // MeshSettings is the EasyTier network a paired desktop handed over (PLAN §9.1-1).
 // The secret is stored only sealed with the Android Keystore vault key (`INV-08`).
 type MeshSettings struct {
-	NetworkName  string   `json:"network_name"`
+	NetworkName string `json:"network_name"`
+	// Label is the name shown for the network on this phone (from the computer that handed it over,
+	// or typed here); empty shows NetworkName.
+	Label        string   `json:"label,omitempty"`
 	Peers        []string `json:"peers,omitempty"`
 	SealedSecret []byte   `json:"sealed_secret"`
 	// FullSpeed turns the low-power mesh off (it is on by default on the phone).
@@ -57,6 +60,9 @@ func (h *Host) JoinMesh(req companion.MeshJoinRequest) (companion.MeshJoinRespon
 		h.notify()
 		return companion.MeshJoinResponse{Running: false, Message: L.MeshPhoneAlreadyJoined(cur)}, nil
 	}
+	if req.Label == "" && h.cfg.Mesh != nil && strings.EqualFold(strings.TrimSpace(h.cfg.Mesh.NetworkName), target) {
+		req.Label = h.cfg.Mesh.Label // a computer from before labels: keep the one shown here
+	}
 	h.mu.Unlock()
 	return h.joinMesh(req, "from paired computer")
 }
@@ -76,7 +82,7 @@ func (h *Host) joinMesh(req companion.MeshJoinRequest, from string) (companion.M
 	h.mu.Unlock()
 	running, err := h.startMesh(name, req.NetworkSecret, req.Peers, full)
 	h.mu.Lock()
-	h.cfg.Mesh = &MeshSettings{NetworkName: name, Peers: req.Peers, SealedSecret: sealed, FullSpeed: full}
+	h.cfg.Mesh = &MeshSettings{NetworkName: name, Label: strings.TrimSpace(req.Label), Peers: req.Peers, SealedSecret: sealed, FullSpeed: full}
 	h.appendAuditLocked(fmt.Sprintf("joined mesh %q %s", name, from))
 	h.saveConfigLocked()
 	h.mu.Unlock()
@@ -359,10 +365,10 @@ func (h *Host) meshID() string {
 	return h.cfg.MeshID
 }
 
-// meshForm is what the phone's own network editor holds: the network name, its servers (one per
-// line) and secret, and why the last save failed.
+// meshForm is what the phone's own network editor holds: the network name, the name shown for
+// it, its servers (one per line) and secret, and why the last save failed.
 type meshForm struct {
-	Name, Servers, Secret, Err string
+	Name, Label, Servers, Secret, Err string
 }
 
 // editMesh opens the network editor with the remembered network's name and servers (the secret
@@ -371,7 +377,7 @@ func (h *Host) editMesh() {
 	f := &meshForm{}
 	h.mu.Lock()
 	if s := h.cfg.Mesh; s != nil {
-		f.Name, f.Servers = s.NetworkName, strings.Join(s.Peers, "\n")
+		f.Name, f.Label, f.Servers = s.NetworkName, s.Label, strings.Join(s.Peers, "\n")
 	}
 	h.mu.Unlock()
 	h.meshForm = f
@@ -387,7 +393,7 @@ func (h *Host) saveMeshForm(f meshForm) {
 			servers = append(servers, s)
 		}
 	}
-	res, err := h.joinMesh(companion.MeshJoinRequest{NetworkName: f.Name, NetworkSecret: f.Secret, Peers: servers}, "on this phone")
+	res, err := h.joinMesh(companion.MeshJoinRequest{NetworkName: f.Name, NetworkSecret: f.Secret, Peers: servers, Label: f.Label}, "on this phone")
 	if err == nil && res.Message != "" {
 		err = errors.New(res.Message)
 	}

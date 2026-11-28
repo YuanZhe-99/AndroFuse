@@ -281,11 +281,10 @@ func TestStatusReportsWirelessPortEvenWhenTunnelDisabled(t *testing.T) {
 	h.mu.Lock()
 	h.cfg.ListenPort = 38200
 	h.cfg.Standby = true
-	h.a11yOn = true
 	h.apkHash = "deadbeef"
 	h.mu.Unlock()
 	st := h.Status()
-	if st.WirelessADBPort != 38102 || st.ADBTunnelAllowed || !st.ScreenShareAllowed || st.AppVersion == "" || st.CompanionPort != 38200 || !st.StandbyRunning || !st.AccessibilityOn || st.AppBuildHash != "deadbeef" {
+	if st.WirelessADBPort != 38102 || st.ADBTunnelAllowed || !st.ScreenShareAllowed || st.AppVersion == "" || st.CompanionPort != 38200 || !st.StandbyRunning || st.AppBuildHash != "deadbeef" {
 		t.Fatalf("Status() missing full phone state: %+v", st)
 	}
 }
@@ -428,5 +427,50 @@ func TestPairPromptChoicesAndMeshOverwriteGuard(t *testing.T) {
 	h.mu.Unlock()
 	if st := h.Status(); st.WirelessADBPairPort != 0 {
 		t.Fatalf("expected expired pair port to read as 0, got %d", st.WirelessADBPairPort)
+	}
+}
+
+func TestStandbyOnByDefaultAndMigratedOnce(t *testing.T) {
+	if !New(t.TempDir(), nil).Config().Standby {
+		t.Fatal("a new Companion should start with Standby on")
+	}
+	dir := t.TempDir()
+	// A phone upgraded from a build where Standby was off by default.
+	if err := os.WriteFile(filepath.Join(dir, "companion.json"), []byte(`{"token":"0123456789abcdefABCDEF","perm_defaults_v2":true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h := New(dir, nil)
+	if !h.Config().Standby {
+		t.Fatal("an upgraded Companion should turn Standby on once")
+	}
+	h.SetStandby(false)
+	if New(dir, nil).Config().Standby {
+		t.Fatal("Standby turned off by the phone's user must stay off")
+	}
+}
+
+// TestMeshLabelShownOnPhone checks that the phone shows the network under the name its computer
+// gave it (MeshSettings.Label), keeps the EasyTier name in its status, and offers the name in its
+// network editor.
+func TestMeshLabelShownOnPhone(t *testing.T) {
+	i18n.SetLocaleFunc(func() string { return "en" })
+	h := New(t.TempDir(), nil)
+	h.mu.Lock()
+	h.cfg.Mesh = &MeshSettings{NetworkName: "androfuse", Label: "Home Network"}
+	h.mu.Unlock()
+	if st := h.Status(); st.MeshNetwork != "androfuse" {
+		t.Fatalf("status must keep the EasyTier name, got %q", st.MeshNetwork)
+	}
+	tt := ui.NewTester(func(c *ui.Context) { RenderCompanionView(c, h) }, 760, 2400)
+	tt.Frame()
+	if !tt.HasText("Home Network") {
+		t.Fatalf("the network's label is not shown: %v", tt.Texts())
+	}
+	h.editMesh()
+	h.mu.Lock()
+	f := h.meshForm
+	h.mu.Unlock()
+	if f == nil || f.Name != "androfuse" || f.Label != "Home Network" {
+		t.Fatalf("editor = %+v", f)
 	}
 }

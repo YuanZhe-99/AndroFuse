@@ -54,8 +54,6 @@ final class AppGuard {
 
     private static final int KEYCODE_BACK = 4;
     private static final int DISPLAY_STATE_ON = 2; // Display.STATE_ON
-    private static final int POWER_MODE_OFF = 0; // SurfaceControl.POWER_MODE_OFF
-    private static final int POWER_MODE_NORMAL = 2; // SurfaceControl.POWER_MODE_NORMAL
     private static final int POWER_ACQUIRE_CAUSES_WAKEUP = 0x10000000;
     private static final int POWER_SCREEN_BRIGHT_WAKE_LOCK = 0x0000000a;
     private static final Pattern DISPLAY_ID_PATTERN = Pattern.compile("\\b(?:mDisplayId|displayId)=(\\d+)\\b");
@@ -84,7 +82,6 @@ final class AppGuard {
     private volatile boolean everHadTask;
     private volatile boolean sharedDisplayGroup;
     private volatile boolean physicalWasOffAtStart;
-    private volatile boolean physicalPanelBlankedByUs;
     private long lastWakeAtMs;
     private int wakeBurstCount;
     private long wakeBurstWindowStartMs;
@@ -135,6 +132,13 @@ final class AppGuard {
 
     @SuppressWarnings("deprecation")
     private void init() {
+        // Read before this guard's own wake lock (ACQUIRE_CAUSES_WAKEUP) can turn the phone on.
+        if (displayManager != null) {
+            try {
+                Display d0 = displayManager.getDisplay(Display.DEFAULT_DISPLAY);
+                physicalWasOffAtStart = (d0 != null && d0.getState() != DISPLAY_STATE_ON);
+            } catch (Throwable ignored) {}
+        }
         try {
             Class<?> smCls = Class.forName("android.os.ServiceManager");
             Method getSvc = smCls.getDeclaredMethod("getService", String.class);
@@ -187,8 +191,6 @@ final class AppGuard {
 
         if (displayManager != null) {
             try {
-                Display d0 = displayManager.getDisplay(Display.DEFAULT_DISPLAY);
-                physicalWasOffAtStart = (d0 != null && d0.getState() != DISPLAY_STATE_ON);
                 Display initial = displayManager.getDisplay(displayId);
                 sharedDisplayGroup = (initial != null && queryDisplayGroupId(initial) == 0);
             } catch (Throwable ignored) {}
@@ -226,14 +228,13 @@ final class AppGuard {
                 Display initial = displayManager.getDisplay(displayId);
                 if (sharedDisplayGroup) {
                     // Path B (OEM ROMs placing new_display in DisplayGroup 0):
-                    // Wake PowerGroup 0 so the virtual display renders, then blank physical Display 0's panel.
+                    // Wake PowerGroup 0 so the virtual display renders. The phone's own screen shares that
+                    // group and must stay on: with its panels powered off (SurfaceControl) Android stops
+                    // drawing the virtual display too, so the window froze until the screen came back on.
                     if (physicalWasOffAtStart || (initial != null && initial.getState() != DISPLAY_STATE_ON)) {
                         runCmdPowerWakeupDisplay(displayId);
                         touchUserActivity(displayId);
                         handler.post(wakeDisplayRunnable);
-                    }
-                    if (physicalWasOffAtStart && setPhysicalDisplay0PowerMode(false)) {
-                        physicalPanelBlankedByUs = true;
                     }
                 } else if (initial != null && initial.getState() != DISPLAY_STATE_ON) {
                     // Path A (Isolated DisplayGroup != 0): wake only the virtual display's PowerGroup.
@@ -316,8 +317,8 @@ final class AppGuard {
     }
 
     /**
-     * Releases all wake locks, unregisters system listeners, restores physical panel power if needed,
-     * and stops the supervisor thread idempotently.
+     * Releases all wake locks, unregisters system listeners, puts a phone that was asleep when the window
+     * opened and is still locked back to sleep, and stops the supervisor thread idempotently.
      */
     void close() {
         if (!closed.compareAndSet(false, true)) {
@@ -344,15 +345,10 @@ final class AppGuard {
                 }
             } catch (Throwable ignored) {}
         }
-        if (physicalPanelBlankedByUs) {
-            physicalPanelBlankedByUs = false;
-            setPhysicalDisplay0PowerMode(true);
-            if (physicalWasOffAtStart && powerBinder != null) {
-                try {
-                    Method goToSleep = powerBinder.getClass().getMethod("goToSleep", long.class, int.class, int.class);
-                    goToSleep.invoke(powerBinder, SystemClock.uptimeMillis(), 0, 0);
-                } catch (Throwable ignored) {}
-            }
+        if (physicalWasOffAtStart && keyguardLocked()) {
+            // The phone was off when the window opened and is still locked: nobody is using it, so put
+            // it back to sleep instead of leaving the screen to time out.
+            goToSleep();
         }
         try {
             thread.quitSafely();
@@ -470,11 +466,6 @@ final class AppGuard {
         runCmdPowerWakeupDisplay(displayId);
         reacquireVirtualDisplayWakeLock();
         touchUserActivity(displayId);
-        if (sharedDisplayGroup && (physicalPanelBlankedByUs || physicalWasOffAtStart)) {
-            if (setPhysicalDisplay0PowerMode(false)) {
-                physicalPanelBlankedByUs = true;
-            }
-        }
     }
 
     private static int queryDisplayGroupId(Display d) {
@@ -494,47 +485,24 @@ final class AppGuard {
         return 0;
     }
 
-    private static boolean setPhysicalDisplay0PowerMode(boolean on) {
+    /** Reports whether the phone's lock screen is up (no one has unlocked it); false when unknown. */
+    private boolean keyguardLocked() {
         try {
-            IBinder token = null;
-            Class<?> scCls = Class.forName("android.view.SurfaceControl");
-            try {
-                Method getIds = scCls.getDeclaredMethod("getPhysicalDisplayIds");
-                Method getTok = scCls.getDeclaredMethod("getPhysicalDisplayToken", long.class);
-                getIds.setAccessible(true);
-                getTok.setAccessible(true);
-                long[] ids = (long[]) getIds.invoke(null);
-                if (ids != null && ids.length > 0) {
-                    token = (IBinder) getTok.invoke(null, ids[0]);
-                }
-            } catch (Throwable ignored) {}
+            android.app.KeyguardManager km = (android.app.KeyguardManager) sysCtx.getSystemService(Context.KEYGUARD_SERVICE);
+            return km != null && km.isKeyguardLocked();
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
 
-            if (token == null) {
-                try {
-                    System.load("/system/lib64/libandroid_servers.so");
-                } catch (Throwable t1) {
-                    try {
-                        System.loadLibrary("android_servers");
-                    } catch (Throwable ignored) {}
-                }
-                ClassLoader loader = new dalvik.system.PathClassLoader("/system/framework/services.jar", ClassLoader.getSystemClassLoader());
-                Class<?> dcCls = Class.forName("com.android.server.display.DisplayControl", true, loader);
-                Method getIds = dcCls.getDeclaredMethod("getPhysicalDisplayIds");
-                Method getTok = dcCls.getDeclaredMethod("getPhysicalDisplayToken", long.class);
-                getIds.setAccessible(true);
-                getTok.setAccessible(true);
-                long[] ids = (long[]) getIds.invoke(null);
-                if (ids != null && ids.length > 0) {
-                    token = (IBinder) getTok.invoke(null, ids[0]);
-                }
-            }
-
-            if (token == null) {
-                return false;
-            }
-            Method setMode = scCls.getDeclaredMethod("setDisplayPowerMode", IBinder.class, int.class);
-            setMode.setAccessible(true);
-            setMode.invoke(null, token, on ? POWER_MODE_NORMAL : POWER_MODE_OFF);
+    /** Puts the phone to sleep through PowerManager; false when the call is unavailable. */
+    private boolean goToSleep() {
+        if (powerBinder == null) {
+            return false;
+        }
+        try {
+            Method m = powerBinder.getClass().getMethod("goToSleep", long.class, int.class, int.class);
+            m.invoke(powerBinder, SystemClock.uptimeMillis(), 0, 0);
             return true;
         } catch (Throwable ignored) {
             return false;

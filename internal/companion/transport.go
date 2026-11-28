@@ -51,11 +51,6 @@ type Handler struct {
 	// OnTunnel opens a loopback connection to this phone's Wireless debugging port for a
 	// "tunnel.open" request; it refuses any other port (`INV-07`).
 	OnTunnel func(port int) (net.Conn, error)
-	// OnShare starts screen sharing (after Android's consent) and returns a connection carrying
-	// the H.264 stream in scrcpy framing.
-	OnShare func() (net.Conn, error)
-	// OnKey runs "back", "home" or "recents" on the phone while it shares its screen.
-	OnKey func(action string) error
 	// OnDaemonStream opens a scrcpy-server video (and optional control) stream through the
 	// persistent UID 2000 daemon for a `daemon.open` request (`PLAN` §9.2).
 	OnDaemonStream func(DaemonStreamRequest) (sessionID string, video net.Conn, ctrl net.Conn, closeFn func(), err error)
@@ -541,11 +536,6 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 			s.serveTunnel(streamConn, enc, env)
 			return
 		}
-		if env.Type == "share.open" {
-			tuneStreamConn(streamConn)
-			s.serveShare(streamConn, enc, env)
-			return
-		}
 		if env.Type == "daemon.open" {
 			tuneStreamConn(streamConn)
 			s.serveDaemonOpen(streamConn, enc, env, ownerHash)
@@ -569,16 +559,6 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 func (s *Server) dispatch(env Envelope) Envelope {
 	perms := s.permissions()
 	switch env.Type {
-	case "input.key":
-		var req KeyRequest
-		_ = json.Unmarshal(env.Payload, &req)
-		if !perms.ScreenShare || s.handler.OnKey == nil {
-			return Envelope{ID: env.ID, Type: "input.res", Error: "screen sharing permission disabled"}
-		}
-		if err := s.handler.OnKey(req.Action); err != nil {
-			return Envelope{ID: env.ID, Type: "input.res", Error: err.Error()}
-		}
-		return Envelope{ID: env.ID, Type: "input.res"}
 	case "status.get":
 		if !perms.Telemetry {
 			return Envelope{ID: env.ID, Type: "status.res", Error: "telemetry permission disabled"}
@@ -1344,54 +1324,6 @@ func ServeTunnels(ctx context.Context, addr, token, fingerprint string, port int
 		}
 	}()
 	return ln.Addr().String(), nil
-}
-
-// KeyRequest is "back", "home" or "recents" for a phone sharing its screen.
-type KeyRequest struct {
-	Action string `json:"action"`
-}
-
-// serveShare answers "share.open": once the phone's user allows capture, the connection stops
-// carrying NDJSON and carries the screen's H.264 stream in scrcpy framing until either side ends.
-func (s *Server) serveShare(conn net.Conn, enc *json.Encoder, env Envelope) {
-	if !s.permissions().ScreenShare || s.handler.OnShare == nil {
-		_ = enc.Encode(Envelope{ID: env.ID, Type: "share.res", Error: "screen sharing permission disabled"})
-		return
-	}
-	_ = conn.SetDeadline(time.Time{})
-	stream, err := s.handler.OnShare()
-	if err != nil {
-		_ = enc.Encode(Envelope{ID: env.ID, Type: "share.res", Error: err.Error()})
-		return
-	}
-	defer stream.Close()
-	if err := enc.Encode(Envelope{ID: env.ID, Type: "share.res"}); err != nil {
-		return
-	}
-	tuneVideoConn(conn)
-	pipe(conn, stream)
-}
-
-// DialShare opens a new authenticated connection to the Companion at addr and asks it to share its
-// screen; it waits while the phone's user answers Android's consent dialog.
-// Returns: the stream (scrcpy framing: device name, codec, a session packet, media packets).
-func DialShare(ctx context.Context, addr, token, fingerprint string) (net.Conn, error) {
-	c, err := Dial(ctx, addr, token, fingerprint)
-	if err != nil {
-		return nil, err
-	}
-	wait, cancel := context.WithTimeout(ctx, 2*time.Minute)
-	defer cancel()
-	if err := c.call(wait, "share.open", struct{}{}, nil); err != nil {
-		_ = c.Close()
-		return nil, err
-	}
-	return c.conn, nil
-}
-
-// Key runs Back, Home or Recents on a phone sharing its screen.
-func (c *Client) Key(ctx context.Context, action string) error {
-	return c.call(ctx, "input.key", KeyRequest{Action: action}, nil)
 }
 
 func (s *Server) serveDaemonOpen(conn net.Conn, enc *json.Encoder, env Envelope, ownerHash string) {

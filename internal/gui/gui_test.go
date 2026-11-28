@@ -3,6 +3,7 @@ package gui
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"image"
 	"image/color"
@@ -823,5 +824,24 @@ func TestDirectLANRoutesAndAdaptiveStreamProfile(t *testing.T) {
 	brP, fpsP, szP, codecP, _, relayedP := a.companionStreamProfile("AF-p-01234567 Fold8", "127.0.0.1:51234", false)
 	if relayedP || brP != 2_000_000 || fpsP != 30 || szP != 1080 || codecP != "h265" {
 		t.Fatalf("WAN P2P mirror profile = (%d, %d, %d, %s, relayed=%v)", brP, fpsP, szP, codecP, relayedP)
+	}
+}
+
+func TestUpdateBlocksADBAndCancelsWork(t *testing.T) {
+	a := testApp(t)
+	ctx, cancel := a.adbWorkContext(time.Minute)
+	defer cancel()
+
+	a.rt.updating.Store(true) // as stopBundledADBForUpdate does
+
+	if _, _, err := a.ensureADBAndLeases(); !errors.Is(err, errUpdateInProgress) {
+		t.Fatalf("expected errUpdateInProgress during update, got %v", err)
+	}
+
+	a.cancelADBWork()
+	select {
+	case <-ctx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("expected cancelADBWork to cancel active adbWorkContext")
 	}
 }

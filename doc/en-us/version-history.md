@@ -1,5 +1,14 @@
 # Version History
 
+## v0.2.4 (2026-11-27)
+
+- **Windows packages work again**: they now ship the SHA-256-pinned `scrcpy-server-v5.0.1` next to `androfuse.exe` and find `bin/androfuse-dex-helper.jar` (the build fails without either); 0.2.3 installs could show no phone screen and could not activate Enhanced mode.
+- **Enhanced mode daemon self-repair**: direct ADB sessions and one-shot helpers use their own copies (`androfuse-scrcpy-session.jar`, `androfuse-dex-tool.jar`), so they no longer delete or replace the daemon's pinned files; the desktop restarts a daemon whose copies are missing, outdated or rewritten (`dex.DaemonOutdated`) and retries `daemon.open` once after a crashed scrcpy-server.
+- **App windows stay live with the phone asleep**: AppGuard no longer powers the phone's panels off (that froze windows and could leave the screen unable to turn on); a still-locked phone goes back to sleep when the window closes; after each capture reset or flex resize the app display is power-cycled (`cmd display power-off` / `power-reset`), and a stall guard requests a fresh encoder session when a window stops answering, fixing blank windows that needed a lock and unlock (Samsung One UI).
+- **Mobile data**: mesh TCP rides EasyTier's KCP proxy; Save battery keeps symmetric-NAT hole punching; app windows on slow links stay within the link's size cap when resized.
+- **Companion**: background standby on by default, a battery-usage reminder (Unrestricted), and the computer's network name shown and editable on the phone; the view-only screen-sharing fallback (MediaProjection, accessibility service) is removed.
+- **Fixes**: one reused `adb forward` per phone (they piled up), updates stop adb and install-directory processes before replacing files ("Access is denied").
+
 ## v0.2.3 (2026-11-27)
 
 - **Physical Screen-Off Support & Two-Layer Bounded Back for Independent App Windows (`AppGuard.java`, `internal/dex/appguard.go`)**:

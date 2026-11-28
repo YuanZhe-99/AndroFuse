@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -27,8 +28,14 @@ import (
 	"github.com/YuanZhe-99/AndroFuse/internal/sysproc"
 )
 
-// RemoteHelperPath is the non-world-writable device path for androfuse-dex-helper.jar.
-const RemoteHelperPath = "/data/local/tmp/androfuse-dex-helper.jar"
+const (
+	// RemoteHelperPath is the copy of androfuse-dex-helper.jar the persistent UID 2000 daemon runs
+	// from and pins by SHA-256 at start (Daemon.java DEX_HELPER_PATH); only StartDaemon writes it.
+	RemoteHelperPath = "/data/local/tmp/androfuse-dex-helper.jar"
+	// RemoteToolPath is the separate copy one-shot ADB helpers (probe, apps, serve, attach,
+	// recover, appguard) push and run, so they never replace the file under a running daemon.
+	RemoteToolPath = "/data/local/tmp/androfuse-dex-tool.jar"
+)
 
 // Backend identifies the active DeX or virtual-desktop transport mechanism (INV-05, INV-06).
 type Backend string
@@ -126,7 +133,8 @@ type LoopbackSession struct {
 	stopped bool
 }
 
-// FindHelperJar locates build/androfuse-dex-helper.jar near the binary or repo root.
+// FindHelperJar locates androfuse-dex-helper.jar: ANDROFUSE_DEX_HELPER, the installed package's
+// `bin/`, next to the binary, or the repo's `build/`.
 func FindHelperJar() (string, error) {
 	if env := strings.TrimSpace(os.Getenv("ANDROFUSE_DEX_HELPER")); env != "" {
 		if _, err := os.Stat(env); err == nil {
@@ -135,7 +143,9 @@ func FindHelperJar() (string, error) {
 	}
 	var candidates []string
 	if exe, err := os.Executable(); err == nil {
-		candidates = append(candidates, filepath.Join(filepath.Dir(exe), "androfuse-dex-helper.jar"))
+		// Installed packages carry it in the signed bin/ bundle; dev builds next to the binary.
+		dir := filepath.Dir(exe)
+		candidates = append(candidates, filepath.Join(dir, "bin", "androfuse-dex-helper.jar"), filepath.Join(dir, "androfuse-dex-helper.jar"))
 	}
 	if wd, err := os.Getwd(); err == nil {
 		cur := wd
@@ -295,11 +305,11 @@ func PushAndProbe(ctx context.Context, client *adb.Client, serial string) (Probe
 	if err != nil {
 		return ProbeReport{}, err
 	}
-	if err := client.PushFile(ctx, serial, jar, RemoteHelperPath); err != nil {
+	if err := client.PushFile(ctx, serial, jar, RemoteToolPath); err != nil {
 		return ProbeReport{}, fmt.Errorf("push dex helper: %w", err)
 	}
-	_, _ = client.Shell(ctx, serial, "chmod 600 "+RemoteHelperPath+" 2>/dev/null || true")
-	cmd := fmt.Sprintf("CLASSPATH=%s app_process / com.androfuse.dexhelper.Main probe", RemoteHelperPath)
+	_, _ = client.Shell(ctx, serial, "chmod 600 "+RemoteToolPath+" 2>/dev/null || true")
+	cmd := fmt.Sprintf("CLASSPATH=%s app_process / com.androfuse.dexhelper.Main probe", RemoteToolPath)
 	out, err := client.Shell(ctx, serial, cmd)
 	if err != nil {
 		return ProbeReport{}, fmt.Errorf("dex helper probe: %w (%s)", err, out)
@@ -324,7 +334,7 @@ func ParseProbeOutput(raw string) (ProbeReport, error) {
 
 // Recover runs `Main recover` on serial to clear any lingering DeX loopback session.
 func Recover(ctx context.Context, client *adb.Client, serial string) error {
-	cmd := fmt.Sprintf("CLASSPATH=%s app_process / com.androfuse.dexhelper.Main recover", RemoteHelperPath)
+	cmd := fmt.Sprintf("CLASSPATH=%s app_process / com.androfuse.dexhelper.Main recover", RemoteToolPath)
 	out, err := client.Shell(ctx, serial, cmd)
 	if err != nil {
 		return fmt.Errorf("dex recover: %w (%s)", err, out)
@@ -341,10 +351,10 @@ func Recover(ctx context.Context, client *adb.Client, serial string) error {
 // which used to kill `serve` before its grace window (`INV-02`) could start; detached, the helper
 // only sees stdin EOF, keeps the DeX display alive and waits for `attach` on the new transport.
 // Verified on Fold 8 / toybox 0.8.13. Falls back to a plain launch where `setsid -w` is missing.
-func detachedHelperCommand(args string) string {
+func detachedHelperCommand(jar, args string) string {
 	launch := "app_process / com.androfuse.dexhelper.Main " + args
 	return fmt.Sprintf("export CLASSPATH=%s; if setsid -w true 2>/dev/null; then exec setsid -w nohup %s; else exec %s; fi",
-		RemoteHelperPath, launch, launch)
+		jar, launch, launch)
 }
 
 // StartNativeLoopback launches `androfuse-dex-helper.jar serve` to activate genuine
@@ -365,10 +375,10 @@ func StartNativeLoopback(
 	if err != nil {
 		return nil, err
 	}
-	if err := client.PushFile(ctx, serial, jar, RemoteHelperPath); err != nil {
+	if err := client.PushFile(ctx, serial, jar, RemoteToolPath); err != nil {
 		return nil, fmt.Errorf("push dex helper: %w", err)
 	}
-	_, _ = client.Shell(ctx, serial, "chmod 600 "+RemoteHelperPath+" 2>/dev/null || true")
+	_, _ = client.Shell(ctx, serial, "chmod 600 "+RemoteToolPath+" 2>/dev/null || true")
 	var tokBytes [6]byte
 	if _, err := rand.Read(tokBytes[:]); err != nil {
 		return nil, err
@@ -387,7 +397,7 @@ func StartNativeLoopback(
 		}
 	}
 
-	shellCmd := detachedHelperCommand(fmt.Sprintf("serve %s %d %d %d %d", token, width, height, dpi, graceSec))
+	shellCmd := detachedHelperCommand(RemoteToolPath, fmt.Sprintf("serve %s %d %d %d %d", token, width, height, dpi, graceSec))
 	cmd := exec.Command(client.Path, "-s", serial, "shell", shellCmd)
 	sysproc.HideConsole(cmd)
 	stdin, err := cmd.StdinPipe()
@@ -574,7 +584,7 @@ func (s *LoopbackSession) Reattach(ctx context.Context, newSerial string) (Ready
 	}
 
 	shellCmd := fmt.Sprintf("CLASSPATH=%s app_process / com.androfuse.dexhelper.Main attach %s %d",
-		RemoteHelperPath, token, ctrlPort)
+		RemoteToolPath, token, ctrlPort)
 	cmd := exec.Command(adbClient.Path, "-s", newSerial, "shell", shellCmd)
 	sysproc.HideConsole(cmd)
 	stdin, err := cmd.StdinPipe()
@@ -844,8 +854,8 @@ func (s *LoopbackSession) Stop() {
 // zero active wakeups until stopped or replaced.
 //
 // Inputs: companionPkg overrides the default Companion package (`com.yuanzhe.androfuse`).
-// Side effects: uploads `androfuse-dex-helper.jar` to RemoteHelperPath and spawns a detached
-// background `app_process` on the device.
+// Side effects: uploads `androfuse-dex-helper.jar` to RemoteHelperPath and scrcpy-server to
+// scrcpy.RemoteServerPath, then replaces any running daemon with a detached `app_process`.
 func StartDaemon(ctx context.Context, client *adb.Client, serial, companionPkg string) error {
 	if client == nil {
 		return errors.New("adb client is required")
@@ -860,19 +870,87 @@ func StartDaemon(ctx context.Context, client *adb.Client, serial, companionPkg s
 	if err := client.PushFile(ctx, serial, jar, RemoteHelperPath); err != nil {
 		return fmt.Errorf("push dex helper: %w", err)
 	}
-	if srvPath, sErr := scrcpy.FindCachedServer(); sErr == nil {
-		if err := client.PushFile(ctx, serial, srvPath, scrcpy.RemoteServerPath); err != nil {
-			return fmt.Errorf("push scrcpy-server: %w", err)
-		}
+	// The daemon runs every mirror, DeX and app window through this copy; without it each session
+	// would crash on the phone, so a missing local scrcpy-server is an error, not a skip.
+	srvPath, err := scrcpy.FindCachedServer()
+	if err != nil {
+		return err
+	}
+	if err := client.PushFile(ctx, serial, srvPath, scrcpy.RemoteServerPath); err != nil {
+		return fmt.Errorf("push scrcpy-server: %w", err)
 	}
 	_, _ = client.Shell(ctx, serial, "chmod 600 "+RemoteHelperPath+" "+scrcpy.RemoteServerPath+" 2>/dev/null || true")
 	// Terminate any prior uid=2000 daemon so the new JAR/binary takes over the lock cleanly.
 	_, _ = client.Shell(ctx, serial, "pkill -f 'com.androfuse.dexhelper.Main daemon' >/dev/null 2>&1 || true; sleep 0.2")
-	inner := detachedHelperCommand(fmt.Sprintf("daemon --pkg %s", companionPkg))
+	inner := detachedHelperCommand(RemoteHelperPath, fmt.Sprintf("daemon --pkg %s", companionPkg))
 	bg := fmt.Sprintf("(%s) </dev/null >/dev/null 2>&1 &", inner)
 	_, err = client.Shell(ctx, serial, bg)
 	if err != nil {
 		return fmt.Errorf("launch uid=2000 daemon: %w", err)
 	}
 	return nil
+}
+
+// DaemonOutdated reports why the phone's running UID 2000 daemon must be restarted with this
+// desktop's copies (StartDaemon), or "" when it is current or not running.
+// Returns: "helper" or "scrcpy-server" when that copy on the phone is missing or differs from the
+// local one, or "replaced" when either file changed after the daemon started.
+// Notes: the daemon pins both SHA-256 digests at start, so any of these makes every session it
+// runs fail (a missing scrcpy-server crashes app_process with ClassNotFoundException).
+func DaemonOutdated(ctx context.Context, client *adb.Client, serial string) (string, error) {
+	helper, err := FindHelperJar()
+	if err != nil {
+		return "", err
+	}
+	srv, err := scrcpy.FindCachedServer()
+	if err != nil {
+		return "", err
+	}
+	want := map[string]string{}
+	for name, p := range map[string]string{"helper": helper, "scrcpy-server": srv} {
+		raw, err := os.ReadFile(p)
+		if err != nil {
+			return "", err
+		}
+		sum := sha256.Sum256(raw)
+		want[name] = hex.EncodeToString(sum[:])
+	}
+	// `[d]aemon` keeps pgrep from matching this very shell's command line.
+	script := fmt.Sprintf(`p=$(pgrep -f 'com.androfuse.dexhelper.Main [d]aemon' | head -n 1); `+
+		`if [ -n "$p" ]; then awk -v now="$(date +%%s)" -v st="$(cut -d' ' -f22 /proc/$p/stat)" -v hz="$(getconf CLK_TCK 2>/dev/null || echo 100)" '{printf "START=%%d\n", now-($1-st/hz)}' /proc/uptime; fi; `+
+		`for f in %s %s; do echo "FILE=$(stat -c %%Y $f 2>/dev/null) $(sha256sum $f 2>/dev/null | cut -d' ' -f1)"; done`,
+		RemoteHelperPath, scrcpy.RemoteServerPath)
+	out, err := client.Shell(ctx, serial, script)
+	if err != nil {
+		return "", err
+	}
+	return daemonOutdatedFrom(out, want["helper"], want["scrcpy-server"]), nil
+}
+
+// daemonOutdatedFrom evaluates DaemonOutdated's shell output against the local digests.
+func daemonOutdatedFrom(out, helperSHA, serverSHA string) string {
+	var start int64
+	var files []string
+	for _, l := range strings.Split(out, "\n") {
+		l = strings.TrimSpace(l)
+		if v, ok := strings.CutPrefix(l, "START="); ok {
+			start, _ = strconv.ParseInt(v, 10, 64)
+		} else if v, ok := strings.CutPrefix(l, "FILE="); ok {
+			files = append(files, v)
+		}
+	}
+	if start == 0 || len(files) != 2 {
+		return "" // no daemon running: the ready check starts one.
+	}
+	for i, name := range []string{"helper", "scrcpy-server"} {
+		mtime, sum, _ := strings.Cut(files[i], " ")
+		if sum == "" || !strings.EqualFold(sum, []string{helperSHA, serverSHA}[i]) {
+			return name
+		}
+		// A couple of seconds of slack: StartDaemon pushes right before it launches.
+		if t, err := strconv.ParseInt(mtime, 10, 64); err == nil && t > start+2 {
+			return "replaced"
+		}
+	}
+	return ""
 }

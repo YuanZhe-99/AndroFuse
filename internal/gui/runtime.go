@@ -14,6 +14,7 @@ import (
 
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -101,6 +102,35 @@ type guiRuntime struct {
 	micUplink       *avbridge.UplinkBridge
 	micUplinkCancel context.CancelFunc
 	recoverRan      bool
+	adbWork         context.Context    // parent of background adb work, cancelled before an update installs
+	adbWorkCancel   context.CancelFunc // cancels adbWork
+	updating        atomic.Bool        // an update is installing: no new adb work may start
+}
+
+// errUpdateInProgress is ensureADBAndLeases' answer while an update installs, so no adb server
+// restarts from the install directory the updater is replacing.
+var errUpdateInProgress = errors.New("an AndroFuse update is being installed")
+
+// adbWorkContext returns a context for background adb work that InstallUpdate can cancel
+// (cancelADBWork), bounded by timeout.
+func (a *App) adbWorkContext(timeout time.Duration) (context.Context, context.CancelFunc) {
+	a.rt.coreMu.Lock()
+	if a.rt.adbWork == nil {
+		a.rt.adbWork, a.rt.adbWorkCancel = context.WithCancel(context.Background())
+	}
+	parent := a.rt.adbWork
+	a.rt.coreMu.Unlock()
+	return context.WithTimeout(parent, timeout)
+}
+
+// cancelADBWork cancels every context adbWorkContext handed out so far.
+func (a *App) cancelADBWork() {
+	a.rt.coreMu.Lock()
+	if a.rt.adbWorkCancel != nil {
+		a.rt.adbWorkCancel()
+	}
+	a.rt.adbWork, a.rt.adbWorkCancel = context.WithCancel(context.Background())
+	a.rt.coreMu.Unlock()
 }
 
 func (a *App) ensureAndroidHost() *androidhost.Host {
@@ -118,6 +148,8 @@ func (a *App) ensureAndroidHost() *androidhost.Host {
 		})
 		if runtime.GOOS == "android" {
 			go a.rt.androidHost.AutoStart()
+			h := a.rt.androidHost
+			mygo.App.OnActivate(func(bool) { h.Resumed() })
 		}
 	}
 	h := a.rt.androidHost
@@ -327,6 +359,9 @@ func (a *App) ensureCoreLocked() (*core.Lib, error) {
 }
 
 func (a *App) ensureADBAndLeases() (*adb.Client, *lease.Store, error) {
+	if a.rt.updating.Load() {
+		return nil, nil, errUpdateInProgress
+	}
 	a.rt.coreMu.Lock()
 	defer a.rt.coreMu.Unlock()
 
@@ -933,7 +968,7 @@ func (a *App) LaunchMirror(d DiscoveredDevice, open OpenIn) {
 	wirelessADB := d.Target.Transport != adb.TransportUSB && d.Target.Transport != adb.TransportEmulator
 	if wirelessADB && a.prefersCompanion() {
 		if r, ok := a.RememberedFor(devKey); ok && r.Companion != nil {
-			a.LaunchShare(devKey, open)
+			a.LaunchCompanionMirror(devKey, open)
 			return
 		}
 	}
@@ -1858,7 +1893,7 @@ func (a *App) watchDevices(ctx context.Context) {
 }
 
 // fallbackToCompanion drops a dead wireless ADB target and immediately hands off to the paired
-// Companion (daemon desktop/DeX or mirror/share) instead of failing the launch.
+// Companion (daemon desktop/DeX or mirror) instead of failing the launch.
 func (a *App) fallbackToCompanion(devKey, serial string, desktop bool, open OpenIn) bool {
 	if devKey == "" {
 		return false
@@ -1872,7 +1907,7 @@ func (a *App) fallbackToCompanion(devKey, serial string, desktop bool, open Open
 	if desktop {
 		a.LaunchDaemonDesktop(devKey, open)
 	} else {
-		a.LaunchShare(devKey, open)
+		a.LaunchCompanionMirror(devKey, open)
 	}
 	return true
 }
@@ -1984,12 +2019,12 @@ func (a *App) wantsReconnect(devs []adb.Device) bool {
 	return false
 }
 
-// LaunchShare shows a remembered phone's screen through its Companion when Wireless debugging
-// cannot run (mobile data): the phone asks its user (Android's capture consent), then streams
-// H.264 in scrcpy framing over the Companion's TLS link, which the same decoder shows. Back, Home
-// and Recents go through the Companion's accessibility service; taps are not available.
+// LaunchCompanionMirror shows a remembered phone's whole screen, with touch and keys, through its
+// Companion and the attached UID 2000 daemon (`daemon.open`), without Wireless debugging. When
+// Enhanced mode is not running it opens the activation dialog, which shows the screen afterwards;
+// there is no view-only fallback.
 // Side effects: may add a mesh forward to reach the Companion; opens a session.
-func (a *App) LaunchShare(hash string, open OpenIn) {
+func (a *App) LaunchCompanionMirror(hash string, open OpenIn) {
 	r, ok := a.RememberedFor(hash)
 	if !ok || r.Companion == nil {
 		a.notify(L.CompanionNotPaired())
@@ -1997,7 +2032,7 @@ func (a *App) LaunchShare(hash string, open OpenIn) {
 	}
 	b := *r.Companion
 	name := r.displayName()
-	fail := func(err error) { a.setCardWork(hash, cardWork{Note: a.failed(L.CardShareFailed(name), err)}) }
+	fail := func(err error) { a.setCardWork(hash, cardWork{Note: a.failed(L.FailScreen(), err)}) }
 	a.setCardWork(hash, cardWork{Busy: L.CardReaching(name)})
 	go func() {
 		tok, err := openSecret(b.SealedToken)
@@ -2005,85 +2040,39 @@ func (a *App) LaunchShare(hash string, open OpenIn) {
 			fail(err)
 			return
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 		defer cancel()
 		keys, addr, err := a.findCompanion(ctx, hash, b, string(tok))
 		if err != nil {
 			fail(err)
 			return
 		}
-		if st, stErr := keys.GetStatus(ctx); stErr == nil && st.DaemonReady {
-			bitRate, maxFPS, maxSize, codecStr, codecID, _ := a.companionStreamProfile(b.MeshHost, addr, false)
-			vidConn, ctrlConn, dErr := companion.DialDaemonStream(ctx, addr, string(tok), b.Fingerprint, companion.DaemonStreamRequest{
-				MaxSize: maxSize,
-				BitRate: bitRate,
-				MaxFPS:  maxFPS,
-				Codec:   codecStr,
-				Control: true,
-			})
-			if dErr == nil {
-				_ = keys.Close()
-				a.setCardWork(hash, cardWork{})
-				a.rt.coreMu.Lock()
-				lib, lErr := a.ensureCoreLocked()
-				a.rt.coreMu.Unlock()
-				if lErr != nil {
-					_ = vidConn.Close()
-					if ctrlConn != nil {
-						_ = ctrlConn.Close()
-					}
-					a.notify(a.failed(L.FailEngine(), lErr))
-					return
-				}
-				sid := newSessionID("mirror")
-				sw := newSessionWindow(a, SessionSpec{
-					ID:           sid,
-					DeviceKey:    hash,
-					Title:        fmt.Sprintf("%s · %s (Companion)", r.displayName(), L.ModeMirrorTitle()),
-					Mode:         SessionModeMirror,
-					Open:         open,
-					Transport:    "Companion",
-					BackendLabel: L.ModeMirrorTitle(),
-					TargetSpec:   fmt.Sprintf("Display 0 · %d fps", maxFPS),
-					ScreenOffCap: true,
-				})
-				var vSess *scrcpy.Session
-				vSess, err = scrcpy.StartFromConns(lib, nil, nil, 0, 0, nil, vidConn, ctrlConn, true, scrcpy.LaunchConfig{
-					SessionID:     sid,
-					EnableControl: true,
-					MaxSize:       maxSize,
-					MaxFPS:        float64(maxFPS),
-					CodecID:       codecID,
-					InitialWidth:  1080,
-					InitialHeight: 1920,
-					OnFrame: func(f core.NV12Frame) {
-						if vSess != nil {
-							st := vSess.Stats()
-							sw.PushNV12(f, st.MeasuredFPS, st.AvgDecodeUs)
-						} else {
-							sw.PushNV12(f, 0, int64(f.DecodeUs))
-						}
-					},
-					OnClipboard: sw.OnDeviceClipboard,
-				})
-				if err != nil {
-					_ = vidConn.Close()
-					if ctrlConn != nil {
-						_ = ctrlConn.Close()
-					}
-					a.notify(a.failed(L.FailScreen(), err))
-					return
-				}
-				a.addSession(sw)
-				a.runOnMain(func() { sw.attachScrcpy(vSess, nil, mirrorDefW, mirrorDefH) })
-				return
-			}
-			_ = a.failed(L.FailScreen(), dErr)
-		}
-		a.setCardWork(hash, cardWork{Busy: L.ShareAsking(name)})
-		stream, err := companion.DialShare(ctx, addr, string(tok), b.Fingerprint)
+		st, err := keys.GetStatus(ctx)
+		_ = keys.Close()
 		if err != nil {
-			_ = keys.Close()
+			fail(err)
+			return
+		}
+		a.update(func() {
+			if a.peerStatus == nil {
+				a.peerStatus = make(map[string]companion.DeviceStatus)
+			}
+			a.peerStatus[hash] = st
+		})
+		if !st.DaemonReady {
+			a.setCardWork(hash, cardWork{})
+			a.OpenActivateModal(hash, openAsScreen)
+			return
+		}
+		bitRate, maxFPS, maxSize, codecStr, codecID, _ := a.companionStreamProfile(b.MeshHost, addr, false)
+		vidConn, ctrlConn, err := a.dialDaemonStream(ctx, hash, addr, string(tok), b.Fingerprint, companion.DaemonStreamRequest{
+			MaxSize: maxSize,
+			BitRate: bitRate,
+			MaxFPS:  maxFPS,
+			Codec:   codecStr,
+			Control: true,
+		})
+		if err != nil {
 			fail(err)
 			return
 		}
@@ -2092,40 +2081,34 @@ func (a *App) LaunchShare(hash string, open OpenIn) {
 		lib, lErr := a.ensureCoreLocked()
 		a.rt.coreMu.Unlock()
 		if lErr != nil {
-			_ = stream.Close()
+			_ = vidConn.Close()
+			if ctrlConn != nil {
+				_ = ctrlConn.Close()
+			}
 			a.notify(a.failed(L.FailEngine(), lErr))
 			return
 		}
-		sid := newSessionID("share")
+		sid := newSessionID("mirror")
 		sw := newSessionWindow(a, SessionSpec{
 			ID:           sid,
 			DeviceKey:    hash,
-			Title:        r.displayName(),
-			Mode:         SessionModeShare,
+			Title:        fmt.Sprintf("%s · %s (Companion)", name, L.ModeMirrorTitle()),
+			Mode:         SessionModeMirror,
 			Open:         open,
 			Transport:    "Companion",
-			BackendLabel: L.KindShare(),
-			TargetSpec:   "1280 · 30 fps",
-			OnClose: func() {
-				if keys != nil {
-					_ = keys.Close()
-				}
-			},
+			BackendLabel: L.ModeMirrorTitle(),
+			TargetSpec:   fmt.Sprintf("Display 0 · %d fps", maxFPS),
+			ScreenOffCap: true,
 		})
-		if keys != nil {
-			sw.shareKey = func(action string) {
-				kctx, kcancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer kcancel()
-				if err := keys.Key(kctx, action); err != nil {
-					sw.flashNote(err.Error())
-				}
-			}
-		}
 		var vSess *scrcpy.Session
-		vSess, err = scrcpy.StartFromConns(lib, nil, nil, 0, 0, nil, stream, nil, false, scrcpy.LaunchConfig{
+		vSess, err = scrcpy.StartFromConns(lib, nil, nil, 0, 0, nil, vidConn, ctrlConn, true, scrcpy.LaunchConfig{
 			SessionID:     sid,
-			InitialWidth:  720,
-			InitialHeight: 1280,
+			EnableControl: true,
+			MaxSize:       maxSize,
+			MaxFPS:        float64(maxFPS),
+			CodecID:       codecID,
+			InitialWidth:  1080,
+			InitialHeight: 1920,
 			OnFrame: func(f core.NV12Frame) {
 				if vSess != nil {
 					st := vSess.Stats()
@@ -2134,15 +2117,67 @@ func (a *App) LaunchShare(hash string, open OpenIn) {
 					sw.PushNV12(f, 0, int64(f.DecodeUs))
 				}
 			},
+			OnClipboard: sw.OnDeviceClipboard,
 		})
 		if err != nil {
-			_ = stream.Close()
+			_ = vidConn.Close()
+			if ctrlConn != nil {
+				_ = ctrlConn.Close()
+			}
 			a.notify(a.failed(L.FailScreen(), err))
 			return
 		}
 		a.addSession(sw)
 		a.runOnMain(func() { sw.attachScrcpy(vSess, nil, mirrorDefW, mirrorDefH) })
 	}()
+}
+
+// dialDaemonStream opens a `daemon.open` stream to hash's Companion and, when the phone's daemon
+// fails because its scrcpy-server or helper copy is missing or outdated (a crashed or refused
+// scrcpy-server), restarts Enhanced mode over adb once — when the phone is reachable over adb —
+// and tries again.
+// Side effects: may connect Wireless debugging and run dex.StartDaemon on the phone.
+func (a *App) dialDaemonStream(ctx context.Context, hash, addr, tok, fingerprint string, req companion.DaemonStreamRequest) (net.Conn, net.Conn, error) {
+	vid, ctrl, err := companion.DialDaemonStream(ctx, addr, tok, fingerprint, req)
+	if err == nil || !daemonCopiesBroken(err) {
+		return vid, ctrl, err
+	}
+	cand, ok := a.discoverAndConnectADB(ctx, hash, false)
+	if !ok {
+		return nil, nil, err
+	}
+	client, _, cErr := a.ensureADBAndLeases()
+	if cErr != nil {
+		return nil, nil, err
+	}
+	if sErr := dex.StartDaemon(ctx, client, cand.Serial, companionPackage); sErr != nil {
+		return nil, nil, fmt.Errorf("%w (restarting Enhanced mode: %v)", err, sErr)
+	}
+	// The new daemon hands its Binder to the Companion within a few seconds.
+	for range 20 {
+		if c, dErr := companion.Dial(ctx, addr, tok, fingerprint); dErr == nil {
+			st, sErr := c.GetStatus(ctx)
+			_ = c.Close()
+			if sErr == nil && st.DaemonReady {
+				break
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return nil, nil, err
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+	return companion.DialDaemonStream(ctx, addr, tok, fingerprint, req)
+}
+
+// daemonCopiesBroken reports whether a `daemon.open` error comes from the daemon's own
+// scrcpy-server or helper copy (missing, deleted or replaced), which restarting it repairs.
+func daemonCopiesBroken(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, "scrcpy-server exited prematurely") ||
+		strings.Contains(msg, "scrcpy-server verification failed") ||
+		strings.Contains(msg, "JAR integrity mismatch")
 }
 
 // LaunchDaemonDesktop opens a 1920x1080 virtual desktop / Samsung DeX display through the
@@ -2198,7 +2233,7 @@ func (a *App) LaunchDaemonDesktop(hash string, open OpenIn) {
 			label             = L.KindDeXFallback()
 		)
 		if isSamsung {
-			vidConn, ctrlConn, err = companion.DialDaemonStream(ctx, addr, string(tok), b.Fingerprint, companion.DaemonStreamRequest{
+			vidConn, ctrlConn, err = a.dialDaemonStream(ctx, hash, addr, string(tok), b.Fingerprint, companion.DaemonStreamRequest{
 				BitRate:    bitRate,
 				MaxFPS:     maxFPS,
 				Codec:      codecStr,
@@ -2213,7 +2248,7 @@ func (a *App) LaunchDaemonDesktop(hash string, open OpenIn) {
 			}
 		}
 		if vidConn == nil {
-			vidConn, ctrlConn, err = companion.DialDaemonStream(ctx, addr, string(tok), b.Fingerprint, companion.DaemonStreamRequest{
+			vidConn, ctrlConn, err = a.dialDaemonStream(ctx, hash, addr, string(tok), b.Fingerprint, companion.DaemonStreamRequest{
 				BitRate:     bitRate,
 				MaxFPS:      maxFPS,
 				Codec:       codecStr,
@@ -2349,9 +2384,9 @@ func (a *App) LaunchDaemonAppWindow(hash string, app adb.AppEntry, open OpenIn) 
 			return
 		}
 
-		bitRate, maxFPS, _, codecStr, codecID, _ := a.companionStreamProfile(b.MeshHost, addr, false)
+		bitRate, maxFPS, maxSize, codecStr, codecID, _ := a.companionStreamProfile(b.MeshHost, addr, false)
 		newDisp := fmt.Sprintf("%dx%d/%d", appWinInitW, appWinInitH, appWinInitDPI)
-		vidConn, ctrlConn, err := companion.DialDaemonStream(ctx, addr, string(tok), b.Fingerprint, companion.DaemonStreamRequest{
+		vidConn, ctrlConn, err := a.dialDaemonStream(ctx, hash, addr, string(tok), b.Fingerprint, companion.DaemonStreamRequest{
 			BitRate:               bitRate,
 			MaxFPS:                maxFPS,
 			Codec:                 codecStr,
@@ -2389,6 +2424,7 @@ func (a *App) LaunchDaemonAppWindow(hash string, app adb.AppEntry, open OpenIn) 
 			BackendLabel: label,
 			TargetSpec:   fmt.Sprintf("%d×%d flex · %d fps", appWinInitW, appWinInitH, maxFPS),
 			AllowResize:  true,
+			MaxSize:      maxSize,
 			ScreenOffCap: true,
 			AppIcon:      icon,
 			AppPackage:   pkg,
