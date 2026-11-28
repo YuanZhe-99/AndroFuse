@@ -845,7 +845,7 @@ func (a *App) offlineCard(c *ui.Context, k tokens, r RememberedDevice) {
 					if m.Item(L.KindAppMenu()).Chosen() {
 						if daemonAppsOK {
 							if len(cachedApps) == 0 {
-								go a.fetchCompanionApps(r.HardwareHash)
+								go a.fetchApps(r.HardwareHash, false)
 							}
 							a.openPicker(openAsApp, r.HardwareHash)
 						} else {
@@ -976,7 +976,7 @@ func (a *App) offlineCard(c *ui.Context, k tokens, r RememberedDevice) {
 					}
 					if hasApps && iconBtn(c, key+"-apps", iconApps, L.KindApp(), false).Disabled(busy).Clicked() {
 						if len(cachedApps) == 0 {
-							go a.fetchCompanionApps(r.HardwareHash)
+							go a.fetchApps(r.HardwareHash, false)
 						}
 						a.openPicker(openAsApp, r.HardwareHash)
 					}

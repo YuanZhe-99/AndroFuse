@@ -40,3 +40,4 @@ Authoritative English → Simplified Chinese glossary for AndroFuse documentatio
 | Android emulator | Android 模拟器 | An emulator found over adb (never its AVD name) |
 | Direct / Relayed | 直连 / 中继 | How a network peer is reached |
 | Remembered phones | 记住的手机 | `devices.json` |
+| Reload apps | 重新获取应用 | App picker action that re-fetches app names and icons |

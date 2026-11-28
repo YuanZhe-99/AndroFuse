@@ -525,6 +525,8 @@
   "ActionReconnectNow": "立即重连",
   "CardActivatingEnhanced": "正在为 {name} 激活增强协同…",
   "PickerLoadingApps": "正在从手机获取应用列表…",
+  "ActionReloadApps": "重新获取应用、名称和图标",
+  "AppsLoadFailed": "无法获取这台手机的应用及其名称和图标。",
   "NetworkPairConnect": "配对并连接",
   "NetworkPairCardHint": "点击后会在手机上弹出配对提醒，无需 USB 线。",
   "MeshPairStarting": "正在通过跨网络连接 {name}…",

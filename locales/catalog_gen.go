@@ -5306,6 +5306,26 @@ func (msgs Messages) PickerLoadingApps() string {
 	return Catalog.Format(msgs.locale, "PickerLoadingApps", nil)
 }
 
+// ActionReloadApps says "Reload apps, names and icons"
+// in the language the app shows.
+func ActionReloadApps() string { return In(i18n.Locale()).ActionReloadApps() }
+
+// ActionReloadApps says "Reload apps, names and icons"
+// in the language of msgs.
+func (msgs Messages) ActionReloadApps() string {
+	return Catalog.Format(msgs.locale, "ActionReloadApps", nil)
+}
+
+// AppsLoadFailed says "Couldn't get this phone's apps with their names and icons."
+// in the language the app shows.
+func AppsLoadFailed() string { return In(i18n.Locale()).AppsLoadFailed() }
+
+// AppsLoadFailed says "Couldn't get this phone's apps with their names and icons."
+// in the language of msgs.
+func (msgs Messages) AppsLoadFailed() string {
+	return Catalog.Format(msgs.locale, "AppsLoadFailed", nil)
+}
+
 // NetworkPairConnect says "Pair & connect"
 // in the language the app shows.
 func NetworkPairConnect() string { return In(i18n.Locale()).NetworkPairConnect() }

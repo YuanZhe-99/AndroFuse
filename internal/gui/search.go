@@ -84,7 +84,7 @@ func (a *App) pickerPopover(c *ui.Context, anchor ui.Element) {
 		if p.Kind == openAsApp && p.Device != "" {
 			for _, d := range devs {
 				if d.HardwareHash == p.Device {
-					a.appPickerFor(c, k, a.phoneName(d), d.Apps, func(ap adb.AppEntry) {
+					a.appPickerFor(c, k, d.HardwareHash, a.phoneName(d), d.Apps, func(ap adb.AppEntry) {
 						a.LaunchAppWindow(d, ap, a.pickerOpenIn())
 					})
 					return
@@ -94,15 +94,15 @@ func (a *App) pickerPopover(c *ui.Context, anchor ui.Element) {
 				apps := a.appsForDevice(r.HardwareHash)
 				if len(apps) > 0 {
 					if a.needsCompanionAppFetch(r.HardwareHash) {
-						go a.fetchCompanionApps(r.HardwareHash)
+						go a.fetchApps(r.HardwareHash, false)
 					}
-					a.appPickerFor(c, k, r.displayName(), apps, func(ap adb.AppEntry) {
+					a.appPickerFor(c, k, r.HardwareHash, r.displayName(), apps, func(ap adb.AppEntry) {
 						a.LaunchDaemonAppWindow(r.HardwareHash, ap, a.pickerOpenIn())
 					})
 					return
 				}
-				go a.fetchCompanionApps(r.HardwareHash)
-				a.appPickerLoading(c, k, r.displayName())
+				go a.fetchApps(r.HardwareHash, false)
+				a.appPickerLoading(c, k, r.HardwareHash, r.displayName())
 				return
 			}
 		}
@@ -197,7 +197,7 @@ func (a *App) pickerPopover(c *ui.Context, anchor ui.Element) {
 								phoneAvatar(c, 32, phoneLogo(r.Maker, r.Brand, r.Model, r.Name), nil, r.displayName())
 							}, r.displayName(), L.KindApp(), true, func() {
 								if len(apps) == 0 || a.needsCompanionAppFetch(r.HardwareHash) {
-									go a.fetchCompanionApps(r.HardwareHash)
+									go a.fetchApps(r.HardwareHash, false)
 								}
 								a.update(func() { a.picker.Device = r.HardwareHash; a.picker.Query = "" })
 							})
@@ -282,14 +282,9 @@ func (a *App) openKind(d DiscoveredDevice, kind int, open OpenIn) {
 }
 
 // appPickerFor is the picker's app grid for one phone: a search, user apps first, a tile per app.
-func (a *App) appPickerFor(c *ui.Context, k tokens, phoneTitle string, apps []adb.AppEntry, onLaunch func(adb.AppEntry)) {
+func (a *App) appPickerFor(c *ui.Context, k tokens, hash, phoneTitle string, apps []adb.AppEntry, onLaunch func(adb.AppEntry)) {
 	t := c.Theme()
-	ui.Row(c.Key("apps-head")).FillWidth().Gap(6).AlignItems(ui.Center).Children(func() {
-		if iconBtn(c, "apps-back", iconBack, L.ActionBack(), false).Clicked() {
-			a.update(func() { a.picker.Device = "" })
-		}
-		ui.Text(c, phoneTitle).Bold().FontSize(sizeBody).Grow(1).SingleLine()
-	})
+	a.appPickerHead(c, k, hash, phoneTitle)
 	ui.TextInput(c.Key("apps-q"), &a.picker.Query).Placeholder(L.AppFilterHint()).FillWidth().AutoFocus()
 	a.mu.Lock()
 	query := strings.ToLower(strings.TrimSpace(a.picker.Query))
@@ -337,13 +332,34 @@ func (a *App) appPickerFor(c *ui.Context, k tokens, phoneTitle string, apps []ad
 	a.pickerFoot(c, k)
 }
 
-func (a *App) appPickerLoading(c *ui.Context, k tokens, phoneTitle string) {
+// appPickerHead is the top of the picker's app grid: Back, the phone's name, and Reload apps,
+// which fetches the list, names and icons again (fetchApps); under it, why the last fetch failed.
+func (a *App) appPickerHead(c *ui.Context, k tokens, hash, phoneTitle string) {
+	st := a.appsFetchFor(hash)
 	ui.Row(c.Key("apps-head")).FillWidth().Gap(6).AlignItems(ui.Center).Children(func() {
 		if iconBtn(c, "apps-back", iconBack, L.ActionBack(), false).Clicked() {
 			a.update(func() { a.picker.Device = "" })
 		}
 		ui.Text(c, phoneTitle).Bold().FontSize(sizeBody).Grow(1).SingleLine()
+		if st.Busy {
+			ui.Box(c.Key("apps-reloading")).Size(iconButton, iconButton).Center().Children(func() {
+				ui.Spinner(c).Size(16, 16)
+			})
+		} else if iconBtn(c, "apps-reload", iconRefresh, L.ActionReloadApps(), false).Clicked() {
+			go a.fetchApps(hash, true)
+		}
 	})
+	if !st.Busy && st.Err != "" {
+		ui.Text(c.Key("apps-err"), st.Err).FontSize(sizeSmall).TextColor(k.badText).FillWidth()
+	}
+}
+
+func (a *App) appPickerLoading(c *ui.Context, k tokens, hash, phoneTitle string) {
+	a.appPickerHead(c, k, hash, phoneTitle)
+	if st := a.appsFetchFor(hash); !st.Busy && st.Err != "" {
+		a.pickerFoot(c, k)
+		return
+	}
 	ui.Row(c.Key("apps-loading")).FillWidth().Padding(24, 12).Gap(10).AlignItems(ui.Center).Justify(ui.Center).Children(func() {
 		ui.Spinner(c).Size(16, 16)
 		ui.Text(c, L.PickerLoadingApps()).FontSize(sizeSmall).TextColor(k.text2)

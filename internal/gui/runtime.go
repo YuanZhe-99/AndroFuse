@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"os"
 	"path/filepath"
@@ -95,7 +96,6 @@ type guiRuntime struct {
 	tunnelAddrs     map[string]string             // each tunnel's loopback adb address, by HardwareHash
 	portScanTried   map[string]time.Time          // last Wireless debugging port-range scan per phone
 	maintTried      map[string]time.Time          // last automatic APK/daemon self-heal attempt per phone
-	fetchingApps    map[string]bool               // active Companion apps.list RPCs by HardwareHash
 	localAPKPath    string
 	localAPKHash    string
 	synced          map[string]bool // phones whose Companion was checked since they came online (syncCompanions)
@@ -724,25 +724,10 @@ func (a *App) RefreshDevices() {
 				if iconKey == "" {
 					iconKey = d.DeviceHash
 				}
-				iconDir := a.deviceIconDir(iconKey)
-				apps, aErr := dex.ListAppsWithIcons(ctx, client, d.Serial, iconDir)
-				if aErr != nil {
-					apps, aErr = client.ListLaunchableApps(ctx, d.Serial)
-				}
-				if aErr == nil {
-					item.Apps = apps
-					a.saveDeviceApps(iconKey, apps)
-					for _, ap := range apps {
-						if ap.IconPath == "" || decodedIcons[ap.IconPath] != nil {
-							continue
-						}
-						if raw, rErr := os.ReadFile(ap.IconPath); rErr == nil {
-							if bmp, bErr := ui.DecodeBitmap(raw); bErr == nil {
-								decodedIcons[ap.IconPath] = bmp
-							}
-						}
-					}
-				}
+				apps, icons, aErr := a.adbApps(ctx, client, d.Serial, iconKey)
+				item.Apps = apps
+				maps.Copy(decodedIcons, icons)
+				a.noteAppsResult(iconKey, aErr, false)
 			}
 			inspected = append(inspected, item)
 		}

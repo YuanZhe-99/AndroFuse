@@ -3,6 +3,8 @@ package gui
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"maps"
 	"net"
 	"os"
 	"path/filepath"
@@ -14,6 +16,7 @@ import (
 
 	"github.com/YuanZhe-99/AndroFuse/internal/adb"
 	"github.com/YuanZhe-99/AndroFuse/internal/companion"
+	"github.com/YuanZhe-99/AndroFuse/internal/dex"
 	"github.com/YuanZhe-99/AndroFuse/internal/mesh"
 	L "github.com/YuanZhe-99/AndroFuse/locales"
 )
@@ -762,25 +765,200 @@ func (a *App) appsForDevice(hash string) []adb.AppEntry {
 	return a.loadDeviceAppsLocked(hash)
 }
 
-// needsCompanionAppFetch reports whether hash lacks a cached app list or lacks any cached PNG
-// app icons (so Enhanced mode should refresh icons from Companion).
+// needsCompanionAppFetch reports whether hash lacks a cached app list or whether more than a
+// quarter of its apps have no cached icon, which is how a list without names and icons looks
+// (the adb fallback, `ListLaunchableApps`), so Enhanced mode should fetch it again.
 func (a *App) needsCompanionAppFetch(hash string) bool {
 	apps := a.appsForDevice(hash)
-	if len(apps) == 0 {
-		return true
-	}
-	hasUserApps := false
+	return len(apps) == 0 || 4*appsWithoutIcon(apps) > len(apps)
+}
+
+// appsWithoutIcon counts the apps whose cached icon file is missing or empty.
+func appsWithoutIcon(apps []adb.AppEntry) int {
+	n := 0
 	for _, ap := range apps {
-		if !ap.System {
-			hasUserApps = true
+		if ap.IconPath == "" {
+			n++
+		} else if info, err := os.Stat(ap.IconPath); err != nil || info.Size() == 0 {
+			n++
 		}
+	}
+	return n
+}
+
+// withCachedDetails returns fresh with every app it lists without an icon given the name and icon
+// cached lists for it, so a package-name-only list never replaces names and icons already fetched.
+func withCachedDetails(fresh, cached []adb.AppEntry) []adb.AppEntry {
+	known := make(map[string]adb.AppEntry, len(cached))
+	for _, ap := range cached {
 		if ap.IconPath != "" {
-			if info, err := os.Stat(ap.IconPath); err == nil && info.Size() > 0 {
-				return false
+			known[ap.Package] = ap
+		}
+	}
+	out := make([]adb.AppEntry, len(fresh))
+	for i, ap := range fresh {
+		if old, ok := known[ap.Package]; ok && ap.IconPath == "" {
+			ap.Label, ap.IconPath, ap.System, ap.Resizeable = old.Label, old.IconPath, old.System, old.Resizeable
+		}
+		out[i] = ap
+	}
+	return out
+}
+
+// appsFetchState is how fetching one phone's app list is going, for the + picker.
+type appsFetchState struct {
+	Busy bool
+	Err  string    // plain words for the last failure (with where the details are); "" after a success
+	At   time.Time // when the last fetchApps ended
+}
+
+// appsRetryAfter is how long an automatic app list fetch waits after the last one; the picker's
+// reload button does not wait.
+const appsRetryAfter = 20 * time.Second
+
+// errNoAppSource is fetchApps' failure when the phone is neither online over adb nor paired with
+// Companion.
+var errNoAppSource = errors.New("the phone is not connected over adb or paired with Companion")
+
+// fetchApps fetches hash's app list, names and icons. Automatic fetches (force false) go through
+// Enhanced mode only (the adb scan lists apps itself) and wait appsRetryAfter after the last one;
+// the picker's reload button (force true) tries adb first when the phone is online there, then
+// Enhanced mode, and downloads every icon again.
+// Side effects: replaces the cached list and icons; keeps the outcome in a.appsFetch and, for a
+// failure, in the log Save logs writes.
+func (a *App) fetchApps(hash string, force bool) {
+	r, paired := a.RememberedFor(hash)
+	paired = paired && r.Companion != nil
+	if hash == "" || (!force && !paired) {
+		return
+	}
+	a.mu.Lock()
+	if a.appsFetch == nil {
+		a.appsFetch = make(map[string]appsFetchState)
+	}
+	st := a.appsFetch[hash]
+	if st.Busy || (!force && time.Since(st.At) < appsRetryAfter) {
+		a.mu.Unlock()
+		return
+	}
+	st.Busy = true
+	a.appsFetch[hash] = st
+	a.mu.Unlock()
+	a.update(func() {})
+
+	err := errNoAppSource
+	if d, ok := a.adbOnline(hash); ok && force {
+		err = a.refreshADBApps(hash, d.Target.Serial)
+	}
+	if err != nil && paired {
+		err = a.fetchCompanionApps(hash, *r.Companion, force)
+	}
+	a.mu.Lock()
+	st = a.appsFetch[hash]
+	st.Busy, st.At = false, time.Now()
+	a.appsFetch[hash] = st
+	a.mu.Unlock()
+	a.noteAppsResult(hash, err, force)
+}
+
+// noteAppsResult keeps how an app list fetch for hash went: a success clears the failure; a
+// failure is logged when always is set or no failure is showing yet, so a periodic adb scan that
+// keeps failing logs it once.
+func (a *App) noteAppsResult(hash string, err error, always bool) {
+	a.update(func() {
+		if a.appsFetch == nil {
+			a.appsFetch = make(map[string]appsFetchState)
+		}
+		st := a.appsFetch[hash]
+		switch {
+		case err == nil:
+			st.Err = ""
+		case always || st.Err == "":
+			st.Err = a.failed(L.AppsLoadFailed(), err)
+		}
+		a.appsFetch[hash] = st
+	})
+}
+
+// appsFetchFor returns how fetching hash's app list is going.
+func (a *App) appsFetchFor(hash string) appsFetchState {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.appsFetch[hash]
+}
+
+// adbOnline returns the scanned phone hash is, when it is online over adb.
+func (a *App) adbOnline(hash string) (DiscoveredDevice, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, d := range a.devices {
+		if d.HardwareHash == hash && d.Target.State == "device" {
+			return d, true
+		}
+	}
+	return DiscoveredDevice{}, false
+}
+
+// adbApps lists serial's apps over adb with the helper (real names and icons into key's icon
+// cache); when the helper fails it lists package names only, keeping the names and icons already
+// cached for them (withCachedDetails), and returns the helper's error with that list.
+// Side effects: saves the list as key's cache.
+func (a *App) adbApps(ctx context.Context, client *adb.Client, serial, key string) ([]adb.AppEntry, map[string]*ui.Bitmap, error) {
+	apps, err := dex.ListAppsWithIcons(ctx, client, serial, a.deviceIconDir(key))
+	if err != nil {
+		bare, bErr := client.ListLaunchableApps(ctx, serial)
+		if bErr != nil {
+			return nil, nil, err
+		}
+		a.mu.Lock()
+		cached := a.loadDeviceAppsLocked(key)
+		a.mu.Unlock()
+		apps = withCachedDetails(bare, cached)
+	}
+	a.saveDeviceApps(key, apps)
+	icons := make(map[string]*ui.Bitmap)
+	for _, ap := range apps {
+		if ap.IconPath == "" || icons[ap.IconPath] != nil {
+			continue
+		}
+		if raw, rErr := os.ReadFile(ap.IconPath); rErr == nil {
+			if bmp, bErr := ui.DecodeBitmap(raw); bErr == nil {
+				icons[ap.IconPath] = bmp
 			}
 		}
 	}
-	return hasUserApps || len(apps) > 0
+	return apps, icons, err
+}
+
+// refreshADBApps lists hash's apps again over adb and shows them on its scanned phone.
+func (a *App) refreshADBApps(hash, serial string) error {
+	client, _, err := a.ensureADBAndLeases()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := a.adbWorkContext(40 * time.Second)
+	defer cancel()
+	apps, icons, err := a.adbApps(ctx, client, serial, hash)
+	if len(apps) > 0 {
+		a.showApps(hash, apps, icons)
+	}
+	return err
+}
+
+// showApps puts a fetched app list on hash's scanned phone and its icons in the icon cache, so
+// a live list never hides a better one fetched another way.
+func (a *App) showApps(hash string, apps []adb.AppEntry, icons map[string]*ui.Bitmap) {
+	a.update(func() {
+		for i := range a.devices {
+			if a.devices[i].HardwareHash == hash {
+				a.devices[i].Apps = apps
+			}
+		}
+		if a.appIcons == nil {
+			a.appIcons = make(map[string]*ui.Bitmap)
+		}
+		maps.Copy(a.appIcons, icons)
+	})
 }
 
 // findCachedApp looks up the metadata/icon entry for pkg on hash.

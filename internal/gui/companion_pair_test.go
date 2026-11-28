@@ -8,9 +8,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/egoist/mygo/ui"
+
 	"github.com/YuanZhe-99/AndroFuse/internal/adb"
 	"github.com/YuanZhe-99/AndroFuse/internal/companion"
 	"github.com/YuanZhe-99/AndroFuse/internal/mesh"
+	L "github.com/YuanZhe-99/AndroFuse/locales"
 )
 
 // TestPeersForPhone checks that relays pass through and a wildcard listener becomes one dialable
@@ -208,5 +211,93 @@ func TestCacheKeySanitizationAndAppIconMigration(t *testing.T) {
 	}
 	if _, err := os.Stat(migrated[0].IconPath); err != nil {
 		t.Fatalf("expected migrated icon file to exist: %v", err)
+	}
+}
+
+// TestBareAppListKeepsNamesAndIcons checks that a package-name-only list (the adb fallback) takes
+// the names and icons already cached, and that such a list asks Enhanced mode for a new one.
+func TestBareAppListKeepsNamesAndIcons(t *testing.T) {
+	a := testApp(t)
+	a.devices = nil // a computer that reaches the phone through Companion only
+	hash := "0123456789abcdef"
+	dir := a.deviceIconDir(hash)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	icon := filepath.Join(dir, "com.sec.android.app.clockpackage.png")
+	if err := os.WriteFile(icon, []byte("png"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cached := []adb.AppEntry{{Package: "com.sec.android.app.clockpackage", Label: "Clock", IconPath: icon, System: true}}
+	bare := []adb.AppEntry{
+		{Package: "com.sec.android.app.clockpackage", Label: "Clockpackage", Resizeable: true},
+		{Package: "org.telegram.messenger", Label: "Messenger", Resizeable: true},
+	}
+	got := withCachedDetails(bare, cached)
+	if got[0].Label != "Clock" || got[0].IconPath != icon || !got[0].System {
+		t.Fatalf("cached name and icon must survive a bare list, got %+v", got[0])
+	}
+	if got[1].Label != "Messenger" || got[1].IconPath != "" {
+		t.Fatalf("an app the cache lacks stays as listed, got %+v", got[1])
+	}
+
+	a.saveDeviceApps(hash, bare)
+	if !a.needsCompanionAppFetch(hash) {
+		t.Fatal("a list without icons must be fetched again")
+	}
+	a.saveDeviceApps(hash, got)
+	if !a.needsCompanionAppFetch(hash) {
+		t.Fatal("half the apps without icons must still be fetched again")
+	}
+	a.saveDeviceApps(hash, got[:1])
+	if a.needsCompanionAppFetch(hash) {
+		t.Fatal("a list with its icons needs no new fetch")
+	}
+}
+
+// TestFetchAppsReportsFailure checks that a reload with no way to reach the phone says so, and
+// that an automatic fetch waits after the last attempt instead of retrying every frame.
+func TestFetchAppsReportsFailure(t *testing.T) {
+	a := testApp(t)
+	a.fetchApps("xiaomi-14", true)
+	st := a.appsFetchFor("xiaomi-14")
+	if st.Busy || st.At.IsZero() || !strings.Contains(st.Err, L.AppsLoadFailed()) {
+		t.Fatalf("a failed reload must end with plain words, got %+v", st)
+	}
+	if logs := a.recentErrors(); len(logs) == 0 || !strings.Contains(logs[len(logs)-1], errNoAppSource.Error()) {
+		t.Fatalf("Save logs must keep why, got %q", logs)
+	}
+
+	a.appsFetch["0123456789abcdef"] = appsFetchState{Err: "earlier", At: time.Now()}
+	a.fetchApps("0123456789abcdef", false)
+	if st := a.appsFetchFor("0123456789abcdef"); st.Err != "earlier" || st.Busy {
+		t.Fatalf("an automatic fetch right after the last one must wait, got %+v", st)
+	}
+}
+
+// TestAppPickerReloadAndFailure checks that the picker's app grid offers Reload apps and shows
+// why the last fetch failed, also in place of the endless loading row when nothing is cached.
+func TestAppPickerReloadAndFailure(t *testing.T) {
+	for _, cachedList := range []bool{true, false} {
+		a := testApp(t)
+		a.devices = nil
+		hash := "0123456789abcdef"
+		if cachedList {
+			a.saveDeviceApps(hash, []adb.AppEntry{{Package: "org.telegram.messenger", Label: "Telegram"}})
+		}
+		a.appsFetch[hash] = appsFetchState{Err: "Fetch failed here.", At: time.Now()}
+		a.picker = pickerState{Open: true, Kind: openAsApp, Device: hash}
+		tt := ui.NewTester(a.view, mainDefW, mainDefH)
+		tt.Frame()
+		tt.Frame()
+		if _, ok := tt.Find(L.ActionReloadApps()); !ok {
+			t.Fatalf("cached=%v: the app grid must offer %q", cachedList, L.ActionReloadApps())
+		}
+		if !tt.HasText("Fetch failed here.") {
+			t.Fatalf("cached=%v: the app grid must say why the last fetch failed", cachedList)
+		}
+		if !cachedList && tt.HasText(L.PickerLoadingApps()) {
+			t.Fatal("a failed fetch must replace the loading row")
+		}
 	}
 }

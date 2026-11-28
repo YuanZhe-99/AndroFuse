@@ -596,6 +596,8 @@
   "CardActivatingEnhanced": "Activating Enhanced mode on {name}…",
   "@CardActivatingEnhanced": {"placeholders":{"name":{"type":"String"}}},
   "PickerLoadingApps": "Loading apps from phone…",
+  "ActionReloadApps": "Reload apps, names and icons",
+  "AppsLoadFailed": "Couldn't get this phone's apps with their names and icons.",
   "NetworkPairConnect": "Pair & connect",
   "NetworkPairCardHint": "Sends a pairing prompt to the phone — no USB cable needed.",
   "MeshPairStarting": "Reaching {name} over the network…",

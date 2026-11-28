@@ -40,3 +40,4 @@ AndroFuse 文档（`doc/en-us/` → `doc/zh-cn/`）的权威英文→简体中�
 | Android emulator | Android 模拟器 | 经 adb 发现的模拟器（不显示 AVD 名称） |
 | Direct / Relayed | 直连 / 中继 | 网络对端的连接方式 |
 | Remembered phones | 记住的手机 | `devices.json` |
+| Reload apps | 重新获取应用 | 应用选择器中重新拉取应用名称与图标的操作 |

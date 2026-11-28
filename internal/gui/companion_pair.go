@@ -990,48 +990,37 @@ func phoneNeedsAction(st companion.DeviceStatus, localHash string, onlineADB, al
 
 // fetchCompanionApps populates the per-device app list and 96x96 PNG icons directly from
 // Companion Enhanced mode (`apps.list`), requesting only icons missing from disk (`known_icons`)
-// so Independent App Windows and the App Launcher Grid have real icons without ADB.
-func (a *App) fetchCompanionApps(hash string) {
-	r, ok := a.RememberedFor(hash)
-	if !ok || r.Companion == nil {
-		return
-	}
-	a.rt.coreMu.Lock()
-	if a.rt.fetchingApps == nil {
-		a.rt.fetchingApps = map[string]bool{}
-	}
-	if a.rt.fetchingApps[hash] {
-		a.rt.coreMu.Unlock()
-		return
-	}
-	a.rt.fetchingApps[hash] = true
-	a.rt.coreMu.Unlock()
-	defer func() {
-		a.rt.coreMu.Lock()
-		delete(a.rt.fetchingApps, hash)
-		a.rt.coreMu.Unlock()
-	}()
-
-	tok, err := openSecret(r.Companion.SealedToken)
+// so Independent App Windows and the App Launcher Grid have real icons without ADB. With
+// allIcons set it asks for every icon again, so a damaged icon cache is replaced. Run it through
+// fetchApps, which keeps one fetch per phone.
+// Returns: why no list arrived, or nil once the list is saved and shown.
+func (a *App) fetchCompanionApps(hash string, b CompanionBinding, allIcons bool) error {
+	tok, err := openSecret(b.SealedToken)
 	if err != nil {
-		return
+		return err
 	}
 	iconDir := a.deviceIconDir(hash)
 	if iconDir != "" {
 		_ = os.MkdirAll(iconDir, 0o755)
 	}
-	knownIcons := existingCachedIconPackages(a.appsForDevice(hash), iconDir)
+	var knownIcons []string
+	if !allIcons {
+		knownIcons = existingCachedIconPackages(a.appsForDevice(hash), iconDir)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
 	defer cancel()
-	c, _, err := a.findCompanion(ctx, hash, *r.Companion, string(tok))
+	c, _, err := a.findCompanion(ctx, hash, b, string(tok))
 	if err != nil {
-		return
+		return fmt.Errorf("reach Companion: %w", err)
 	}
-	list, lErr := c.ListAppsWithKnown(ctx, knownIcons)
+	list, err := c.ListAppsWithKnown(ctx, knownIcons)
 	_ = c.Close()
-	if lErr != nil || len(list) == 0 {
-		return
+	if err != nil {
+		return fmt.Errorf("apps.list: %w", err)
+	}
+	if len(list) == 0 {
+		return errors.New("apps.list: Enhanced mode returned no apps (is its daemon running?)")
 	}
 
 	apps := make([]adb.AppEntry, 0, len(list))
@@ -1077,7 +1066,7 @@ func (a *App) fetchCompanionApps(hash string) {
 		apps = append(apps, entry)
 	}
 	if len(apps) == 0 {
-		return
+		return errors.New("apps.list: every listed app was filtered out")
 	}
 	slices.SortFunc(apps, func(x, y adb.AppEntry) int {
 		if d := strings.Compare(strings.ToLower(x.Label), strings.ToLower(y.Label)); d != 0 {
@@ -1086,15 +1075,9 @@ func (a *App) fetchCompanionApps(hash string) {
 		return strings.Compare(x.Package, y.Package)
 	})
 	a.saveDeviceApps(hash, apps)
-	a.update(func() {
-		if a.appIcons == nil {
-			a.appIcons = make(map[string]*ui.Bitmap)
-		}
-		for p, bmp := range decoded {
-			a.appIcons[p] = bmp
-		}
-	})
+	a.showApps(hash, apps, decoded)
 	a.backfillSessionAppIcons(hash, decodedByPkg)
+	return nil
 }
 
 func existingCachedIconPackages(cached []adb.AppEntry, iconDir string) []string {
@@ -1207,7 +1190,7 @@ func (a *App) checkCompanionHealthOnce(ctx context.Context, r RememberedDevice) 
 
 func (a *App) ensurePhoneReady(ctx context.Context, r RememberedDevice, st companion.DeviceStatus) {
 	if st.DaemonReady && a.needsCompanionAppFetch(r.HardwareHash) {
-		go a.fetchCompanionApps(r.HardwareHash)
+		go a.fetchApps(r.HardwareHash, false)
 	}
 	if a.activate.Open && a.activate.Hash == r.HardwareHash && st.DaemonReady {
 		a.update(func() {
@@ -1280,7 +1263,7 @@ func (a *App) bootstrapDaemonOverSerial(ctx context.Context, client *adb.Client,
 								a.peerStatus[r.HardwareHash] = st
 							})
 							if st.DaemonReady {
-								go a.fetchCompanionApps(r.HardwareHash)
+								go a.fetchApps(r.HardwareHash, false)
 							}
 						}
 						_ = c.Close()

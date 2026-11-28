@@ -111,6 +111,7 @@ type App struct {
 	deviceNotice    string
 	appIcons        map[string]*ui.Bitmap
 	cachedApps      map[string][]adb.AppEntry
+	appsFetch       map[string]appsFetchState // how fetching each phone's app list is going, by HardwareHash
 	dexRoutes       map[string]dex.RoutePreference
 	vmStatus        vm.Status
 
@@ -200,6 +201,7 @@ func New(profile, stateDir string) *App {
 		page:          pageHome,
 		appIcons:      make(map[string]*ui.Bitmap),
 		cachedApps:    make(map[string][]adb.AppEntry),
+		appsFetch:     make(map[string]appsFetchState),
 		peerStatus:    make(map[string]companion.DeviceStatus),
 		dexRoutes:     make(map[string]dex.RoutePreference),
 		adbAuthNeeded: make(map[string]bool),
