@@ -4,7 +4,7 @@
 |---|---|---|
 | `cmd/androfuse` | 统一 MyGo 原生 UI 入口 | `main` |
 | `cmd/androfuse-svc` | 无头引擎命令行（`version`、`check`、`probe`、`run`） | `main`、`runFullProbe`、`runDaemon` |
-| `internal/version` | 全局唯一版本号（`0.2.3`） | `Version` |
+| `internal/version` | 全局唯一版本号（`0.2.5`） | `Version` |
 | `internal/core` | Rust 核心 C-ABI v6 加载器、零分配 NV12 环形缓冲与 WASAPI 播放/采集 | `Open`、`Lib.Start`、`Lib.SelfCheck`、`Lib.OpenDecoder`、`Lib.OpenAudioPlayer`、`Lib.OpenMicCapture`、`Decoder.PullInto`、`NV12Ring`、`AudioPlayer`、`MicCapturer` |
 | `internal/localapi` | 同用户 AF_UNIX NDJSON 服务（Windows SID 校验） | `Listen`、`Server.Serve`、`RecoverLeases`、`Call` |
 | `internal/vm` | 按需下载的轻量无头 Android 虚拟机管理器（`INV-03`、`INV-10`） | `NewManager`、`NativeABIForArch`、`DefaultVMRoot`、`ParseCmdlineToolsManifest`、`Manager.Status`、`Manager.Provision`、`Manager.Start`、`Manager.Stop`、`Manager.DeleteManaged` |

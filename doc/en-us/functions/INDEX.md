@@ -4,7 +4,7 @@
 |---|---|---|
 | `cmd/androfuse` | Unified MyGo native GUI entry point | `main` |
 | `cmd/androfuse-svc` | Headless engine CLI (`version`, `check`, `probe`, `run`) | `main`, `runFullProbe`, `runDaemon` |
-| `internal/version` | Single product version (`0.2.3`) | `Version` |
+| `internal/version` | Single product version (`0.2.5`) | `Version` |
 | `internal/core` | Rust core C-ABI v6 loader, zero-alloc NV12 ring, WASAPI audio player & mic capture | `Open`, `Lib.Start`, `Lib.SelfCheck`, `Lib.OpenDecoder`, `Lib.OpenAudioPlayer`, `Lib.OpenMicCapture`, `Decoder.PullInto`, `NV12Ring`, `AudioPlayer`, `MicCapturer` |
 | `internal/localapi` | Per-user AF_UNIX NDJSON server with Windows peer SID verification | `Listen`, `Server.Serve`, `RecoverLeases`, `Call` |
 | `internal/vm` | On-demand downloadable headless Android VM manager (`INV-03`, `INV-10`) | `NewManager`, `NativeABIForArch`, `DefaultVMRoot`, `ParseCmdlineToolsManifest`, `Manager.Status`, `Manager.Provision`, `Manager.Start`, `Manager.Stop`, `Manager.DeleteManaged` |

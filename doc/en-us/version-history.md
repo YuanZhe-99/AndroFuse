@@ -1,5 +1,12 @@
 # Version History
 
+## v0.2.5 (2026-11-28)
+
+- **App names and icons in the `+` picker**:
+  - Added a **Reload apps** button in the app picker (`fetchApps`) that tries ADB first (when online) then Companion and re-downloads all icons, while automatic refreshes back off for 20 s after a prior attempt.
+  - A bare package-name ADB fallback (`ListLaunchableApps` when `dex.ListAppsWithIcons` fails) is merged with `withCachedDetails` instead of overwriting cached names and icons, and Companion apps are refreshed whenever more than a quarter of cached apps lack an icon.
+  - Failures are shown directly in the picker instead of spinning indefinitely and are recorded in `Save logs`.
+
 ## v0.2.4 (2026-11-27)
 
 - **Windows packages work again**: they now ship the SHA-256-pinned `scrcpy-server-v5.0.1` next to `androfuse.exe` and find `bin/androfuse-dex-helper.jar` (the build fails without either); 0.2.3 installs could show no phone screen and could not activate Enhanced mode.
